@@ -291,9 +291,9 @@ const Auth = {
 /* ── THEME ────────────────────────────────────────────────── */
 const Theme = {
     init() {
-        // Default to light theme; only use saved if user explicitly set it
-        const saved = localStorage.getItem('orion_theme');
-        this.set(saved || 'light');
+        // Always start with light theme — reset any saved dark preference
+        localStorage.setItem('orion_theme', 'light');
+        this.set('light');
     },
     toggle() {
         this.set(state.theme === 'light' ? 'dark' : 'light');
