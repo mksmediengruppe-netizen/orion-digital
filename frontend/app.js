@@ -347,7 +347,7 @@ const UI = {
     },
 
     renderWelcome() {
-        const msgs = $('chat-messages');
+        const msgs = $('messages-container');
         if (!msgs) return;
         msgs.innerHTML = '';
         const ws = el('div', 'welcome-screen');
@@ -411,7 +411,7 @@ const UI = {
         const stopBtn = $('btn-stop');
         if (sendBtn) sendBtn.style.display = active ? 'none' : '';
         if (stopBtn) stopBtn.style.display = active ? '' : 'none';
-        const textarea = $('chat-input');
+        const textarea = $('message-input');
         if (textarea) textarea.placeholder = active ? 'Можно писать — сообщение встанет в очередь...' : 'Напишите сообщение...';
     },
 
@@ -451,7 +451,7 @@ const UI = {
         if (adminBtn) adminBtn.addEventListener('click', () => AdminPanel.open());
 
         // Chat input
-        const textarea = $('chat-input');
+        const textarea = $('message-input');
         if (textarea) {
             textarea.addEventListener('keydown', e => {
                 if (e.key === 'Enter' && !e.shiftKey) {
@@ -576,7 +576,9 @@ const ChatList = {
     async load() {
         try {
             const data = await API.get('/chats');
-            state.chats = data.chats || data || [];
+            // Normalize: backend may return [{chat: {...}}, ...] or [{id, ...}, ...]
+            const rawChats = data.chats || data || [];
+            state.chats = rawChats.map(c => c.chat || c);
             this.render();
         } catch (e) {
             console.warn('ChatList.load error:', e);
@@ -705,7 +707,7 @@ const Chat = {
         ChatList.setActive(null);
         ActivityPanel.clear();
         ActivityPanel.hide();
-        const textarea = $('chat-input');
+        const textarea = $('message-input');
         if (textarea) { textarea.value = ''; UI.autoResize(textarea); textarea.focus(); }
         Sidebar.close();
     },
@@ -722,8 +724,10 @@ const Chat = {
         UI.updateChatTitle(chat?.title || 'Чат');
 
         try {
-            const data = await API.get('/chats/' + chatId + '/messages');
-            state.messages = data.messages || data || [];
+            const data = await API.get('/chats/' + chatId);
+            // Backend returns {chat: {messages: [...], ...}}
+            const chatData = data.chat || data;
+            state.messages = chatData.messages || data.messages || [];
             this.renderMessages();
         } catch (e) {
             Toast.show('Ошибка загрузки чата', 'error');
@@ -731,7 +735,7 @@ const Chat = {
     },
 
     renderMessages() {
-        const container = $('chat-messages');
+        const container = $('messages-container');
         if (!container) return;
         container.innerHTML = '';
         if (!state.messages.length) {
@@ -746,14 +750,14 @@ const Chat = {
     },
 
     scrollToBottom(smooth = true) {
-        const container = $('chat-messages');
+        const container = $('messages-container');
         if (container) {
             container.scrollTo({ top: container.scrollHeight, behavior: smooth ? 'smooth' : 'auto' });
         }
     },
 
     async send() {
-        const textarea = $('chat-input');
+        const textarea = $('message-input');
         if (!textarea) return;
         const text = textarea.value.trim();
         if (!text && !state.attachments.length) return;
@@ -780,7 +784,8 @@ const Chat = {
     async _doSend(text, attachments = []) {
         if (!state.currentChatId) {
             try {
-                const chat = await API.post('/chats', { title: text.slice(0, 50) || 'Новый чат', mode: state.mode });
+                const chatRaw = await API.post('/chats', { title: text.slice(0, 50) || 'Новый чат', mode: state.mode });
+                const chat = chatRaw.chat || chatRaw;
                 state.currentChatId = chat.id;
                 state.chats.unshift(chat);
                 ChatList.render();
@@ -800,7 +805,7 @@ const Chat = {
         const userMsg = { id: Utils.generateId(), role: 'user', content: text, attachments, created_at: new Date().toISOString() };
         state.messages.push(userMsg);
         const userEl = Messages.render(userMsg);
-        if (userEl) $('chat-messages').appendChild(userEl);
+        if (userEl) $('messages-container').appendChild(userEl);
         this.scrollToBottom();
 
         // Start streaming
@@ -816,7 +821,7 @@ const Chat = {
         // Add AI message placeholder
         const aiMsg = { id: aiMsgId, role: 'assistant', content: '', created_at: new Date().toISOString() };
         aiMsgEl = Messages.renderStreaming(aiMsg);
-        $('chat-messages').appendChild(aiMsgEl);
+        $('messages-container').appendChild(aiMsgEl);
         this.scrollToBottom();
 
         try {
@@ -829,7 +834,7 @@ const Chat = {
             const controller = new AbortController();
             state.streamController = controller;
 
-            const res = await fetch(API_BASE + '/chats/' + state.currentChatId + '/stream', {
+            const res = await fetch(API_BASE + '/chats/' + state.currentChatId + '/send', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -891,10 +896,15 @@ const Chat = {
 
     _handleSSE(evt, aiMsgEl, aiContent, startTime) {
         switch (evt.type) {
+            case 'content':  // backend sends {type: 'content', text: '...'}
             case 'text':
             case 'delta':
-                aiContent += evt.content || evt.delta || '';
+                aiContent += evt.text || evt.content || evt.delta || '';
                 Messages.updateStreamContent(aiMsgEl, aiContent);
+                break;
+            case 'done':  // backend sends {type: 'done'} instead of [DONE]
+                break;
+            case 'meta':  // backend sends metadata at start, ignore
                 break;
             case 'thinking':
                 ActivityPanel.addLine('thinking', '🤔', evt.content || evt.text || '');
@@ -975,7 +985,7 @@ const Chat = {
     },
 
     sendFromChip(text) {
-        const textarea = $('chat-input');
+        const textarea = $('message-input');
         if (textarea) {
             textarea.value = text;
             UI.autoResize(textarea);
