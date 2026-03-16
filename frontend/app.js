@@ -69,7 +69,9 @@ const Utils = {
         return date.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
     },
     formatDate(dateStr) {
+        if (!dateStr) return '';
         const d = new Date(dateStr);
+        if (isNaN(d.getTime())) return '';
         const now = new Date();
         const diff = now - d;
         if (diff < 60000) return 'только что';
@@ -278,6 +280,8 @@ const Auth = {
         state.messages = [];
         localStorage.removeItem('orion_token');
         localStorage.removeItem('orion_user');
+        localStorage.removeItem('orion_theme');
+        Theme.set('light');
         this.showAuthScreen();
         $('auth-login').value = '';
         $('auth-password').value = '';
@@ -287,8 +291,9 @@ const Auth = {
 /* ── THEME ────────────────────────────────────────────────── */
 const Theme = {
     init() {
-        const saved = localStorage.getItem('orion_theme') || 'light';
-        this.set(saved);
+        // Default to light theme; only use saved if user explicitly set it
+        const saved = localStorage.getItem('orion_theme');
+        this.set(saved || 'light');
     },
     toggle() {
         this.set(state.theme === 'light' ? 'dark' : 'light');
@@ -527,6 +532,11 @@ const UI = {
         // Takeover send
         const takeoverBtn = $('btn-takeover-send');
         if (takeoverBtn) takeoverBtn.addEventListener('click', () => ActivityPanel.sendTakeover());
+
+        // Welcome chips (data-prompt buttons in HTML)
+        document.querySelectorAll('[data-prompt]').forEach(btn => {
+            btn.addEventListener('click', () => Chat.sendFromChip(btn.dataset.prompt));
+        });
 
         // Keyboard shortcuts
         document.addEventListener('keydown', e => {
@@ -1640,12 +1650,12 @@ const Attachments = {
     },
 
     showDropOverlay() {
-        const overlay = document.querySelector('.drop-overlay');
+        const overlay = document.querySelector('.drop-overlay, .drop-zone-overlay, #drop-zone-overlay');
         if (overlay) overlay.classList.add('active');
     },
 
     hideDropOverlay() {
-        const overlay = document.querySelector('.drop-overlay');
+        const overlay = document.querySelector('.drop-overlay, .drop-zone-overlay, #drop-zone-overlay');
         if (overlay) overlay.classList.remove('active');
     }
 };

@@ -754,7 +754,8 @@ img { max-width: 100%; display: block; }
     flex-wrap: wrap;
     gap: 8px;
     justify-content: center;
-    max-width: 560px;
+    max-width: 700px;
+    width: 100%;
 }
 
 .welcome-chip {
@@ -1107,7 +1108,8 @@ img { max-width: 100%; display: block; }
 }
 
 /* Drag & Drop overlay */
-.drop-overlay {
+.drop-overlay,
+.drop-zone-overlay {
     display: none;
     position: absolute;
     inset: 0;
@@ -1122,7 +1124,8 @@ img { max-width: 100%; display: block; }
     pointer-events: none;
 }
 
-.drop-overlay.active { display: flex; }
+.drop-overlay.active,
+.drop-zone-overlay.active { display: flex; }
 
 .drop-overlay-icon { font-size: 32px; }
 .drop-overlay-text {
