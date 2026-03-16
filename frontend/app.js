@@ -1,1465 +1,2071 @@
-/**
- * ORION Digital — Frontend v2.0
- * Новый UI: боковая панель, режимы, агенты, стоимость, ask_user
- */
+/* ============================================================
+   ORION Digital v1.4 — app.js
+   Чистый JS: Auth, Chat, SSE Streaming, Activity Panel,
+   Admin Panel, Artifacts, Drag&Drop, Theme, Queue
+   ============================================================ */
 
 'use strict';
 
-// ══════════════════════════════════════════════════════════════
-// STATE
-// ══════════════════════════════════════════════════════════════
+/* ── CONSTANTS ────────────────────────────────────────────── */
+const API_BASE = '/api';
+const SSE_TIMEOUT = 120000;
 
-const STATE = {
-  token: null,
-  user: null,
-  currentChatId: null,
-  chats: [],
-  messages: [],
-  orionMode: 'turbo_standard',
-  multiAgent: false,
-  isStreaming: false,
-  sessionCost: 0,
-  maxCost: 2.0,
-  attachedFiles: [],
-  activeAgents: new Set(),
-  abortController: null,
+const MODES = {
+    'turbo-basic':   { label: 'Turbo Обычный',  tag: 'TURBO', desc: 'Быстрые ответы, DeepSeek V3. Идеально для задач разработки.' },
+    'turbo-premium': { label: 'Turbo Премиум',  tag: 'PRO',   desc: 'Turbo + Claude Sonnet. Лучшее качество для сложных задач.' },
+    'pro-basic':     { label: 'Pro Обычный',    tag: 'AGENT', desc: 'Агентный режим с инструментами. SSH, браузер, файлы.' },
+    'pro-premium':   { label: 'Pro Премиум',    tag: 'ELITE', desc: 'Мультиагент: Designer + Developer + DevOps одновременно.' }
 };
 
-const BACKEND = window.location.origin;
+const WELCOME_CHIPS = [
+    'Создай лендинг для SaaS продукта',
+    'Разверни Docker контейнер на сервере',
+    'Напиши Python скрипт для парсинга',
+    'Настрой nginx с SSL сертификатом',
+    'Сделай REST API на FastAPI',
+    'Проанализируй логи и найди ошибки'
+];
 
-// ── Auth helper: всегда добавляет Bearer token ──────────────
-function authHeaders(extra = {}) {
-  const h = { 'Content-Type': 'application/json', ...extra };
-  if (STATE.token) h['Authorization'] = `Bearer ${STATE.token}`;
-  return h;
-}
+const MODEL_TAGS = [
+    { name: 'DeepSeek V3', color: '#3B82F6' },
+    { name: 'Claude Sonnet', color: '#8B5CF6' },
+    { name: 'Gemini Pro', color: '#10B981' }
+];
 
-async function authFetch(url, opts = {}) {
-  if (!opts.headers) opts.headers = {};
-  if (STATE.token) opts.headers['Authorization'] = `Bearer ${STATE.token}`;
-  opts.credentials = 'include';
-  return fetch(url, opts);
-}
-
-
-// ══════════════════════════════════════════════════════════════
-// MODE CONFIG
-// ══════════════════════════════════════════════════════════════
-
-const MODE_CONFIG = {
-  turbo_standard: {
-    label: 'Turbo Обычный',
-    info: 'DeepSeek везде · Gemini для дизайна',
-    maxCost: 2.0,
-    model: 'DeepSeek V3.2',
-  },
-  turbo_premium: {
-    label: 'Turbo Премиум',
-    info: 'Sonnet для диалога · DeepSeek для работы',
-    maxCost: 2.0,
-    model: 'Claude Sonnet 4.5',
-  },
-  pro_standard: {
-    label: 'Pro Обычный',
-    info: 'Sonnet для оркестрации · DeepSeek для кода',
-    maxCost: 10.0,
-    model: 'Claude Sonnet 4.5',
-  },
-  pro_premium: {
-    label: 'Pro Премиум',
-    info: 'Sonnet везде · Максимальное качество',
-    maxCost: 10.0,
-    model: 'Claude Sonnet 4.5',
-  },
+/* ── STATE ────────────────────────────────────────────────── */
+const state = {
+    user: null,
+    token: null,
+    chats: [],
+    currentChatId: null,
+    messages: [],
+    mode: 'turbo-basic',
+    theme: 'light',
+    isStreaming: false,
+    streamController: null,
+    messageQueue: [],
+    attachments: [],
+    activityVisible: false,
+    activityLines: [],
+    taskProgress: { current: 0, total: 0, steps: [] },
+    totalCost: 0,
+    monthlyLimit: 2.00,
+    adminData: { users: [], chats: [], analytics: null }
 };
 
-const AGENT_CONFIG = {
-  designer:   { emoji: '🎨', name: 'Дизайнер',    model: 'Gemini 2.5 Pro' },
-  developer:  { emoji: '💻', name: 'Разработчик', model: 'DeepSeek V3.2' },
-  devops:     { emoji: '🔧', name: 'DevOps',       model: 'DeepSeek V3.2' },
-  analyst:    { emoji: '📊', name: 'Аналитик',     model: 'DeepSeek V3.2' },
-  tester:     { emoji: '🧪', name: 'Тестировщик',  model: 'DeepSeek V3.2' },
-  integrator: { emoji: '🔌', name: 'Интегратор',   model: 'DeepSeek V3.2' },
-};
-
-// ══════════════════════════════════════════════════════════════
-// DOM REFS
-// ══════════════════════════════════════════════════════════════
-
+/* ── DOM REFS ─────────────────────────────────────────────── */
 const $ = id => document.getElementById(id);
 const $$ = sel => document.querySelectorAll(sel);
-
-const DOM = {
-  loginScreen:      $('login-screen'),
-  app:              $('app'),
-  loginForm:        $('login-form'),
-  loginUsername:    $('login-username'),
-  loginPassword:    $('login-password'),
-  loginError:       $('login-error'),
-  loginBtn:         $('login-btn'),
-
-  sidebar:          $('sidebar'),
-  sidebarToggle:    $('sidebar-toggle'),
-  mobileMenuBtn:    $('mobile-menu-btn'),
-  modeGrid:         $('mode-grid'),
-  modeInfo:         $('mode-info'),
-  agentsList:       $('agents-list'),
-  costFill:         $('cost-fill'),
-  costCurrent:      $('cost-current'),
-  costMax:          $('cost-max'),
-  chatsList:        $('chats-list'),
-  newChatBtn:       $('new-chat-btn'),
-  userAvatar:       $('user-avatar'),
-  userName:         $('user-name'),
-  userRole:         $('user-role'),
-  logoutBtn:        $('logout-btn'),
-
-  chatTitle:        $('chat-title'),
-  intentBadge:      $('intent-badge'),
-  modelIndicator:   $('model-indicator'),
-  modelNameDisplay: $('model-name-display'),
-  multiAgentToggle: $('multi-agent-toggle'),
-  multiAgentIcon:   $('multi-agent-icon'),
-  settingsBtn:      $('settings-btn'),
-
-  messagesArea:     $('messages-area'),
-  welcomeScreen:    $('welcome-screen'),
-  messagesList:     $('messages-list'),
-
-  askUserModal:     $('ask-user-modal'),
-  askUserQuestion:  $('ask-user-question'),
-  askUserInput:     $('ask-user-input'),
-  askUserSkip:      $('ask-user-skip'),
-  askUserSend:      $('ask-user-send'),
-
-  messageInput:     $('message-input'),
-  sendBtn:          $('send-btn'),
-  stopBtn:          $('stop-btn'),
-  attachBtn:        $('attach-btn'),
-  fileInput:        $('file-input'),
-  charCount:        $('char-count'),
-  currentModeLabel: $('current-mode-label'),
-
-  settingsModal:    $('settings-modal'),
-  settingsClose:    $('settings-close'),
-  settingsCancel:   $('settings-cancel'),
-  settingsSave:     $('settings-save'),
-  sshHost:          $('ssh-host'),
-  sshUser:          $('ssh-user'),
-  sshPass:          $('ssh-pass'),
-  modesDetail:      $('modes-detail'),
-  agentsDetail:     $('agents-detail'),
+const el = (tag, cls, html) => {
+    const e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (html !== undefined) e.innerHTML = html;
+    return e;
 };
 
-// ══════════════════════════════════════════════════════════════
-// INIT
-// ══════════════════════════════════════════════════════════════
+/* ── UTILS ────────────────────────────────────────────────── */
+const Utils = {
+    formatTime(date = new Date()) {
+        return date.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    },
+    formatDate(dateStr) {
+        const d = new Date(dateStr);
+        const now = new Date();
+        const diff = now - d;
+        if (diff < 60000) return 'только что';
+        if (diff < 3600000) return Math.floor(diff / 60000) + ' мин назад';
+        if (diff < 86400000) return d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+        if (diff < 172800000) return 'вчера';
+        return d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' });
+    },
+    formatCost(n) {
+        if (!n) return '$0.000';
+        return '$' + Number(n).toFixed(3);
+    },
+    formatSize(bytes) {
+        if (bytes < 1024) return bytes + ' B';
+        if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
+        return (bytes / 1048576).toFixed(1) + ' MB';
+    },
+    formatDuration(ms) {
+        if (ms < 1000) return ms + 'мс';
+        if (ms < 60000) return (ms / 1000).toFixed(1) + 'с';
+        const m = Math.floor(ms / 60000);
+        const s = Math.floor((ms % 60000) / 1000);
+        return m + ':' + String(s).padStart(2, '0');
+    },
+    escapeHtml(str) {
+        return String(str)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    },
+    copyText(text) {
+        if (navigator.clipboard) {
+            return navigator.clipboard.writeText(text);
+        }
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+        return Promise.resolve();
+    },
+    debounce(fn, ms) {
+        let t;
+        return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), ms); };
+    },
+    generateId() {
+        return Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+    },
+    groupChatsByDate(chats) {
+        const groups = { today: [], yesterday: [], week: [], earlier: [] };
+        const now = new Date();
+        const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        const yesterday = new Date(today - 86400000);
+        const weekAgo = new Date(today - 7 * 86400000);
+        chats.forEach(chat => {
+            const d = new Date(chat.updated_at || chat.created_at);
+            if (d >= today) groups.today.push(chat);
+            else if (d >= yesterday) groups.yesterday.push(chat);
+            else if (d >= weekAgo) groups.week.push(chat);
+            else groups.earlier.push(chat);
+        });
+        return groups;
+    },
+    getFileIcon(name) {
+        const ext = name.split('.').pop().toLowerCase();
+        const icons = {
+            pdf: '📄', doc: '📝', docx: '📝', txt: '📄',
+            js: '💻', ts: '💻', py: '🐍', html: '🌐', css: '🎨',
+            json: '📋', xml: '📋', csv: '📊', xlsx: '📊',
+            png: '🖼️', jpg: '🖼️', jpeg: '🖼️', gif: '🖼️', svg: '🖼️', webp: '🖼️',
+            zip: '📦', tar: '📦', gz: '📦',
+            mp4: '🎬', mp3: '🎵', wav: '🎵'
+        };
+        return icons[ext] || '📎';
+    },
+    isImage(name) {
+        return /\.(png|jpg|jpeg|gif|svg|webp|bmp)$/i.test(name);
+    }
+};
 
+/* ── API ──────────────────────────────────────────────────── */
+const API = {
+    async request(method, path, body, isFormData = false) {
+        const headers = {};
+        if (state.token) headers['Authorization'] = 'Bearer ' + state.token;
+        if (!isFormData && body) headers['Content-Type'] = 'application/json';
+
+        const opts = { method, headers };
+        if (body) opts.body = isFormData ? body : JSON.stringify(body);
+
+        const res = await fetch(API_BASE + path, opts);
+        if (res.status === 401) {
+            Auth.logout();
+            throw new Error('Unauthorized');
+        }
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({ detail: 'Ошибка сервера' }));
+            throw new Error(err.detail || 'Ошибка ' + res.status);
+        }
+        return res.json();
+    },
+    get: (path) => API.request('GET', path),
+    post: (path, body) => API.request('POST', path, body),
+    put: (path, body) => API.request('PUT', path, body),
+    delete: (path) => API.request('DELETE', path),
+
+    async login(username, password) {
+        const fd = new FormData();
+        fd.append('username', username);
+        fd.append('password', password);
+        const res = await fetch(API_BASE + '/auth/token', {
+            method: 'POST',
+            body: fd
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.detail || 'Неверный логин или пароль');
+        }
+        return res.json();
+    },
+
+    async uploadFile(file) {
+        const fd = new FormData();
+        fd.append('file', file);
+        return API.request('POST', '/files/upload', fd, true);
+    }
+};
+
+/* ── AUTH ─────────────────────────────────────────────────── */
+const Auth = {
+    init() {
+        const token = localStorage.getItem('orion_token');
+        const user = localStorage.getItem('orion_user');
+        if (token && user) {
+            state.token = token;
+            state.user = JSON.parse(user);
+            this.onLogin();
+        } else {
+            this.showAuthScreen();
+        }
+    },
+
+    showAuthScreen() {
+        $('auth-screen').classList.remove('hidden');
+        $('app').classList.add('hidden');
+    },
+
+    hideAuthScreen() {
+        $('auth-screen').classList.add('hidden');
+        $('app').classList.remove('hidden');
+    },
+
+    async handleLogin(e) {
+        e.preventDefault();
+        const username = $('auth-username').value.trim();
+        const password = $('auth-password').value;
+        const errEl = $('auth-error');
+        const btn = $('auth-submit');
+
+        if (!username || !password) {
+            errEl.textContent = 'Введите логин и пароль';
+            errEl.classList.add('visible');
+            return;
+        }
+
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner spinner-sm"></span> Вход...';
+        errEl.classList.remove('visible');
+
+        try {
+            const data = await API.login(username, password);
+            state.token = data.access_token;
+            localStorage.setItem('orion_token', data.access_token);
+
+            const me = await API.get('/auth/me');
+            state.user = me;
+            localStorage.setItem('orion_user', JSON.stringify(me));
+
+            this.onLogin();
+        } catch (err) {
+            errEl.textContent = err.message;
+            errEl.classList.add('visible');
+            btn.disabled = false;
+            btn.textContent = 'Войти';
+        }
+    },
+
+    onLogin() {
+        this.hideAuthScreen();
+        UI.init();
+        ChatList.load();
+        UI.updateUserInfo();
+    },
+
+    logout() {
+        state.token = null;
+        state.user = null;
+        state.chats = [];
+        state.currentChatId = null;
+        state.messages = [];
+        localStorage.removeItem('orion_token');
+        localStorage.removeItem('orion_user');
+        this.showAuthScreen();
+        $('auth-username').value = '';
+        $('auth-password').value = '';
+    }
+};
+
+/* ── THEME ────────────────────────────────────────────────── */
+const Theme = {
+    init() {
+        const saved = localStorage.getItem('orion_theme') || 'light';
+        this.set(saved);
+    },
+    toggle() {
+        this.set(state.theme === 'light' ? 'dark' : 'light');
+    },
+    set(theme) {
+        state.theme = theme;
+        document.documentElement.setAttribute('data-theme', theme);
+        localStorage.setItem('orion_theme', theme);
+        const btn = $('btn-theme');
+        if (btn) btn.textContent = theme === 'dark' ? '☀️' : '🌙';
+        // Toggle highlight.js theme
+        const darkHljs = document.querySelector('link[href*="github-dark"]');
+        if (darkHljs) darkHljs.disabled = theme !== 'dark';
+    }
+};
+
+/* ── UI INIT ──────────────────────────────────────────────── */
+const UI = {
+    init() {
+        this.renderModes();
+        this.renderWelcome();
+        this.bindEvents();
+        Theme.init();
+        ActivityPanel.hide();
+    },
+
+    renderModes() {
+        const grid = document.querySelector('.modes-grid');
+        if (!grid) return;
+        grid.innerHTML = '';
+        Object.entries(MODES).forEach(([key, m]) => {
+            const btn = el('button', 'mode-btn' + (key === state.mode ? ' active' : ''));
+            btn.dataset.mode = key;
+            btn.innerHTML = `<span class="mode-name">${m.label}</span><span class="mode-tag">${m.tag}</span>`;
+            btn.addEventListener('click', () => this.setMode(key));
+            grid.appendChild(btn);
+        });
+        this.updateModeDesc();
+    },
+
+    setMode(key) {
+        state.mode = key;
+        $$('.mode-btn').forEach(b => b.classList.toggle('active', b.dataset.mode === key));
+        this.updateModeDesc();
+        this.updateFooterInfo();
+    },
+
+    updateModeDesc() {
+        const desc = document.querySelector('.mode-description');
+        if (desc) desc.textContent = MODES[state.mode]?.desc || '';
+    },
+
+    renderWelcome() {
+        const msgs = $('chat-messages');
+        if (!msgs) return;
+        msgs.innerHTML = '';
+        const ws = el('div', 'welcome-screen');
+        ws.innerHTML = `
+            <div class="welcome-logo">
+                <div class="welcome-logo-icon">OR</div>
+                <div class="welcome-title">ORION Digital</div>
+                <div class="welcome-subtitle">AI-агент с полным доступом к серверу, браузеру и коду. Просто опишите задачу.</div>
+            </div>
+            <div class="welcome-chips">
+                ${WELCOME_CHIPS.map(c => `<button class="welcome-chip" onclick="Chat.sendFromChip('${c.replace(/'/g, "\\'")}')">${c}</button>`).join('')}
+            </div>
+            <div class="welcome-models">
+                ${MODEL_TAGS.map(m => `<div class="model-tag"><span class="model-tag-dot" style="background:${m.color}"></span>${m.name}</div>`).join('')}
+            </div>`;
+        msgs.appendChild(ws);
+    },
+
+    updateUserInfo() {
+        const u = state.user;
+        if (!u) return;
+        const nameEl = document.querySelector('.user-name');
+        const roleEl = document.querySelector('.user-role');
+        const avatarEl = document.querySelector('.user-avatar');
+        if (nameEl) nameEl.textContent = u.full_name || u.username;
+        if (roleEl) roleEl.textContent = u.role === 'admin' ? 'Администратор' : 'Пользователь';
+        if (avatarEl) avatarEl.textContent = (u.full_name || u.username || 'U')[0].toUpperCase();
+
+        const adminBtn = $('btn-admin');
+        if (adminBtn) adminBtn.style.display = u.role === 'admin' ? '' : 'none';
+
+        this.updateCostBar();
+    },
+
+    updateCostBar() {
+        const fill = document.querySelector('.cost-bar-fill');
+        const val = document.querySelector('.cost-bar-value');
+        if (!fill || !val) return;
+        const pct = Math.min(100, (state.totalCost / state.monthlyLimit) * 100);
+        fill.style.width = pct + '%';
+        fill.className = 'cost-bar-fill' + (pct > 80 ? ' danger' : pct > 50 ? ' warn' : '');
+        val.textContent = Utils.formatCost(state.totalCost) + ' / $' + state.monthlyLimit.toFixed(2);
+    },
+
+    updateFooterInfo() {
+        const info = document.querySelector('.input-footer-info');
+        if (info) {
+            const mode = MODES[state.mode];
+            info.textContent = `ORION Digital · ${mode?.label || ''} · ${Utils.formatCost(state.totalCost)} за чат`;
+        }
+    },
+
+    updateChatTitle(title) {
+        const inp = $('chat-title-input');
+        if (inp) inp.value = title || 'Новый чат';
+    },
+
+    setStreaming(active) {
+        state.isStreaming = active;
+        const sendBtn = $('btn-send');
+        const stopBtn = $('btn-stop');
+        if (sendBtn) sendBtn.style.display = active ? 'none' : '';
+        if (stopBtn) stopBtn.style.display = active ? '' : 'none';
+        const textarea = $('chat-input');
+        if (textarea) textarea.placeholder = active ? 'Можно писать — сообщение встанет в очередь...' : 'Напишите сообщение...';
+    },
+
+    showQueueIndicator(count) {
+        let qi = document.querySelector('.queue-indicator');
+        if (count > 0) {
+            if (!qi) {
+                qi = el('div', 'queue-indicator');
+                const inputArea = document.querySelector('.chat-input-area');
+                if (inputArea) inputArea.insertBefore(qi, inputArea.firstChild);
+            }
+            qi.innerHTML = `⏳ В очереди: ${count} сообщение${count > 1 ? 'я' : ''}`;
+        } else if (qi) {
+            qi.remove();
+        }
+    },
+
+    bindEvents() {
+        // Auth form
+        const authForm = $('auth-form');
+        if (authForm) authForm.addEventListener('submit', e => Auth.handleLogin(e));
+
+        // New chat
+        const newChatBtn = $('btn-new-chat');
+        if (newChatBtn) newChatBtn.addEventListener('click', () => Chat.newChat());
+
+        // Theme toggle
+        const themeBtn = $('btn-theme');
+        if (themeBtn) themeBtn.addEventListener('click', () => Theme.toggle());
+
+        // Logout
+        const logoutBtn = $('btn-logout');
+        if (logoutBtn) logoutBtn.addEventListener('click', () => Auth.logout());
+
+        // Admin
+        const adminBtn = $('btn-admin');
+        if (adminBtn) adminBtn.addEventListener('click', () => AdminPanel.open());
+
+        // Chat input
+        const textarea = $('chat-input');
+        if (textarea) {
+            textarea.addEventListener('keydown', e => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    Chat.send();
+                }
+            });
+            textarea.addEventListener('input', () => this.autoResize(textarea));
+        }
+
+        // Send button
+        const sendBtn = $('btn-send');
+        if (sendBtn) sendBtn.addEventListener('click', () => Chat.send());
+
+        // Stop button
+        const stopBtn = $('btn-stop');
+        if (stopBtn) stopBtn.addEventListener('click', () => Chat.stop());
+
+        // Attach button
+        const attachBtn = $('btn-attach');
+        const fileInput = $('file-input');
+        if (attachBtn && fileInput) {
+            attachBtn.addEventListener('click', () => fileInput.click());
+            fileInput.addEventListener('change', e => Attachments.handleFiles(e.target.files));
+        }
+
+        // Chat title rename
+        const titleInput = $('chat-title-input');
+        if (titleInput) {
+            titleInput.addEventListener('blur', () => Chat.renameCurrentChat(titleInput.value));
+            titleInput.addEventListener('keydown', e => {
+                if (e.key === 'Enter') titleInput.blur();
+                if (e.key === 'Escape') {
+                    titleInput.value = state.chats.find(c => c.id === state.currentChatId)?.title || 'Новый чат';
+                    titleInput.blur();
+                }
+            });
+        }
+
+        // Drag & Drop
+        const chatArea = $('chat-area');
+        if (chatArea) {
+            chatArea.addEventListener('dragover', e => { e.preventDefault(); Attachments.showDropOverlay(); });
+            chatArea.addEventListener('dragleave', e => { if (!chatArea.contains(e.relatedTarget)) Attachments.hideDropOverlay(); });
+            chatArea.addEventListener('drop', e => { e.preventDefault(); Attachments.handleFiles(e.dataTransfer.files); Attachments.hideDropOverlay(); });
+        }
+
+        // Activity panel toggle
+        const activityToggle = $('btn-activity-toggle');
+        if (activityToggle) activityToggle.addEventListener('click', () => ActivityPanel.toggle());
+
+        // Collapse activity
+        const collapseBtn = $('btn-collapse-activity');
+        if (collapseBtn) collapseBtn.addEventListener('click', () => ActivityPanel.hide());
+
+        // Sidebar toggle (mobile)
+        const sidebarToggle = $('btn-sidebar-toggle');
+        if (sidebarToggle) sidebarToggle.addEventListener('click', () => Sidebar.toggle());
+
+        // Sidebar overlay
+        const overlay = $('sidebar-overlay');
+        if (overlay) overlay.addEventListener('click', () => Sidebar.close());
+
+        // Search
+        const searchInput = $('chat-search');
+        if (searchInput) searchInput.addEventListener('input', Utils.debounce(e => ChatList.filter(e.target.value), 200));
+
+        // Lightbox close
+        const lightbox = $('lightbox');
+        if (lightbox) {
+            lightbox.addEventListener('click', e => {
+                if (e.target === lightbox || e.target.classList.contains('lightbox-close')) {
+                    Lightbox.close();
+                }
+            });
+        }
+
+        // Takeover send
+        const takeoverBtn = $('btn-takeover-send');
+        if (takeoverBtn) takeoverBtn.addEventListener('click', () => ActivityPanel.sendTakeover());
+
+        // Keyboard shortcuts
+        document.addEventListener('keydown', e => {
+            if (e.key === 'Escape') {
+                Lightbox.close();
+                AdminPanel.close();
+                Sidebar.close();
+            }
+        });
+    },
+
+    autoResize(textarea) {
+        textarea.style.height = 'auto';
+        const maxH = 144;
+        textarea.style.height = Math.min(textarea.scrollHeight, maxH) + 'px';
+    }
+};
+
+/* ── SIDEBAR ──────────────────────────────────────────────── */
+const Sidebar = {
+    toggle() {
+        const sb = $('sidebar');
+        if (sb) sb.classList.toggle('open');
+        const ov = $('sidebar-overlay');
+        if (ov) ov.classList.toggle('visible', sb.classList.contains('open'));
+    },
+    close() {
+        const sb = $('sidebar');
+        if (sb) sb.classList.remove('open');
+        const ov = $('sidebar-overlay');
+        if (ov) ov.classList.remove('visible');
+    }
+};
+
+/* ── CHAT LIST ────────────────────────────────────────────── */
+const ChatList = {
+    async load() {
+        try {
+            const data = await API.get('/chats');
+            state.chats = data.chats || data || [];
+            this.render();
+        } catch (e) {
+            console.warn('ChatList.load error:', e);
+            state.chats = [];
+            this.render();
+        }
+    },
+
+    render(chats = state.chats) {
+        const container = $('chat-list');
+        if (!container) return;
+        container.innerHTML = '';
+
+        if (!chats.length) {
+            container.innerHTML = '<div class="empty-state" style="padding:20px"><div class="empty-state-icon">💬</div><div class="empty-state-desc">Нет чатов. Начните новый!</div></div>';
+            return;
+        }
+
+        const groups = Utils.groupChatsByDate(chats);
+        const labels = { today: 'Сегодня', yesterday: 'Вчера', week: 'Эта неделя', earlier: 'Ранее' };
+
+        Object.entries(groups).forEach(([key, items]) => {
+            if (!items.length) return;
+            const label = el('div', 'chat-group-label', labels[key]);
+            container.appendChild(label);
+            items.forEach(chat => container.appendChild(this.renderItem(chat)));
+        });
+    },
+
+    renderItem(chat) {
+        const item = el('div', 'chat-item' + (chat.id === state.currentChatId ? ' active' : ''));
+        item.dataset.chatId = chat.id;
+        item.innerHTML = `
+            <div class="chat-item-icon">💬</div>
+            <div class="chat-item-body">
+                <div class="chat-item-title">${Utils.escapeHtml(chat.title || 'Новый чат')}</div>
+                <div class="chat-item-meta">
+                    <span class="chat-item-cost">${Utils.formatCost(chat.total_cost)}</span>
+                    <span class="chat-item-time">${Utils.formatDate(chat.updated_at || chat.created_at)}</span>
+                </div>
+            </div>
+            <div class="chat-item-actions">
+                <button class="chat-action-btn" title="Переименовать" onclick="ChatList.startRename(event, '${chat.id}')">✏️</button>
+                <button class="chat-action-btn delete" title="Удалить" onclick="ChatList.deleteChat(event, '${chat.id}')">🗑️</button>
+            </div>`;
+        item.addEventListener('click', () => Chat.open(chat.id));
+        return item;
+    },
+
+    filter(query) {
+        const q = query.toLowerCase().trim();
+        if (!q) { this.render(); return; }
+        const filtered = state.chats.filter(c => (c.title || '').toLowerCase().includes(q));
+        this.render(filtered);
+    },
+
+    setActive(chatId) {
+        $$('.chat-item').forEach(el => el.classList.toggle('active', el.dataset.chatId === String(chatId)));
+    },
+
+    startRename(e, chatId) {
+        e.stopPropagation();
+        const item = document.querySelector(`.chat-item[data-chat-id="${chatId}"]`);
+        if (!item) return;
+        const titleEl = item.querySelector('.chat-item-title');
+        const currentTitle = titleEl.textContent;
+        const input = el('input', 'chat-item-rename-input');
+        input.value = currentTitle;
+        titleEl.replaceWith(input);
+        input.focus();
+        input.select();
+        const finish = async () => {
+            const newTitle = input.value.trim() || currentTitle;
+            const span = el('div', 'chat-item-title', Utils.escapeHtml(newTitle));
+            input.replaceWith(span);
+            if (newTitle !== currentTitle) {
+                await Chat.renameChat(chatId, newTitle);
+            }
+        };
+        input.addEventListener('blur', finish);
+        input.addEventListener('keydown', e => {
+            if (e.key === 'Enter') input.blur();
+            if (e.key === 'Escape') { input.value = currentTitle; input.blur(); }
+        });
+    },
+
+    async deleteChat(e, chatId) {
+        e.stopPropagation();
+        if (!confirm('Удалить этот чат?')) return;
+        try {
+            await API.delete('/chats/' + chatId);
+            state.chats = state.chats.filter(c => c.id !== chatId);
+            if (state.currentChatId === chatId) {
+                state.currentChatId = null;
+                UI.renderWelcome();
+                UI.updateChatTitle('');
+            }
+            this.render();
+            Toast.show('Чат удалён', 'success');
+        } catch (err) {
+            Toast.show('Ошибка удаления: ' + err.message, 'error');
+        }
+    },
+
+    updateChatCost(chatId, cost) {
+        const item = document.querySelector(`.chat-item[data-chat-id="${chatId}"]`);
+        if (item) {
+            const costEl = item.querySelector('.chat-item-cost');
+            if (costEl) costEl.textContent = Utils.formatCost(cost);
+        }
+        const chat = state.chats.find(c => c.id === chatId);
+        if (chat) chat.total_cost = cost;
+    }
+};
+
+/* ── CHAT ─────────────────────────────────────────────────── */
+const Chat = {
+    async newChat() {
+        if (state.isStreaming) Chat.stop();
+        state.currentChatId = null;
+        state.messages = [];
+        state.attachments = [];
+        Attachments.renderPreviews();
+        UI.renderWelcome();
+        UI.updateChatTitle('Новый чат');
+        ChatList.setActive(null);
+        ActivityPanel.clear();
+        ActivityPanel.hide();
+        const textarea = $('chat-input');
+        if (textarea) { textarea.value = ''; UI.autoResize(textarea); textarea.focus(); }
+        Sidebar.close();
+    },
+
+    async open(chatId) {
+        if (state.isStreaming) Chat.stop();
+        state.currentChatId = chatId;
+        state.messages = [];
+        ChatList.setActive(chatId);
+        ActivityPanel.clear();
+        Sidebar.close();
+
+        const chat = state.chats.find(c => c.id === chatId);
+        UI.updateChatTitle(chat?.title || 'Чат');
+
+        try {
+            const data = await API.get('/chats/' + chatId + '/messages');
+            state.messages = data.messages || data || [];
+            this.renderMessages();
+        } catch (e) {
+            Toast.show('Ошибка загрузки чата', 'error');
+        }
+    },
+
+    renderMessages() {
+        const container = $('chat-messages');
+        if (!container) return;
+        container.innerHTML = '';
+        if (!state.messages.length) {
+            UI.renderWelcome();
+            return;
+        }
+        state.messages.forEach(msg => {
+            const el = Messages.render(msg);
+            if (el) container.appendChild(el);
+        });
+        this.scrollToBottom();
+    },
+
+    scrollToBottom(smooth = true) {
+        const container = $('chat-messages');
+        if (container) {
+            container.scrollTo({ top: container.scrollHeight, behavior: smooth ? 'smooth' : 'auto' });
+        }
+    },
+
+    async send() {
+        const textarea = $('chat-input');
+        if (!textarea) return;
+        const text = textarea.value.trim();
+        if (!text && !state.attachments.length) return;
+
+        if (state.isStreaming) {
+            state.messageQueue.push({ text, attachments: [...state.attachments] });
+            UI.showQueueIndicator(state.messageQueue.length);
+            textarea.value = '';
+            UI.autoResize(textarea);
+            state.attachments = [];
+            Attachments.renderPreviews();
+            return;
+        }
+
+        textarea.value = '';
+        UI.autoResize(textarea);
+        const attachments = [...state.attachments];
+        state.attachments = [];
+        Attachments.renderPreviews();
+
+        await this._doSend(text, attachments);
+    },
+
+    async _doSend(text, attachments = []) {
+        if (!state.currentChatId) {
+            try {
+                const chat = await API.post('/chats', { title: text.slice(0, 50) || 'Новый чат', mode: state.mode });
+                state.currentChatId = chat.id;
+                state.chats.unshift(chat);
+                ChatList.render();
+                ChatList.setActive(chat.id);
+                UI.updateChatTitle(chat.title);
+            } catch (e) {
+                Toast.show('Ошибка создания чата: ' + e.message, 'error');
+                return;
+            }
+        }
+
+        // Remove welcome screen
+        const ws = document.querySelector('.welcome-screen');
+        if (ws) ws.remove();
+
+        // Add user message
+        const userMsg = { id: Utils.generateId(), role: 'user', content: text, attachments, created_at: new Date().toISOString() };
+        state.messages.push(userMsg);
+        const userEl = Messages.render(userMsg);
+        if (userEl) $('chat-messages').appendChild(userEl);
+        this.scrollToBottom();
+
+        // Start streaming
+        UI.setStreaming(true);
+        ActivityPanel.show();
+        ActivityPanel.setStatus('running');
+
+        const startTime = Date.now();
+        let aiMsgEl = null;
+        let aiContent = '';
+        let aiMsgId = Utils.generateId();
+
+        // Add AI message placeholder
+        const aiMsg = { id: aiMsgId, role: 'assistant', content: '', created_at: new Date().toISOString() };
+        aiMsgEl = Messages.renderStreaming(aiMsg);
+        $('chat-messages').appendChild(aiMsgEl);
+        this.scrollToBottom();
+
+        try {
+            const body = {
+                message: text,
+                mode: state.mode,
+                attachments: attachments.map(a => a.id || a.url).filter(Boolean)
+            };
+
+            const controller = new AbortController();
+            state.streamController = controller;
+
+            const res = await fetch(API_BASE + '/chats/' + state.currentChatId + '/stream', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': 'Bearer ' + state.token
+                },
+                body: JSON.stringify(body),
+                signal: controller.signal
+            });
+
+            if (!res.ok) throw new Error('Stream error ' + res.status);
+
+            const reader = res.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split('\n');
+                buffer = lines.pop();
+                for (const line of lines) {
+                    if (line.startsWith('data: ')) {
+                        const raw = line.slice(6).trim();
+                        if (raw === '[DONE]') break;
+                        try {
+                            const evt = JSON.parse(raw);
+                            aiContent = this._handleSSE(evt, aiMsgEl, aiContent, startTime);
+                        } catch (e) {
+                            // plain text chunk
+                            aiContent += raw;
+                            Messages.updateStreamContent(aiMsgEl, aiContent);
+                        }
+                        this.scrollToBottom(false);
+                    }
+                }
+            }
+        } catch (err) {
+            if (err.name !== 'AbortError') {
+                ActivityPanel.addLine('error', '❌', 'Ошибка: ' + err.message);
+                Toast.show('Ошибка: ' + err.message, 'error');
+            }
+        } finally {
+            const duration = Date.now() - startTime;
+            Messages.finalizeStreaming(aiMsgEl, aiContent, duration);
+            state.isStreaming = false;
+            state.streamController = null;
+            UI.setStreaming(false);
+            ActivityPanel.setStatus('done');
+
+            // Process queue
+            if (state.messageQueue.length > 0) {
+                const next = state.messageQueue.shift();
+                UI.showQueueIndicator(state.messageQueue.length);
+                setTimeout(() => this._doSend(next.text, next.attachments), 300);
+            }
+        }
+    },
+
+    _handleSSE(evt, aiMsgEl, aiContent, startTime) {
+        switch (evt.type) {
+            case 'text':
+            case 'delta':
+                aiContent += evt.content || evt.delta || '';
+                Messages.updateStreamContent(aiMsgEl, aiContent);
+                break;
+            case 'thinking':
+                ActivityPanel.addLine('thinking', '🤔', evt.content || evt.text || '');
+                break;
+            case 'tool_start':
+                ActivityPanel.addLine('tool-start', this._toolEmoji(evt.tool), evt.tool + ': ' + (evt.args || ''));
+                break;
+            case 'tool_result':
+                ActivityPanel.addLine('tool-result', '📄', evt.result || '', true);
+                break;
+            case 'code_write':
+                ActivityPanel.addCodeBlock(evt.filename || 'file', evt.content || '');
+                break;
+            case 'browser_update':
+                ActivityPanel.addScreenshot(evt.url || '', evt.screenshot || '', evt.status || '');
+                break;
+            case 'iteration':
+                ActivityPanel.updateProgress(evt.current, evt.total, evt.steps);
+                ActivityPanel.addLine('iteration', '🔄', `Итерация ${evt.current}/${evt.total}`);
+                break;
+            case 'artifact':
+                Messages.addArtifact(aiMsgEl, evt);
+                break;
+            case 'followups':
+                Messages.addFollowups(aiMsgEl, evt.suggestions || []);
+                break;
+            case 'task_complete':
+                Messages.addTaskSummary(aiMsgEl, evt);
+                ActivityPanel.setStatus('done');
+                break;
+            case 'human_handoff':
+                ActivityPanel.showTakeover(evt.message || 'Агент нуждается в помощи', evt.screenshot || '');
+                break;
+            case 'error':
+                ActivityPanel.addLine('error', '❌', evt.message || evt.error || 'Ошибка');
+                break;
+            case 'cost':
+                state.totalCost += evt.amount || 0;
+                UI.updateCostBar();
+                UI.updateFooterInfo();
+                if (state.currentChatId) ChatList.updateChatCost(state.currentChatId, evt.chat_total || state.totalCost);
+                break;
+            case 'title':
+                if (evt.title) {
+                    UI.updateChatTitle(evt.title);
+                    const chat = state.chats.find(c => c.id === state.currentChatId);
+                    if (chat) { chat.title = evt.title; ChatList.render(); }
+                }
+                break;
+        }
+        return aiContent;
+    },
+
+    _toolEmoji(tool) {
+        const map = {
+            ssh_execute: '🔧', file_write: '📝', file_read: '📖',
+            browser_navigate: '🌐', browser_get_text: '🌐', browser_check_site: '🌐',
+            browser_check_api: '🌐', web_search: '🔍', web_fetch: '🔍',
+            code_interpreter: '💻', generate_file: '📄', generate_image: '🖼️',
+            generate_chart: '📊', generate_report: '📋', create_artifact: '🎨',
+            store_memory: '🧠', recall_memory: '🧠', analyze_image: '🔍',
+            read_any_file: '📖', edit_image: '🖼️', generate_design: '🎨'
+        };
+        return map[tool] || '🔧';
+    },
+
+    stop() {
+        if (state.streamController) {
+            state.streamController.abort();
+            state.streamController = null;
+        }
+        state.isStreaming = false;
+        state.messageQueue = [];
+        UI.setStreaming(false);
+        UI.showQueueIndicator(0);
+        ActivityPanel.setStatus('done');
+        Toast.show('Остановлено', 'warning');
+    },
+
+    sendFromChip(text) {
+        const textarea = $('chat-input');
+        if (textarea) {
+            textarea.value = text;
+            UI.autoResize(textarea);
+        }
+        this.send();
+    },
+
+    async renameCurrentChat(title) {
+        if (!state.currentChatId || !title.trim()) return;
+        const chat = state.chats.find(c => c.id === state.currentChatId);
+        if (chat && chat.title === title.trim()) return;
+        await this.renameChat(state.currentChatId, title.trim());
+    },
+
+    async renameChat(chatId, title) {
+        try {
+            await API.put('/chats/' + chatId, { title });
+            const chat = state.chats.find(c => c.id === chatId);
+            if (chat) chat.title = title;
+            ChatList.render();
+        } catch (e) {
+            console.warn('Rename error:', e);
+        }
+    }
+};
+
+/* ── MESSAGES ─────────────────────────────────────────────── */
+const Messages = {
+    render(msg) {
+        const isUser = msg.role === 'user';
+        const wrapper = el('div', 'message ' + (isUser ? 'user' : 'ai'));
+        wrapper.dataset.msgId = msg.id;
+
+        const avatar = el('div', 'msg-avatar', isUser ? (state.user?.username?.[0]?.toUpperCase() || 'U') : '🤖');
+        const body = el('div', 'msg-body');
+        const bubble = el('div', 'msg-bubble' + (isUser ? '' : ' msg-ai'));
+
+        if (isUser) {
+            bubble.textContent = msg.content;
+            if (msg.attachments?.length) {
+                const attWrap = el('div', 'msg-attachments');
+                msg.attachments.forEach(a => {
+                    const att = el('div', 'msg-attachment-item', Utils.escapeHtml(a.name || a));
+                    attWrap.appendChild(att);
+                });
+                bubble.appendChild(attWrap);
+            }
+        } else {
+            bubble.innerHTML = this.renderMarkdown(msg.content);
+            this.highlightCode(bubble);
+            this.addCopyButtons(bubble);
+            if (msg.meta) {
+                body.appendChild(bubble);
+                body.appendChild(this.renderMeta(msg.meta));
+                body.appendChild(this.renderActions(msg.content));
+                wrapper.appendChild(avatar);
+                wrapper.appendChild(body);
+                return wrapper;
+            }
+        }
+
+        body.appendChild(bubble);
+        if (!isUser) {
+            body.appendChild(this.renderActions(msg.content));
+        }
+        wrapper.appendChild(avatar);
+        wrapper.appendChild(body);
+        return wrapper;
+    },
+
+    renderStreaming(msg) {
+        const wrapper = el('div', 'message ai');
+        wrapper.dataset.msgId = msg.id;
+        const avatar = el('div', 'msg-avatar', '🤖');
+        const body = el('div', 'msg-body');
+        const bubble = el('div', 'msg-bubble msg-ai');
+        bubble.innerHTML = '<span class="typing-indicator"><span class="typing-dot"></span><span class="typing-dot"></span><span class="typing-dot"></span></span>';
+        body.appendChild(bubble);
+        wrapper.appendChild(avatar);
+        wrapper.appendChild(body);
+        return wrapper;
+    },
+
+    updateStreamContent(wrapper, content) {
+        const bubble = wrapper.querySelector('.msg-bubble');
+        if (!bubble) return;
+        bubble.innerHTML = this.renderMarkdown(content) + '<span class="stream-cursor"></span>';
+        this.highlightCode(bubble);
+    },
+
+    finalizeStreaming(wrapper, content, duration) {
+        const bubble = wrapper.querySelector('.msg-bubble');
+        if (!bubble) return;
+        bubble.innerHTML = this.renderMarkdown(content);
+        this.highlightCode(bubble);
+        this.addCopyButtons(bubble);
+        const body = wrapper.querySelector('.msg-body');
+        if (body) {
+            body.appendChild(this.renderActions(content));
+        }
+    },
+
+    renderMarkdown(text) {
+        if (!text) return '';
+        if (typeof marked !== 'undefined') {
+            try {
+                marked.setOptions({
+                    breaks: true,
+                    gfm: true,
+                    highlight: (code, lang) => {
+                        if (typeof hljs !== 'undefined' && lang && hljs.getLanguage(lang)) {
+                            return hljs.highlight(code, { language: lang }).value;
+                        }
+                        return Utils.escapeHtml(code);
+                    }
+                });
+                return marked.parse(text);
+            } catch (e) {
+                return Utils.escapeHtml(text).replace(/\n/g, '<br>');
+            }
+        }
+        return Utils.escapeHtml(text).replace(/\n/g, '<br>');
+    },
+
+    highlightCode(container) {
+        if (typeof hljs === 'undefined') return;
+        container.querySelectorAll('pre code').forEach(block => {
+            if (!block.dataset.highlighted) {
+                hljs.highlightElement(block);
+                block.dataset.highlighted = '1';
+            }
+        });
+    },
+
+    addCopyButtons(container) {
+        container.querySelectorAll('pre').forEach(pre => {
+            if (pre.querySelector('.code-copy-btn')) return;
+            const btn = el('button', 'code-copy-btn', '📋 Копировать');
+            btn.style.cssText = 'position:absolute;top:8px;right:8px';
+            pre.style.position = 'relative';
+            btn.addEventListener('click', () => {
+                const code = pre.querySelector('code')?.textContent || pre.textContent;
+                Utils.copyText(code).then(() => {
+                    btn.textContent = '✅ Скопировано';
+                    btn.classList.add('copied');
+                    setTimeout(() => { btn.textContent = '📋 Копировать'; btn.classList.remove('copied'); }, 2000);
+                });
+            });
+            pre.appendChild(btn);
+        });
+    },
+
+    renderMeta(meta) {
+        const div = el('div', 'msg-meta');
+        div.innerHTML = `
+            <span class="msg-meta-model">${meta.model || ''}</span>
+            <span class="msg-meta-sep">·</span>
+            <span class="msg-meta-cost">${Utils.formatCost(meta.cost)}</span>
+            <span class="msg-meta-sep">·</span>
+            <span>${Utils.formatDuration(meta.duration_ms || 0)}</span>
+            ${meta.iterations ? `<span class="msg-meta-sep">·</span><span>${meta.iterations} итер.</span>` : ''}`;
+        return div;
+    },
+
+    renderActions(content) {
+        const div = el('div', 'msg-actions');
+        const copyBtn = el('button', 'msg-action-btn', '📋 Копировать');
+        copyBtn.addEventListener('click', () => {
+            Utils.copyText(content).then(() => {
+                copyBtn.textContent = '✅ Скопировано';
+                copyBtn.classList.add('copied');
+                setTimeout(() => { copyBtn.textContent = '📋 Копировать'; copyBtn.classList.remove('copied'); }, 2000);
+            });
+        });
+        const regenBtn = el('button', 'msg-action-btn', '🔄 Повторить');
+        regenBtn.addEventListener('click', () => Chat.regenerate());
+        div.appendChild(copyBtn);
+        div.appendChild(regenBtn);
+        return div;
+    },
+
+    addArtifact(wrapper, evt) {
+        const body = wrapper.querySelector('.msg-body');
+        if (!body) return;
+        const card = Artifacts.render(evt);
+        if (card) body.appendChild(card);
+    },
+
+    addFollowups(wrapper, suggestions) {
+        const body = wrapper.querySelector('.msg-body');
+        if (!body || !suggestions.length) return;
+        const wrap = el('div', 'followups-wrap');
+        suggestions.forEach(s => {
+            const chip = el('button', 'followup-chip', Utils.escapeHtml(s));
+            chip.addEventListener('click', () => Chat.sendFromChip(s));
+            wrap.appendChild(chip);
+        });
+        body.appendChild(wrap);
+    },
+
+    addTaskSummary(wrapper, evt) {
+        const body = wrapper.querySelector('.msg-body');
+        if (!body) return;
+        const summary = el('div', 'task-summary');
+        summary.innerHTML = `
+            <div class="task-summary-title">✅ Задача выполнена</div>
+            <div class="task-summary-stats">
+                <span class="task-summary-stat">💰 ${Utils.formatCost(evt.cost)}</span>
+                <span class="task-summary-stat">⏱ ${Utils.formatDuration(evt.duration_ms || 0)}</span>
+                <span class="task-summary-stat">🔄 ${evt.iterations || 0} итераций</span>
+            </div>
+            ${evt.agents?.length ? `<div class="task-summary-agents">👥 ${evt.agents.map(a => `<span class="agent-badge">${a}</span>`).join('')}</div>` : ''}`;
+        body.appendChild(summary);
+    }
+};
+
+/* ── ARTIFACTS ────────────────────────────────────────────── */
+const Artifacts = {
+    render(evt) {
+        switch (evt.artifact_type) {
+            case 'html': return this.renderHTML(evt);
+            case 'image': return this.renderImage(evt);
+            case 'script':
+            case 'code': return this.renderScript(evt);
+            case 'document':
+            case 'pdf':
+            case 'docx': return this.renderDocument(evt);
+            default: return null;
+        }
+    },
+
+    renderHTML(evt) {
+        const card = el('div', 'artifact-card');
+        const filename = evt.filename || 'index.html';
+        const htmlContent = evt.html_content || evt.content || '';
+        let showPreview = true;
+
+        card.innerHTML = `
+            <div class="artifact-header">
+                <span class="artifact-icon">🌐</span>
+                <span class="artifact-title">${Utils.escapeHtml(filename)}</span>
+                <div class="artifact-tabs">
+                    <button class="artifact-tab active" data-tab="preview">Превью</button>
+                    <button class="artifact-tab" data-tab="code">Код</button>
+                </div>
+                <div class="artifact-actions">
+                    <button class="artifact-action-btn" title="Копировать">📋</button>
+                    <button class="artifact-action-btn" title="Открыть">↗️</button>
+                </div>
+            </div>
+            <div class="artifact-body">
+                <div class="artifact-preview-wrap">
+                    <iframe class="artifact-preview-frame" sandbox="allow-scripts allow-same-origin"></iframe>
+                </div>
+                <div class="artifact-code-view hidden">
+                    <pre><code class="language-html">${Utils.escapeHtml(htmlContent)}</code></pre>
+                </div>
+            </div>`;
+
+        const iframe = card.querySelector('iframe');
+        const previewWrap = card.querySelector('.artifact-preview-wrap');
+        const codeView = card.querySelector('.artifact-code-view');
+        const tabs = card.querySelectorAll('.artifact-tab');
+
+        // Load iframe
+        if (htmlContent) {
+            const blob = new Blob([htmlContent], { type: 'text/html' });
+            iframe.src = URL.createObjectURL(blob);
+        }
+
+        // Tab switching
+        tabs.forEach(tab => {
+            tab.addEventListener('click', () => {
+                tabs.forEach(t => t.classList.remove('active'));
+                tab.classList.add('active');
+                const isPreview = tab.dataset.tab === 'preview';
+                previewWrap.classList.toggle('hidden', !isPreview);
+                codeView.classList.toggle('hidden', isPreview);
+                if (!isPreview && typeof hljs !== 'undefined') {
+                    const codeEl = codeView.querySelector('code');
+                    if (codeEl && !codeEl.dataset.highlighted) {
+                        hljs.highlightElement(codeEl);
+                        codeEl.dataset.highlighted = '1';
+                    }
+                }
+            });
+        });
+
+        // Actions
+        const [copyBtn, openBtn] = card.querySelectorAll('.artifact-action-btn');
+        copyBtn.addEventListener('click', () => {
+            Utils.copyText(htmlContent).then(() => { copyBtn.textContent = '✅'; setTimeout(() => copyBtn.textContent = '📋', 2000); });
+        });
+        openBtn.addEventListener('click', () => {
+            const blob = new Blob([htmlContent], { type: 'text/html' });
+            window.open(URL.createObjectURL(blob), '_blank');
+        });
+
+        return card;
+    },
+
+    renderImage(evt) {
+        const card = el('div', 'artifact-card');
+        const src = evt.url || evt.src || evt.image_url || '';
+        const filename = evt.filename || 'image.png';
+        card.innerHTML = `
+            <div class="artifact-header">
+                <span class="artifact-icon">🖼️</span>
+                <span class="artifact-title">${Utils.escapeHtml(filename)}</span>
+                <div class="artifact-actions">
+                    <a class="artifact-action-btn" href="${src}" download="${filename}">⬇️ Скачать</a>
+                </div>
+            </div>
+            <img class="artifact-image" src="${src}" alt="${Utils.escapeHtml(filename)}" loading="lazy">`;
+        card.querySelector('img').addEventListener('click', () => Lightbox.open(src));
+        return card;
+    },
+
+    renderScript(evt) {
+        const card = el('div', 'artifact-card');
+        const filename = evt.filename || 'script.py';
+        const content = evt.content || '';
+        const lines = content.split('\n');
+        const preview = lines.slice(0, 10).join('\n');
+        const hasMore = lines.length > 10;
+        const lang = filename.split('.').pop() || 'python';
+
+        card.innerHTML = `
+            <div class="artifact-header">
+                <span class="artifact-icon">💻</span>
+                <span class="artifact-title">${Utils.escapeHtml(filename)}</span>
+                <div class="artifact-actions">
+                    <button class="artifact-action-btn">📋 Копировать</button>
+                </div>
+            </div>
+            <div class="artifact-script-preview">
+                <pre class="artifact-code-view" style="max-height:200px;overflow:hidden"><code class="language-${lang}">${Utils.escapeHtml(preview)}</code></pre>
+                ${hasMore ? `<button class="artifact-expand-btn">▼ Показать все ${lines.length} строк</button>` : ''}
+            </div>`;
+
+        const copyBtn = card.querySelector('.artifact-action-btn');
+        copyBtn.addEventListener('click', () => {
+            Utils.copyText(content).then(() => { copyBtn.textContent = '✅ Скопировано'; setTimeout(() => copyBtn.textContent = '📋 Копировать', 2000); });
+        });
+
+        if (hasMore) {
+            const expandBtn = card.querySelector('.artifact-expand-btn');
+            const pre = card.querySelector('pre');
+            expandBtn.addEventListener('click', () => {
+                pre.querySelector('code').textContent = content;
+                pre.style.maxHeight = 'none';
+                expandBtn.remove();
+                if (typeof hljs !== 'undefined') hljs.highlightElement(pre.querySelector('code'));
+            });
+        }
+
+        if (typeof hljs !== 'undefined') {
+            const codeEl = card.querySelector('code');
+            if (codeEl) hljs.highlightElement(codeEl);
+        }
+
+        return card;
+    },
+
+    renderDocument(evt) {
+        const card = el('div', 'artifact-card');
+        const filename = evt.filename || 'document.pdf';
+        const size = evt.size ? Utils.formatSize(evt.size) : '';
+        const url = evt.url || evt.download_url || '#';
+        const icon = Utils.getFileIcon(filename);
+
+        card.innerHTML = `
+            <div class="artifact-header">
+                <span class="artifact-icon">${icon}</span>
+                <span class="artifact-title">${Utils.escapeHtml(filename)}</span>
+            </div>
+            <div class="artifact-doc">
+                <div class="artifact-doc-icon">${icon}</div>
+                <div class="artifact-doc-info">
+                    <div class="artifact-doc-name">${Utils.escapeHtml(filename)}</div>
+                    ${size ? `<div class="artifact-doc-size">${size}</div>` : ''}
+                </div>
+                <a class="btn btn-primary btn-sm" href="${url}" download="${filename}">⬇️ Скачать</a>
+            </div>`;
+        return card;
+    }
+};
+
+/* ── ACTIVITY PANEL ───────────────────────────────────────── */
+const ActivityPanel = {
+    show(agentName = '') {
+        const panel = $('activity-panel');
+        if (panel) panel.classList.remove('hidden');
+        state.activityVisible = true;
+        if (agentName) {
+            const nameEl = document.querySelector('.activity-agent-name');
+            if (nameEl) nameEl.textContent = agentName;
+        }
+    },
+
+    hide() {
+        const panel = $('activity-panel');
+        if (panel) panel.classList.add('hidden');
+        state.activityVisible = false;
+    },
+
+    toggle() {
+        if (state.activityVisible) this.hide();
+        else this.show();
+    },
+
+    clear() {
+        const log = $('activity-log');
+        if (log) log.innerHTML = '';
+        state.activityLines = [];
+        this.updateProgress(0, 0, []);
+        this.hideTakeover();
+    },
+
+    setStatus(status) {
+        const statusEl = document.querySelector('.activity-status');
+        const pulseEl = document.querySelector('.status-pulse');
+        if (!statusEl || !pulseEl) return;
+        const labels = { running: 'Работает', done: 'Завершено', waiting: 'Ожидает' };
+        statusEl.className = 'activity-status ' + status;
+        pulseEl.className = 'status-pulse ' + (status === 'running' ? '' : status);
+        statusEl.innerHTML = `<span class="status-pulse ${status === 'running' ? '' : status}"></span>${labels[status] || status}`;
+    },
+
+    addLine(type, emoji, text, collapsible = false) {
+        const log = $('activity-log');
+        if (!log) return;
+
+        const line = el('div', 'activity-line ' + type);
+        const time = el('span', 'activity-time', Utils.formatTime());
+        const emojiEl = el('span', 'activity-emoji', emoji);
+        const content = el('div', 'activity-content');
+
+        if (collapsible && text.length > 200) {
+            const preview = text.slice(0, 200);
+            const resultEl = el('div', 'activity-result', Utils.escapeHtml(preview));
+            const toggle = el('span', 'activity-result-toggle', '▼ Показать полностью');
+            toggle.addEventListener('click', () => {
+                resultEl.textContent = text;
+                resultEl.classList.add('expanded');
+                toggle.remove();
+            });
+            content.appendChild(resultEl);
+            content.appendChild(toggle);
+        } else {
+            const textEl = el('div', 'activity-text', Utils.escapeHtml(text));
+            content.appendChild(textEl);
+        }
+
+        line.appendChild(time);
+        line.appendChild(emojiEl);
+        line.appendChild(content);
+        log.appendChild(line);
+
+        state.activityLines.push({ type, emoji, text, time: new Date() });
+        log.scrollTop = log.scrollHeight;
+    },
+
+    addCodeBlock(filename, content) {
+        const log = $('activity-log');
+        if (!log) return;
+
+        const line = el('div', 'activity-line file-write');
+        const time = el('span', 'activity-time', Utils.formatTime());
+        const emojiEl = el('span', 'activity-emoji', '📝');
+        const content_wrap = el('div', 'activity-content');
+
+        const label = el('div', 'activity-tool', 'Создаю ' + filename);
+        const block = el('div', 'activity-code-block');
+        const lines = content.split('\n');
+        const preview = lines.slice(0, 10).join('\n');
+        const hasMore = lines.length > 10;
+
+        block.innerHTML = `
+            <div class="activity-code-header">
+                <span class="activity-code-filename">${Utils.escapeHtml(filename)}</span>
+                <button class="code-copy-btn" style="font-size:10px;padding:2px 6px">📋</button>
+            </div>
+            <div class="activity-code-body">${Utils.escapeHtml(preview)}</div>
+            ${hasMore ? `<div class="activity-code-expand">▼ Ещё ${lines.length - 10} строк</div>` : ''}`;
+
+        const copyBtn = block.querySelector('.code-copy-btn');
+        copyBtn.addEventListener('click', () => {
+            Utils.copyText(content).then(() => { copyBtn.textContent = '✅'; setTimeout(() => copyBtn.textContent = '📋', 2000); });
+        });
+
+        if (hasMore) {
+            const expandBtn = block.querySelector('.activity-code-expand');
+            const bodyEl = block.querySelector('.activity-code-body');
+            expandBtn.addEventListener('click', () => {
+                bodyEl.textContent = content;
+                bodyEl.classList.add('expanded');
+                expandBtn.remove();
+            });
+        }
+
+        content_wrap.appendChild(label);
+        content_wrap.appendChild(block);
+        line.appendChild(time);
+        line.appendChild(emojiEl);
+        line.appendChild(content_wrap);
+        log.appendChild(line);
+        log.scrollTop = log.scrollHeight;
+    },
+
+    addScreenshot(url, screenshotData, status) {
+        const log = $('activity-log');
+        if (!log) return;
+
+        const line = el('div', 'activity-line browser');
+        const time = el('span', 'activity-time', Utils.formatTime());
+        const emojiEl = el('span', 'activity-emoji', '🌐');
+        const content = el('div', 'activity-content');
+
+        const label = el('div', 'activity-tool', 'Открываю ' + url);
+        content.appendChild(label);
+
+        if (screenshotData) {
+            const screenshot = el('div', 'activity-screenshot');
+            const src = screenshotData.startsWith('data:') ? screenshotData : 'data:image/png;base64,' + screenshotData;
+            screenshot.innerHTML = `
+                <div class="activity-screenshot-header">
+                    <span>${Utils.escapeHtml(url)}</span>
+                    <span>${status || ''}</span>
+                </div>
+                <img src="${src}" alt="Screenshot" loading="lazy">
+                ${status ? `<div class="activity-screenshot-status">${Utils.escapeHtml(status)}</div>` : ''}`;
+            screenshot.querySelector('img').addEventListener('click', () => Lightbox.open(src));
+            content.appendChild(screenshot);
+        }
+
+        line.appendChild(time);
+        line.appendChild(emojiEl);
+        line.appendChild(content);
+        log.appendChild(line);
+        log.scrollTop = log.scrollHeight;
+    },
+
+    updateProgress(current, total, steps = []) {
+        state.taskProgress = { current, total, steps };
+        const progressEl = document.querySelector('.task-progress');
+        if (!progressEl) return;
+
+        if (!total) { progressEl.style.display = 'none'; return; }
+        progressEl.style.display = '';
+
+        const fill = progressEl.querySelector('.progress-bar-fill');
+        const label = progressEl.querySelector('.progress-label');
+        const stepsEl = progressEl.querySelector('.progress-steps');
+
+        if (fill) fill.style.width = Math.round((current / total) * 100) + '%';
+        if (label) label.textContent = `Итерация ${current} / ${total}`;
+
+        if (stepsEl && steps.length) {
+            stepsEl.innerHTML = steps.map(s => `
+                <div class="progress-step ${s.status}">
+                    <span class="step-icon">${s.status === 'done' ? '✅' : s.status === 'active' ? '⏳' : '○'}</span>
+                    ${Utils.escapeHtml(s.name)}
+                </div>`).join('');
+        }
+    },
+
+    showTakeover(message, screenshotData) {
+        const panel = $('activity-panel');
+        if (!panel) return;
+        this.show();
+
+        let banner = panel.querySelector('.takeover-banner');
+        if (!banner) {
+            banner = el('div', 'takeover-banner');
+            panel.appendChild(banner);
+        }
+
+        banner.innerHTML = `
+            <div class="takeover-title">⚠️ Агент нуждается в помощи</div>
+            <div class="takeover-desc">${Utils.escapeHtml(message)}</div>
+            ${screenshotData ? `<img src="${screenshotData.startsWith('data:') ? screenshotData : 'data:image/png;base64,' + screenshotData}" style="width:100%;border-radius:6px;margin-bottom:8px;cursor:zoom-in" onclick="Lightbox.open(this.src)">` : ''}
+            <input type="text" class="takeover-input" id="takeover-input" placeholder="Введите ответ (капча, пароль, данные...)">
+            <button class="btn-takeover-send" id="btn-takeover-send">Отправить агенту</button>`;
+
+        const sendBtn = banner.querySelector('#btn-takeover-send');
+        if (sendBtn) sendBtn.addEventListener('click', () => this.sendTakeover());
+    },
+
+    hideTakeover() {
+        const banner = document.querySelector('.takeover-banner');
+        if (banner) banner.remove();
+    },
+
+    async sendTakeover() {
+        const input = $('takeover-input');
+        if (!input) return;
+        const value = input.value.trim();
+        if (!value) return;
+
+        try {
+            await API.post('/chats/' + state.currentChatId + '/takeover', { response: value });
+            this.hideTakeover();
+            this.addLine('success', '✅', 'Ответ отправлен агенту: ' + value);
+            Toast.show('Ответ отправлен', 'success');
+        } catch (e) {
+            Toast.show('Ошибка отправки: ' + e.message, 'error');
+        }
+    }
+};
+
+/* ── ATTACHMENTS ──────────────────────────────────────────── */
+const Attachments = {
+    async handleFiles(files) {
+        for (const file of files) {
+            if (state.attachments.length >= 10) {
+                Toast.show('Максимум 10 файлов', 'warning');
+                break;
+            }
+            const att = {
+                id: Utils.generateId(),
+                name: file.name,
+                size: file.size,
+                type: file.type,
+                file
+            };
+            if (Utils.isImage(file.name)) {
+                att.preview = await this.readAsDataURL(file);
+            }
+            state.attachments.push(att);
+        }
+        this.renderPreviews();
+        // Reset file input
+        const fi = $('file-input');
+        if (fi) fi.value = '';
+    },
+
+    readAsDataURL(file) {
+        return new Promise(resolve => {
+            const reader = new FileReader();
+            reader.onload = e => resolve(e.target.result);
+            reader.readAsDataURL(file);
+        });
+    },
+
+    renderPreviews() {
+        const container = document.querySelector('.attachments-preview');
+        if (!container) return;
+        container.innerHTML = '';
+        if (!state.attachments.length) { container.style.display = 'none'; return; }
+        container.style.display = 'flex';
+
+        state.attachments.forEach((att, idx) => {
+            const item = el('div', 'attachment-item');
+            if (att.preview) {
+                item.innerHTML = `<img class="attachment-thumb" src="${att.preview}" alt="${Utils.escapeHtml(att.name)}">`;
+            } else {
+                item.innerHTML = `<div class="attachment-icon">${Utils.getFileIcon(att.name)}</div>`;
+            }
+            item.innerHTML += `
+                <div class="attachment-info">
+                    <div class="attachment-name">${Utils.escapeHtml(att.name)}</div>
+                    <div class="attachment-size">${Utils.formatSize(att.size)}</div>
+                </div>
+                <button class="attachment-remove" data-idx="${idx}">✕</button>`;
+            item.querySelector('.attachment-remove').addEventListener('click', () => {
+                state.attachments.splice(idx, 1);
+                this.renderPreviews();
+            });
+            container.appendChild(item);
+        });
+    },
+
+    showDropOverlay() {
+        const overlay = document.querySelector('.drop-overlay');
+        if (overlay) overlay.classList.add('active');
+    },
+
+    hideDropOverlay() {
+        const overlay = document.querySelector('.drop-overlay');
+        if (overlay) overlay.classList.remove('active');
+    }
+};
+
+/* ── LIGHTBOX ─────────────────────────────────────────────── */
+const Lightbox = {
+    open(src) {
+        const lb = $('lightbox');
+        if (!lb) return;
+        const img = lb.querySelector('img');
+        if (img) img.src = src;
+        lb.classList.remove('hidden');
+        document.body.style.overflow = 'hidden';
+    },
+    close() {
+        const lb = $('lightbox');
+        if (lb) lb.classList.add('hidden');
+        document.body.style.overflow = '';
+    }
+};
+
+/* ── TOAST ────────────────────────────────────────────────── */
+const Toast = {
+    show(message, type = 'info', duration = 3000) {
+        const container = document.querySelector('.toast-container');
+        if (!container) return;
+        const icons = { success: '✅', error: '❌', warning: '⚠️', info: 'ℹ️' };
+        const toast = el('div', 'toast ' + type);
+        toast.innerHTML = `<span class="toast-icon">${icons[type] || 'ℹ️'}</span><span class="toast-text">${Utils.escapeHtml(message)}</span>`;
+        container.appendChild(toast);
+        setTimeout(() => {
+            toast.style.opacity = '0';
+            toast.style.transform = 'translateX(20px)';
+            toast.style.transition = 'all 0.3s';
+            setTimeout(() => toast.remove(), 300);
+        }, duration);
+    }
+};
+
+/* ── ADMIN PANEL ──────────────────────────────────────────── */
+const AdminPanel = {
+    currentTab: 'users',
+    chart: null,
+
+    async open() {
+        if (!state.user || state.user.role !== 'admin') return;
+        const modal = $('admin-modal');
+        if (modal) modal.classList.remove('hidden');
+        await this.loadTab('users');
+    },
+
+    close() {
+        const modal = $('admin-modal');
+        if (modal) modal.classList.add('hidden');
+        if (this.chart) { this.chart.destroy(); this.chart = null; }
+    },
+
+    async loadTab(tab) {
+        this.currentTab = tab;
+        $$('.modal-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
+        $$('.modal-tab-content').forEach(c => c.classList.toggle('active', c.id === 'admin-tab-' + tab));
+
+        switch (tab) {
+            case 'users': await this.loadUsers(); break;
+            case 'chats': await this.loadAllChats(); break;
+            case 'analytics': await this.loadAnalytics(); break;
+        }
+    },
+
+    async loadUsers() {
+        const container = $('admin-tab-users');
+        if (!container) return;
+        container.innerHTML = '<div class="empty-state"><div class="spinner"></div></div>';
+
+        try {
+            const data = await API.get('/admin/users');
+            state.adminData.users = data.users || data || [];
+            this.renderUsers(state.adminData.users);
+        } catch (e) {
+            container.innerHTML = `<div class="empty-state"><div class="empty-state-desc">Ошибка: ${Utils.escapeHtml(e.message)}</div></div>`;
+        }
+    },
+
+    renderUsers(users) {
+        const container = $('admin-tab-users');
+        if (!container) return;
+
+        const html = `
+            <div style="display:flex;justify-content:flex-end;margin-bottom:16px">
+                <button class="btn btn-primary btn-sm" onclick="AdminPanel.showCreateUser()">+ Создать пользователя</button>
+            </div>
+            <div style="overflow-x:auto">
+                <table class="admin-table">
+                    <thead>
+                        <tr>
+                            <th>Пользователь</th>
+                            <th>Роль</th>
+                            <th>Создан</th>
+                            <th>Потрачено</th>
+                            <th>Лимит</th>
+                            <th>Статус</th>
+                            <th>Действия</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${users.map(u => `
+                            <tr>
+                                <td>
+                                    <div class="user-cell">
+                                        <div class="user-cell-avatar">${(u.full_name || u.username || 'U')[0].toUpperCase()}</div>
+                                        <div>
+                                            <div style="font-weight:500">${Utils.escapeHtml(u.full_name || u.username)}</div>
+                                            <div style="font-size:11px;color:var(--text-tertiary)">${Utils.escapeHtml(u.username)}</div>
+                                        </div>
+                                    </div>
+                                </td>
+                                <td><span class="role-badge ${u.role}">${u.role === 'admin' ? 'Админ' : 'Пользователь'}</span></td>
+                                <td style="font-size:12px;color:var(--text-secondary)">${Utils.formatDate(u.created_at)}</td>
+                                <td style="color:var(--success);font-weight:500">${Utils.formatCost(u.total_spent)}</td>
+                                <td style="font-size:12px">$${(u.monthly_limit || 0).toFixed(2)}</td>
+                                <td><span class="status-badge ${u.is_blocked ? 'blocked' : 'active'}">${u.is_blocked ? 'Заблокирован' : 'Активен'}</span></td>
+                                <td>
+                                    <div class="table-actions">
+                                        <button class="table-action-btn edit" onclick="AdminPanel.showEditUser('${u.id}')">Изменить</button>
+                                        <button class="table-action-btn block" onclick="AdminPanel.toggleBlock('${u.id}', ${u.is_blocked})">${u.is_blocked ? 'Разблокировать' : 'Заблокировать'}</button>
+                                    </div>
+                                </td>
+                            </tr>`).join('')}
+                    </tbody>
+                </table>
+            </div>`;
+        container.innerHTML = html;
+    },
+
+    async loadAllChats() {
+        const container = $('admin-tab-chats');
+        if (!container) return;
+        container.innerHTML = '<div class="empty-state"><div class="spinner"></div></div>';
+
+        try {
+            const data = await API.get('/admin/chats');
+            state.adminData.chats = data.chats || data || [];
+            this.renderAllChats(state.adminData.chats);
+        } catch (e) {
+            container.innerHTML = `<div class="empty-state"><div class="empty-state-desc">Ошибка: ${Utils.escapeHtml(e.message)}</div></div>`;
+        }
+    },
+
+    renderAllChats(chats) {
+        const container = $('admin-tab-chats');
+        if (!container) return;
+
+        const html = `
+            <div style="margin-bottom:12px">
+                <input type="text" class="form-input" placeholder="Фильтр по пользователю..." oninput="AdminPanel.filterChats(this.value)" style="max-width:300px">
+            </div>
+            <div style="overflow-x:auto">
+                <table class="admin-table">
+                    <thead>
+                        <tr>
+                            <th>Пользователь</th>
+                            <th>Чат</th>
+                            <th>Дата</th>
+                            <th>Сообщений</th>
+                            <th>Стоимость</th>
+                            <th>Режим</th>
+                        </tr>
+                    </thead>
+                    <tbody id="admin-chats-tbody">
+                        ${chats.map(c => `
+                            <tr data-user="${Utils.escapeHtml((c.username || '').toLowerCase())}">
+                                <td style="font-size:12px;font-weight:500">${Utils.escapeHtml(c.username || '—')}</td>
+                                <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${Utils.escapeHtml(c.title || 'Без названия')}</td>
+                                <td style="font-size:12px;color:var(--text-secondary)">${Utils.formatDate(c.created_at)}</td>
+                                <td style="text-align:center">${c.message_count || 0}</td>
+                                <td style="color:var(--success);font-weight:500">${Utils.formatCost(c.total_cost)}</td>
+                                <td style="font-size:11px;color:var(--text-tertiary)">${Utils.escapeHtml(c.mode || '—')}</td>
+                            </tr>`).join('')}
+                    </tbody>
+                </table>
+            </div>`;
+        container.innerHTML = html;
+    },
+
+    filterChats(query) {
+        const q = query.toLowerCase().trim();
+        const rows = document.querySelectorAll('#admin-chats-tbody tr');
+        rows.forEach(row => {
+            row.style.display = !q || row.dataset.user.includes(q) ? '' : 'none';
+        });
+    },
+
+    async loadAnalytics() {
+        const container = $('admin-tab-analytics');
+        if (!container) return;
+        container.innerHTML = '<div class="empty-state"><div class="spinner"></div></div>';
+
+        try {
+            const data = await API.get('/admin/analytics');
+            state.adminData.analytics = data;
+            this.renderAnalytics(data);
+        } catch (e) {
+            container.innerHTML = `<div class="empty-state"><div class="empty-state-desc">Ошибка: ${Utils.escapeHtml(e.message)}</div></div>`;
+        }
+    },
+
+    renderAnalytics(data) {
+        const container = $('admin-tab-analytics');
+        if (!container) return;
+
+        container.innerHTML = `
+            <div class="analytics-grid">
+                <div class="analytics-card">
+                    <div class="analytics-card-label">Сегодня</div>
+                    <div class="analytics-card-value">${Utils.formatCost(data.today || 0)}</div>
+                    <div class="analytics-card-sub">${data.today_requests || 0} запросов</div>
+                </div>
+                <div class="analytics-card">
+                    <div class="analytics-card-label">Эта неделя</div>
+                    <div class="analytics-card-value">${Utils.formatCost(data.week || 0)}</div>
+                    <div class="analytics-card-sub">${data.week_requests || 0} запросов</div>
+                </div>
+                <div class="analytics-card">
+                    <div class="analytics-card-label">Этот месяц</div>
+                    <div class="analytics-card-value">${Utils.formatCost(data.month || 0)}</div>
+                    <div class="analytics-card-sub">${data.month_requests || 0} запросов</div>
+                </div>
+            </div>
+            <div class="analytics-chart-wrap">
+                <div class="analytics-chart-title">Расходы за 30 дней</div>
+                <canvas id="analytics-chart" height="200"></canvas>
+            </div>
+            ${data.top_users?.length ? `
+            <div class="analytics-chart-wrap">
+                <div class="analytics-chart-title">Топ пользователей по расходам</div>
+                <table class="admin-table">
+                    <thead><tr><th>Пользователь</th><th>Потрачено</th><th>Запросов</th></tr></thead>
+                    <tbody>
+                        ${data.top_users.map(u => `
+                            <tr>
+                                <td>${Utils.escapeHtml(u.username)}</td>
+                                <td style="color:var(--success);font-weight:500">${Utils.formatCost(u.total_spent)}</td>
+                                <td>${u.request_count || 0}</td>
+                            </tr>`).join('')}
+                    </tbody>
+                </table>
+            </div>` : ''}
+            ${data.model_breakdown?.length ? `
+            <div class="analytics-chart-wrap">
+                <div class="analytics-chart-title">Разбивка по моделям</div>
+                <canvas id="models-chart" height="150"></canvas>
+            </div>` : ''}`;
+
+        // Render Chart.js charts
+        if (typeof Chart !== 'undefined') {
+            this.renderDailyChart(data.daily || []);
+            if (data.model_breakdown?.length) this.renderModelsChart(data.model_breakdown);
+        }
+    },
+
+    renderDailyChart(daily) {
+        const canvas = $('analytics-chart');
+        if (!canvas) return;
+        if (this.chart) this.chart.destroy();
+        const isDark = state.theme === 'dark';
+        this.chart = new Chart(canvas, {
+            type: 'line',
+            data: {
+                labels: daily.map(d => d.date),
+                datasets: [{
+                    label: 'Расходы ($)',
+                    data: daily.map(d => d.cost),
+                    borderColor: '#6366F1',
+                    backgroundColor: 'rgba(99,102,241,0.1)',
+                    fill: true,
+                    tension: 0.4,
+                    pointRadius: 3
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: { legend: { display: false } },
+                scales: {
+                    x: { grid: { color: isDark ? '#2D2D3D' : '#F3F4F6' }, ticks: { color: isDark ? '#9CA3AF' : '#6B7280', font: { size: 11 } } },
+                    y: { grid: { color: isDark ? '#2D2D3D' : '#F3F4F6' }, ticks: { color: isDark ? '#9CA3AF' : '#6B7280', font: { size: 11 }, callback: v => '$' + v.toFixed(3) } }
+                }
+            }
+        });
+    },
+
+    renderModelsChart(models) {
+        const canvas = $('models-chart');
+        if (!canvas) return;
+        new Chart(canvas, {
+            type: 'doughnut',
+            data: {
+                labels: models.map(m => m.model),
+                datasets: [{
+                    data: models.map(m => m.cost),
+                    backgroundColor: ['#6366F1', '#8B5CF6', '#10B981', '#F59E0B', '#EF4444']
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: {
+                    legend: { position: 'right', labels: { font: { size: 12 }, color: state.theme === 'dark' ? '#E5E7EB' : '#111827' } }
+                }
+            }
+        });
+    },
+
+    showCreateUser() {
+        const modal = $('user-modal');
+        if (!modal) return;
+        $('user-modal-title').textContent = 'Создать пользователя';
+        $('user-form').reset();
+        $('user-id').value = '';
+        $('user-password-group').style.display = '';
+        modal.classList.remove('hidden');
+    },
+
+    showEditUser(userId) {
+        const user = state.adminData.users.find(u => u.id === userId);
+        if (!user) return;
+        const modal = $('user-modal');
+        if (!modal) return;
+        $('user-modal-title').textContent = 'Редактировать пользователя';
+        $('user-id').value = userId;
+        $('user-username').value = user.username;
+        $('user-fullname').value = user.full_name || '';
+        $('user-role').value = user.role;
+        $('user-limit').value = user.monthly_limit || 2;
+        $('user-password-group').style.display = 'none';
+        modal.classList.remove('hidden');
+    },
+
+    async saveUser(e) {
+        e.preventDefault();
+        const userId = $('user-id').value;
+        const data = {
+            username: $('user-username').value.trim(),
+            full_name: $('user-fullname').value.trim(),
+            role: $('user-role').value,
+            monthly_limit: parseFloat($('user-limit').value) || 2
+        };
+        const password = $('user-password').value;
+        if (password) data.password = password;
+
+        try {
+            if (userId) {
+                await API.put('/admin/users/' + userId, data);
+                Toast.show('Пользователь обновлён', 'success');
+            } else {
+                if (!data.password) { Toast.show('Введите пароль', 'error'); return; }
+                await API.post('/admin/users', data);
+                Toast.show('Пользователь создан', 'success');
+            }
+            $('user-modal').classList.add('hidden');
+            await this.loadUsers();
+        } catch (err) {
+            Toast.show('Ошибка: ' + err.message, 'error');
+        }
+    },
+
+    async toggleBlock(userId, isBlocked) {
+        try {
+            await API.put('/admin/users/' + userId, { is_blocked: !isBlocked });
+            Toast.show(isBlocked ? 'Пользователь разблокирован' : 'Пользователь заблокирован', 'success');
+            await this.loadUsers();
+        } catch (err) {
+            Toast.show('Ошибка: ' + err.message, 'error');
+        }
+    }
+};
+
+/* ── INIT ─────────────────────────────────────────────────── */
 document.addEventListener('DOMContentLoaded', () => {
-  initEventListeners();
-  checkAuth();
-  createToastContainer();
-  // Sprint 3: тема
-  const themeBtn = document.getElementById('theme-toggle');
-  if (themeBtn) themeBtn.addEventListener('click', toggleTheme);
+    Theme.init();
+    Auth.init();
+
+    // Admin modal tabs
+    $$('.modal-tab[data-tab]').forEach(tab => {
+        tab.addEventListener('click', () => {
+            const panel = tab.closest('.modal');
+            if (panel && panel.id === 'admin-modal') {
+                AdminPanel.loadTab(tab.dataset.tab);
+            }
+        });
+    });
+
+    // Admin modal close
+    const adminClose = document.querySelector('#admin-modal .modal-close');
+    if (adminClose) adminClose.addEventListener('click', () => AdminPanel.close());
+
+    // Admin modal overlay click
+    const adminModal = $('admin-modal');
+    if (adminModal) {
+        adminModal.addEventListener('click', e => {
+            if (e.target === adminModal) AdminPanel.close();
+        });
+    }
+
+    // User form
+    const userForm = $('user-form');
+    if (userForm) userForm.addEventListener('submit', e => AdminPanel.saveUser(e));
+
+    // User modal close
+    const userModalClose = document.querySelector('#user-modal .modal-close');
+    if (userModalClose) userModalClose.addEventListener('click', () => $('user-modal').classList.add('hidden'));
+
+    // User modal cancel
+    const userCancel = $('btn-user-cancel');
+    if (userCancel) userCancel.addEventListener('click', () => $('user-modal').classList.add('hidden'));
+
+    console.log('%cORION Digital v1.4', 'color:#6366F1;font-size:18px;font-weight:bold');
+    console.log('%cReady. Auth:', 'color:#10B981', state.user ? 'logged in' : 'not logged in');
 });
 
-function initEventListeners() {
-  // Login
-  DOM.loginForm.addEventListener('submit', handleLogin);
-
-  // Sidebar
-  DOM.sidebarToggle.addEventListener('click', toggleSidebar);
-  DOM.mobileMenuBtn.addEventListener('click', toggleMobileSidebar);
-
-  // Mode buttons
-  DOM.modeGrid.addEventListener('click', e => {
-    const btn = e.target.closest('.mode-btn');
-    if (btn) setMode(btn.dataset.mode);
-  });
-
-  // Multi-agent toggle
-  DOM.multiAgentToggle.addEventListener('click', toggleMultiAgent);
-
-  // New chat
-  DOM.newChatBtn.addEventListener('click', createNewChat);
-
-  // Logout
-  DOM.logoutBtn.addEventListener('click', handleLogout);
-
-  // Settings
-  DOM.settingsBtn.addEventListener('click', openSettings);
-  DOM.settingsClose.addEventListener('click', closeSettings);
-  DOM.settingsCancel.addEventListener('click', closeSettings);
-  DOM.settingsSave.addEventListener('click', saveSettings);
-  DOM.settingsModal.addEventListener('click', e => {
-    if (e.target === DOM.settingsModal) closeSettings();
-  });
-
-  // Message input
-  DOM.messageInput.addEventListener('input', handleInputChange);
-  DOM.messageInput.addEventListener('keydown', handleInputKeydown);
-  DOM.sendBtn.addEventListener('click', sendMessage);
-  DOM.stopBtn.addEventListener('click', stopStreaming);
-
-  // File attach
-  DOM.attachBtn.addEventListener('click', () => DOM.fileInput.click());
-  DOM.fileInput.addEventListener('change', handleFileAttach);
-
-  // Welcome chips
-  DOM.welcomeScreen.addEventListener('click', e => {
-    const chip = e.target.closest('.chip');
-    if (chip) {
-      DOM.messageInput.value = chip.dataset.prompt;
-      handleInputChange();
-      DOM.messageInput.focus();
-    }
-  });
-
-  // Ask user
-  DOM.askUserSend.addEventListener('click', handleAskUserSend);
-  DOM.askUserSkip.addEventListener('click', handleAskUserSkip);
-  DOM.askUserInput.addEventListener('keydown', e => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      handleAskUserSend();
-    }
-  });
-
-  // Mobile: close sidebar on outside click
-  document.addEventListener('click', e => {
-    if (window.innerWidth <= 768 &&
-        DOM.sidebar.classList.contains('mobile-open') &&
-        !DOM.sidebar.contains(e.target) &&
-        e.target !== DOM.mobileMenuBtn) {
-      DOM.sidebar.classList.remove('mobile-open');
-    }
-  });
-}
-
-// ══════════════════════════════════════════════════════════════
-// AUTH
-// ══════════════════════════════════════════════════════════════
-
-async function checkAuth() {
-  try {
-    const res = await authFetch(`${BACKEND}/api/auth/me`);
-    if (res.ok) {
-      const data = await res.json();
-      STATE.token = data.token || 'cookie';
-      STATE.user = data.user || data;
-      showApp();
-    } else {
-      showLogin();
-    }
-  } catch {
-    showLogin();
-  }
-}
-
-async function handleLogin(e) {
-  e.preventDefault();
-  const username = DOM.loginUsername.value.trim();
-  const password = DOM.loginPassword.value;
-
-  if (!username || !password) return;
-
-  setLoginLoading(true);
-  DOM.loginError.classList.add('hidden');
-
-  try {
-    const res = await fetch(`${BACKEND}/api/auth/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: username, password }),
-    });
-
-    const data = await res.json();
-
-    if (res.ok && data.token) {
-      STATE.token = data.token;
-      STATE.user = data.user;
-      showApp();
-    } else {
-      showLoginError(data.error || 'Неверный логин или пароль');
-    }
-  } catch (err) {
-    showLoginError('Ошибка подключения к серверу');
-  } finally {
-    setLoginLoading(false);
-  }
-}
-
-async function handleLogout() {
-  try {
-    await authFetch(`${BACKEND}/api/auth/logout`, {
-      method: 'POST',
-    });
-  } catch {}
-  STATE.token = null;
-  STATE.user = null;
-  showLogin();
-}
-
-function showLogin() {
-  DOM.loginScreen.classList.remove('hidden');
-  DOM.app.classList.add('hidden');
-  DOM.loginUsername.focus();
-}
-
-function showApp() {
-  DOM.loginScreen.classList.add('hidden');
-  DOM.app.classList.remove('hidden');
-  initApp();
-}
-
-function setLoginLoading(loading) {
-  DOM.loginBtn.disabled = loading;
-  DOM.loginBtn.querySelector('.btn-text').textContent = loading ? 'Вход...' : 'Войти';
-  DOM.loginBtn.querySelector('.btn-loader').classList.toggle('hidden', !loading);
-}
-
-function showLoginError(msg) {
-  DOM.loginError.textContent = msg;
-  DOM.loginError.classList.remove('hidden');
-}
-
-// ══════════════════════════════════════════════════════════════
-// APP INIT
-// ══════════════════════════════════════════════════════════════
-
-async function initApp() {
-  // User info
-  if (STATE.user) {
-    const name = STATE.user.name || STATE.user.username || 'User';
-    DOM.userName.textContent = name;
-    DOM.userAvatar.textContent = name[0].toUpperCase();
-    DOM.userRole.textContent = STATE.user.role === 'admin' ? 'Administrator' : 'User';
-  }
-
-  // Load settings
-  await loadSettings();
-
-  // Load chats
-  await loadChats();
-
-  // Set mode
-  setMode(STATE.orionMode, false);
-
-  // Load modes info
-  loadModesInfo();
-}
-
-async function loadSettings() {
-  try {
-    const res = await authFetch(`${BACKEND}/api/settings`);
-    if (res.ok) {
-      const data = await res.json();
-      if (data.ssh_host) DOM.sshHost.value = data.ssh_host;
-      if (data.ssh_user) DOM.sshUser.value = data.ssh_user;
-      if (data.orion_mode) STATE.orionMode = data.orion_mode;
-    }
-  } catch {}
-}
-
-async function loadModesInfo() {
-  try {
-    const res = await fetch(`${BACKEND}/api/modes`);
-    if (res.ok) {
-      const data = await res.json();
-      renderModesDetail(data.modes || []);
-      renderAgentsDetail(data.models || []);
-    }
-  } catch {}
-}
-
-// ══════════════════════════════════════════════════════════════
-// SIDEBAR
-// ══════════════════════════════════════════════════════════════
-
-function toggleSidebar() {
-  DOM.sidebar.classList.toggle('collapsed');
-}
-
-function toggleMobileSidebar() {
-  DOM.sidebar.classList.toggle('mobile-open');
-}
-
-// ══════════════════════════════════════════════════════════════
-// MODE
-// ══════════════════════════════════════════════════════════════
-
-function setMode(mode, save = true) {
-  STATE.orionMode = mode;
-  const cfg = MODE_CONFIG[mode] || MODE_CONFIG.turbo_standard;
-
-  // Update buttons
-  $$('.mode-btn').forEach(btn => {
-    btn.classList.toggle('active', btn.dataset.mode === mode);
-  });
-
-  // Update info
-  DOM.modeInfo.textContent = cfg.info;
-  DOM.currentModeLabel.textContent = cfg.label;
-  DOM.modelNameDisplay.textContent = cfg.model;
-
-  // Update cost max
-  STATE.maxCost = cfg.maxCost;
-  DOM.costMax.textContent = `/ $${cfg.maxCost.toFixed(2)}`;
-  updateCostBar();
-
-  // Update agent models for pro_premium (analyst → Sonnet)
-  updateAgentModels(mode);
-
-  if (save) saveSettingsToServer({ orion_mode: mode });
-}
-
-function updateAgentModels(mode) {
-  const analystModel = (mode === 'pro_premium') ? 'Sonnet 4.5' : 'DeepSeek V3.2';
-  const orchestratorModel = (mode.startsWith('pro')) ? 'Sonnet 4.5' : 'DeepSeek V3.2';
-
-  $$('.agent-item').forEach(item => {
-    const agent = item.dataset.agent;
-    const modelEl = item.querySelector('.agent-model');
-    if (!modelEl) return;
-    if (agent === 'designer') modelEl.textContent = 'Gemini 2.5';
-    else if (agent === 'analyst' && mode === 'pro_premium') modelEl.textContent = 'Sonnet 4.5';
-    else modelEl.textContent = 'DeepSeek V3.2';
-  });
-}
-
-// ══════════════════════════════════════════════════════════════
-// MULTI-AGENT
-// ══════════════════════════════════════════════════════════════
-
-function toggleMultiAgent() {
-  STATE.multiAgent = !STATE.multiAgent;
-  DOM.multiAgentIcon.textContent = STATE.multiAgent ? '👥' : '👤';
-  DOM.multiAgentToggle.title = STATE.multiAgent ? 'Мульти-агент: ВКЛ' : 'Мульти-агент: ВЫКЛ';
-  showToast(STATE.multiAgent ? '👥 Мульти-агент режим включён' : '👤 Одиночный режим', 'info');
-}
-
-// ══════════════════════════════════════════════════════════════
-// CHATS
-// ══════════════════════════════════════════════════════════════
-
-async function loadChats() {
-  try {
-    const res = await authFetch(`${BACKEND}/api/chats`);
-    if (res.ok) {
-      const data = await res.json();
-      STATE.chats = data.chats || [];
-      renderChatsList();
-      if (STATE.chats.length > 0) {
-        await loadChat(STATE.chats[0].id);
-      }
-    }
-  } catch {}
-}
-
-function renderChatsList() {
-  DOM.chatsList.innerHTML = '';
-  STATE.chats.forEach(chat => {
-    const item = document.createElement('div');
-    item.className = `chat-item${chat.id === STATE.currentChatId ? ' active' : ''}`;
-    item.dataset.chatId = chat.id;
-    item.innerHTML = `
-      <span class="chat-item-icon">💬</span>
-      <span class="chat-item-text">${escHtml(chat.title || 'Новый чат')}</span>
-    `;
-    item.addEventListener('click', () => loadChat(chat.id));
-    DOM.chatsList.appendChild(item);
-  });
-}
-
-async function loadChat(chatId) {
-  try {
-    const res = await authFetch(`${BACKEND}/api/chats/${chatId}`);
-    if (res.ok) {
-      const data = await res.json();
-      STATE.currentChatId = chatId;
-      STATE.messages = data.messages || [];
-      DOM.chatTitle.textContent = data.title || 'Чат';
-      renderMessages();
-      renderChatsList();
-      hideWelcome();
-    }
-  } catch {}
-}
-
-async function createNewChat() {
-  try {
-    const res = await authFetch(`${BACKEND}/api/chats`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ title: 'Новый чат' }),
-    });
-    if (res.ok) {
-      const data = await res.json();
-      STATE.currentChatId = data.chat_id || data.id;
-      STATE.messages = [];
-      DOM.chatTitle.textContent = 'Новый чат';
-      DOM.messagesList.innerHTML = '';
-      showWelcome();
-      await loadChats();
-    }
-  } catch {
-    // Fallback: just clear UI
-    STATE.currentChatId = null;
-    STATE.messages = [];
-    DOM.messagesList.innerHTML = '';
-    showWelcome();
-  }
-}
-
-// ══════════════════════════════════════════════════════════════
-// MESSAGES
-// ══════════════════════════════════════════════════════════════
-
-function renderMessages() {
-  DOM.messagesList.innerHTML = '';
-  STATE.messages.forEach(msg => {
-    if (msg.role === 'user' || msg.role === 'assistant') {
-      appendMessage(msg.role, msg.content, msg.agent);
-    }
-  });
-  scrollToBottom();
-}
-
-function appendMessage(role, content, agent = null) {
-  hideWelcome();
-
-  const msg = document.createElement('div');
-  msg.className = `message ${role}`;
-
-  const avatarContent = role === 'user'
-    ? (STATE.user?.name?.[0] || 'U').toUpperCase()
-    : '🔮';
-
-  const agentBadge = agent
-    ? `<span class="msg-agent-badge">${AGENT_CONFIG[agent]?.emoji || '🤖'} ${AGENT_CONFIG[agent]?.name || agent}</span>`
-    : '';
-
-  const time = new Date().toLocaleTimeString('ru', { hour: '2-digit', minute: '2-digit' });
-
-  msg.innerHTML = `
-    <div class="msg-avatar">${avatarContent}</div>
-    <div class="msg-content">
-      <div class="msg-bubble">${renderMarkdown(content)}</div>
-      <div class="msg-meta">
-        ${agentBadge}
-        <span>${time}</span>
-      </div>
-    </div>
-  `;
-
-  DOM.messagesList.appendChild(msg);
-  scrollToBottom();
-  return msg;
-}
-
-function appendToolEvent(toolName, detail, status = 'running', preview = '') {
-  const icons = {
-    ssh_execute: '🖥️', file_write: '📝', file_read: '📖',
-    browser_navigate: '🌐', browser_get_text: '📄', browser_check_site: '🔍',
-    browser_check_api: '🔌', web_search: '🔎', web_fetch: '📡',
-    code_interpreter: '🐍', generate_file: '📁', generate_image: '🖼️',
-    generate_design: '🎨', create_artifact: '✨', generate_chart: '📊',
-    generate_report: '📋', store_memory: '🧠', recall_memory: '💭',
-    canvas_create: '📝', task_complete: '✅', read_any_file: '📂',
-    analyze_image: '👁️', edit_image: '✏️',
-  };
-
-  const icon = icons[toolName] || '⚙️';
-  const statusClass = status === 'success' ? 'success' : status === 'error' ? 'error' : 'running';
-
-  const el = document.createElement('div');
-  el.className = `tool-event ${statusClass}`;
-  el.innerHTML = `
-    <div class="tool-event-inner">
-      <span class="tool-event-icon">${icon}</span>
-      <div style="flex:1;min-width:0">
-        <div class="tool-event-name">${toolName}</div>
-        ${detail ? `<div class="tool-event-detail">${escHtml(detail.substring(0, 100))}</div>` : ''}
-        ${preview ? `<div class="tool-event-preview">${escHtml(preview.substring(0, 200))}</div>` : ''}
-      </div>
-    </div>
-  `;
-
-  DOM.messagesList.appendChild(el);
-  scrollToBottom();
-  return el;
-}
-
-function appendTypingIndicator() {
-  const el = document.createElement('div');
-  el.className = 'message assistant';
-  el.id = 'typing-indicator';
-  el.innerHTML = `
-    <div class="msg-avatar">🔮</div>
-    <div class="msg-content">
-      <div class="msg-bubble">
-        <div class="typing-indicator">
-          <div class="typing-dot"></div>
-          <div class="typing-dot"></div>
-          <div class="typing-dot"></div>
-        </div>
-      </div>
-    </div>
-  `;
-  DOM.messagesList.appendChild(el);
-  scrollToBottom();
-  return el;
-}
-
-function removeTypingIndicator() {
-  const el = $('typing-indicator');
-  if (el) el.remove();
-}
-
-// ══════════════════════════════════════════════════════════════
-// SEND MESSAGE
-// ══════════════════════════════════════════════════════════════
-
-async function sendMessage() {
-  const text = DOM.messageInput.value.trim();
-  if (!text || STATE.isStreaming) return;
-
-  // Ensure chat exists
-  if (!STATE.currentChatId) {
-    await createNewChat();
-  }
-
-  // Append user message
-  appendMessage('user', text);
-  STATE.messages.push({ role: 'user', content: text });
-
-  // Clear input
-  DOM.messageInput.value = '';
-  handleInputChange();
-
-  // Start streaming
-  await streamResponse(text);
-}
-
-async function streamResponse(userMessage) {
-  setStreaming(true);
-  resetAgentStatuses();
-
-  const typingEl = appendTypingIndicator();
-  let assistantMsgEl = null;
-  let assistantBubble = null;
-  let fullText = '';
-  let currentToolEl = null;
-
-  STATE.abortController = new AbortController();
-
-  try {
-    const endpoint = STATE.multiAgent
-      ? `${BACKEND}/api/chat/multi-agent`
-      : `${BACKEND}/api/chat`;
-
-    const body = {
-      message: userMessage,
-      chat_id: STATE.currentChatId,
-      history: STATE.messages.slice(-10),
-      mode: STATE.orionMode,
-      multi_agent: STATE.multiAgent,
-    };
-
-    // Add file content if attached
-    if (STATE.attachedFiles.length > 0) {
-      body.file_content = STATE.attachedFiles.map(f => f.content).join('\n\n---\n\n');
-      clearAttachments();
-    }
-
-    const res = await authFetch(endpoint, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Accept': 'text/event-stream',
-      },
-      body: JSON.stringify(body),
-      signal: STATE.abortController.signal,
-    });
-
-    if (!res.ok) {
-      throw new Error(`HTTP ${res.status}`);
-    }
-
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop();
-
-      for (const line of lines) {
-        if (!line.startsWith('data: ')) continue;
-        const raw = line.slice(6).trim();
-        if (!raw || raw === '[DONE]') continue;
-
-        let event;
-        try { event = JSON.parse(raw); } catch { continue; }
-
-        await handleSSEEvent(event, {
-          typingEl,
-          getAssistantEl: () => assistantMsgEl,
-          setAssistantEl: (el, bubble) => { assistantMsgEl = el; assistantBubble = bubble; },
-          getFullText: () => fullText,
-          setFullText: t => { fullText = t; },
-          getCurrentToolEl: () => currentToolEl,
-          setCurrentToolEl: el => { currentToolEl = el; },
-        });
-      }
-    }
-
-  } catch (err) {
-    if (err.name !== 'AbortError') {
-      removeTypingIndicator();
-      appendMessage('assistant', `Ошибка: ${err.message}`);
-    }
-  } finally {
-    removeTypingIndicator();
-    if (fullText) {
-      STATE.messages.push({ role: 'assistant', content: fullText });
-      // Remove streaming cursor
-      if (assistantBubble) {
-        assistantBubble.classList.remove('streaming-cursor');
-      }
-    }
-    setStreaming(false);
-    resetAgentStatuses();
-  }
-}
-
-async function handleSSEEvent(event, ctx) {
-  const { type } = event;
-
-  switch (type) {
-    case 'intent': {
-      // Show intent badge
-      const label = event.label || event.data?.intent || '';
-      if (label) {
-        DOM.intentBadge.textContent = label;
-        DOM.intentBadge.classList.remove('hidden');
-      }
-      // Highlight suggested agents
-      const agents = event.data?.suggested_agents || [];
-      agents.forEach(a => setAgentStatus(a, 'thinking'));
-      break;
-    }
-
-    case 'ask_user': {
-      // Show ask_user modal
-      DOM.askUserQuestion.textContent = event.question || 'Уточните задачу';
-      DOM.askUserModal.classList.remove('hidden');
-      DOM.askUserInput.focus();
-      break;
-    }
-
-    case 'text_delta': {
-      ctx.typingEl?.remove?.();
-      const text = event.text || '';
-      ctx.setFullText(ctx.getFullText() + text);
-
-      if (!ctx.getAssistantEl()) {
-        const msgEl = document.createElement('div');
-        msgEl.className = 'message assistant';
-        msgEl.innerHTML = `
-          <div class="msg-avatar">🔮</div>
-          <div class="msg-content">
-            <div class="msg-bubble streaming-cursor"></div>
-            <div class="msg-meta"><span>${new Date().toLocaleTimeString('ru', {hour:'2-digit',minute:'2-digit'})}</span></div>
-          </div>
-        `;
-        DOM.messagesList.appendChild(msgEl);
-        const bubble = msgEl.querySelector('.msg-bubble');
-        ctx.setAssistantEl(msgEl, bubble);
-      }
-
-      const bubble = ctx.getAssistantEl()?.querySelector('.msg-bubble');
-      if (bubble) {
-        bubble.innerHTML = renderMarkdown(ctx.getFullText());
-        bubble.classList.add('streaming-cursor');
-      }
-      scrollToBottom();
-      break;
-    }
-
-    case 'text_complete': {
-      const content = event.content || ctx.getFullText();
-      ctx.setFullText(content);
-      const bubble = ctx.getAssistantEl()?.querySelector('.msg-bubble');
-      if (bubble) {
-        bubble.innerHTML = renderMarkdown(content);
-        bubble.classList.remove('streaming-cursor');
-      }
-      DOM.intentBadge.classList.add('hidden');
-      break;
-    }
-
-    case 'tool_start': {
-      const toolEl = appendToolEvent(event.tool, event.args_preview || '', 'running');
-      ctx.setCurrentToolEl(toolEl);
-      // Set agent active
-      const agentMap = {
-        ssh_execute: 'devops', file_write: 'developer', file_read: 'developer',
-        browser_navigate: 'tester', browser_get_text: 'tester',
-        generate_design: 'designer', generate_image: 'designer', create_artifact: 'designer',
-        web_search: 'analyst', code_interpreter: 'developer',
-      };
-      const agent = agentMap[event.tool];
-      if (agent) setAgentStatus(agent, 'active');
-      break;
-    }
-
-    case 'tool_result': {
-      const toolEl = ctx.getCurrentToolEl();
-      if (toolEl) {
-        toolEl.className = `tool-event ${event.success ? 'success' : 'error'}`;
-        const preview = toolEl.querySelector('.tool-event-preview');
-        if (preview && event.preview) {
-          preview.textContent = event.preview.substring(0, 200);
-        }
-      }
-      break;
-    }
-
-    case 'tool_calls': {
-      // Tool calls batch — show each
-      const calls = event.tool_calls || [];
-      calls.forEach(call => {
-        appendToolEvent(call.function?.name || 'tool', '', 'running');
-      });
-      break;
-    }
-
-    case 'agent_switch': {
-      const agent = event.agent;
-      if (agent) {
-        resetAgentStatuses();
-        setAgentStatus(agent, 'active');
-        const cfg = AGENT_CONFIG[agent];
-        if (cfg) {
-          DOM.chatTitle.textContent = `${cfg.emoji} ${cfg.name}`;
-        }
-      }
-      break;
-    }
-
-    case 'cost': {
-      const cost = event.cost_usd || 0;
-      STATE.sessionCost += cost;
-      updateCostBar();
-      break;
-    }
-
-    case 'error': {
-      removeTypingIndicator();
-      appendMessage('assistant', `❌ ${event.error || 'Произошла ошибка'}`);
-      break;
-    }
-
-    case 'done':
-    case 'complete': {
-      DOM.intentBadge.classList.add('hidden');
-      break;
-    }
-  }
-}
-
-// ══════════════════════════════════════════════════════════════
-// ASK USER
-// ══════════════════════════════════════════════════════════════
-
-function handleAskUserSend() {
-  const answer = DOM.askUserInput.value.trim();
-  if (!answer) return;
-  DOM.askUserModal.classList.add('hidden');
-  DOM.askUserInput.value = '';
-  // Send answer as new message
-  DOM.messageInput.value = answer;
-  sendMessage();
-}
-
-function handleAskUserSkip() {
-  DOM.askUserModal.classList.add('hidden');
-  DOM.askUserInput.value = '';
-}
-
-// ══════════════════════════════════════════════════════════════
-// STREAMING CONTROL
-// ══════════════════════════════════════════════════════════════
-
-function setStreaming(active) {
-  STATE.isStreaming = active;
-  DOM.sendBtn.disabled = active;
-  DOM.stopBtn.classList.toggle('hidden', !active);
-  DOM.messageInput.disabled = active;
-}
-
-function stopStreaming() {
-  if (STATE.abortController) {
-    STATE.abortController.abort();
-  }
-  setStreaming(false);
-  removeTypingIndicator();
-  showToast('Остановлено', 'info');
-}
-
-// ══════════════════════════════════════════════════════════════
-// AGENT STATUS
-// ══════════════════════════════════════════════════════════════
-
-function setAgentStatus(agentKey, status) {
-  const item = document.querySelector(`.agent-item[data-agent="${agentKey}"]`);
-  if (!item) return;
-  const dot = item.querySelector('.agent-status');
-  if (dot) {
-    dot.className = `agent-status ${status}`;
-  }
-  item.classList.toggle('active', status === 'active' || status === 'thinking');
-}
-
-function resetAgentStatuses() {
-  $$('.agent-item').forEach(item => {
-    item.classList.remove('active');
-    const dot = item.querySelector('.agent-status');
-    if (dot) dot.className = 'agent-status idle';
-  });
-}
-
-// ══════════════════════════════════════════════════════════════
-// COST BAR
-// ══════════════════════════════════════════════════════════════
-
-function updateCostBar() {
-  const pct = Math.min(100, (STATE.sessionCost / STATE.maxCost) * 100);
-  DOM.costFill.style.width = `${pct}%`;
-  DOM.costCurrent.textContent = `$${STATE.sessionCost.toFixed(3)}`;
-
-  DOM.costFill.classList.remove('warning', 'danger');
-  if (pct > 80) DOM.costFill.classList.add('danger');
-  else if (pct > 60) DOM.costFill.classList.add('warning');
-}
-
-// ══════════════════════════════════════════════════════════════
-// INPUT
-// ══════════════════════════════════════════════════════════════
-
-function handleInputChange() {
-  const val = DOM.messageInput.value;
-  DOM.sendBtn.disabled = !val.trim() || STATE.isStreaming;
-
-  // Auto-resize
-  DOM.messageInput.style.height = 'auto';
-  DOM.messageInput.style.height = Math.min(DOM.messageInput.scrollHeight, 200) + 'px';
-
-  // Char count
-  if (val.length > 500) {
-    DOM.charCount.textContent = val.length;
-  } else {
-    DOM.charCount.textContent = '';
-  }
-}
-
-function handleInputKeydown(e) {
-  if (e.key === 'Enter' && !e.shiftKey) {
-    e.preventDefault();
-    if (!DOM.sendBtn.disabled) sendMessage();
-  }
-}
-
-// ══════════════════════════════════════════════════════════════
-// FILE ATTACH
-// ══════════════════════════════════════════════════════════════
-
-function handleFileAttach(e) {
-  const files = Array.from(e.target.files);
-  files.forEach(file => {
-    const reader = new FileReader();
-    reader.onload = ev => {
-      STATE.attachedFiles.push({
-        name: file.name,
-        content: ev.target.result,
-        size: file.size,
-      });
-      renderAttachments();
-    };
-    reader.readAsText(file);
-  });
-  e.target.value = '';
-}
-
-function renderAttachments() {
-  let preview = document.querySelector('.attachments-preview');
-  if (!preview) {
-    preview = document.createElement('div');
-    preview.className = 'attachments-preview';
-    DOM.messageInput.parentElement.insertBefore(preview, DOM.messageInput);
-  }
-
-  preview.innerHTML = STATE.attachedFiles.map((f, i) => `
-    <div class="attachment-chip">
-      📎 ${escHtml(f.name)}
-      <button class="attachment-remove" data-idx="${i}">✕</button>
-    </div>
-  `).join('');
-
-  preview.querySelectorAll('.attachment-remove').forEach(btn => {
-    btn.addEventListener('click', () => {
-      STATE.attachedFiles.splice(parseInt(btn.dataset.idx), 1);
-      renderAttachments();
-    });
-  });
-}
-
-function clearAttachments() {
-  STATE.attachedFiles = [];
-  const preview = document.querySelector('.attachments-preview');
-  if (preview) preview.remove();
-}
-
-// ══════════════════════════════════════════════════════════════
-// SETTINGS
-// ══════════════════════════════════════════════════════════════
-
-function openSettings() {
-  DOM.settingsModal.classList.remove('hidden');
-}
-
-function closeSettings() {
-  DOM.settingsModal.classList.add('hidden');
-}
-
-async function saveSettings() {
-  const settings = {
-    ssh_host: DOM.sshHost.value.trim(),
-    ssh_user: DOM.sshUser.value.trim() || 'root',
-    ssh_pass: DOM.sshPass.value,
-    orion_mode: STATE.orionMode,
-  };
-
-  await saveSettingsToServer(settings);
-  closeSettings();
-  showToast('Настройки сохранены', 'success');
-}
-
-async function saveSettingsToServer(settings) {
-  try {
-    await authFetch(`${BACKEND}/api/settings`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(settings),
-    });
-  } catch {}
-}
-
-function renderModesDetail(modes) {
-  if (!DOM.modesDetail) return;
-  DOM.modesDetail.innerHTML = modes.map(m => `
-    <div class="mode-detail-item${m.key === STATE.orionMode ? ' active' : ''}">
-      <div style="flex:1">
-        <div class="mode-detail-label">${m.label}</div>
-        <div class="mode-detail-desc">${m.description}</div>
-      </div>
-      <div class="mode-detail-cost">$${m.max_cost_usd}</div>
-    </div>
-  `).join('');
-}
-
-function renderAgentsDetail(models) {
-  if (!DOM.agentsDetail) return;
-  DOM.agentsDetail.innerHTML = models.map(m => `
-    <div class="agent-detail-item">
-      <div style="flex:1">
-        <div style="font-weight:600;font-size:12px">${m.name}</div>
-        <div style="color:var(--text-muted);font-size:11px">${m.description}</div>
-      </div>
-      <div style="font-size:11px;color:var(--text-muted)">
-        in: $${m.input_price}/M · out: $${m.output_price}/M
-      </div>
-    </div>
-  `).join('');
-}
-
-// ══════════════════════════════════════════════════════════════
-// WELCOME
-// ══════════════════════════════════════════════════════════════
-
-function showWelcome() {
-  DOM.welcomeScreen.classList.remove('hidden');
-  DOM.chatTitle.textContent = 'Новый чат';
-  DOM.intentBadge.classList.add('hidden');
-}
-
-function hideWelcome() {
-  DOM.welcomeScreen.classList.add('hidden');
-}
-
-// ══════════════════════════════════════════════════════════════
-// SCROLL
-// ══════════════════════════════════════════════════════════════
-
-function scrollToBottom() {
-  requestAnimationFrame(() => {
-    DOM.messagesArea.scrollTop = DOM.messagesArea.scrollHeight;
-  });
-}
-
-// ══════════════════════════════════════════════════════════════
-// MARKDOWN RENDERER (lightweight)
-// ══════════════════════════════════════════════════════════════
-
-
-// ══════════════════════════════════════════════════════════════
-// SPRINT 3: ТЕМА (☀/🌙)
-// ══════════════════════════════════════════════════════════════
-
-const THEME_KEY = 'orion_theme';
-
-function initTheme() {
-  const saved = localStorage.getItem(THEME_KEY) || 'dark';
-  applyTheme(saved, false);
-}
-
-function applyTheme(theme, save = true) {
-  document.documentElement.setAttribute('data-theme', theme);
-  const btn = document.getElementById('theme-toggle');
-  if (btn) btn.textContent = theme === 'dark' ? '🌙' : '☀️';
-
-  // Переключаем highlight.js тему
-  const darkLink  = document.getElementById('hljs-theme-dark');
-  const lightLink = document.getElementById('hljs-theme-light');
-  if (darkLink)  darkLink.disabled  = (theme === 'light');
-  if (lightLink) lightLink.disabled = (theme === 'dark');
-
-  if (save) localStorage.setItem(THEME_KEY, theme);
-}
-
-function toggleTheme() {
-  const current = document.documentElement.getAttribute('data-theme') || 'dark';
-  applyTheme(current === 'dark' ? 'light' : 'dark');
-}
-
-// Инициализируем тему сразу при загрузке скрипта
-initTheme();
-
-// ══════════════════════════════════════════════════════════════
-// SPRINT 3: MARKDOWN — marked.js + highlight.js
-// ══════════════════════════════════════════════════════════════
-
-// Настраиваем marked.js с highlight.js
-function setupMarked() {
-  if (typeof marked === 'undefined') return false;
-
-  const renderer = new marked.Renderer();
-
-  // Кастомный рендер блоков кода — с заголовком и кнопкой копирования
-  renderer.code = function(code, lang) {
-    // В marked.js v9 code может быть объектом
-    if (typeof code === 'object' && code !== null) {
-      lang = code.lang || '';
-      code = code.text || '';
-    }
-    const langLabel = lang ? lang.toLowerCase() : 'code';
-    const highlighted = (typeof hljs !== 'undefined' && lang && hljs.getLanguage(lang))
-      ? hljs.highlight(code, { language: lang }).value
-      : (typeof hljs !== 'undefined' ? hljs.highlightAuto(code).value : escHtml(code));
-
-    const id = 'code-' + Math.random().toString(36).substr(2, 8);
-    return `<div class="code-block-wrap">
-  <div class="code-block-header">
-    <span class="code-lang-label">${escHtml(langLabel)}</span>
-    <button class="copy-code-btn" onclick="copyCode('${id}')">📋 Копировать</button>
-  </div>
-  <pre><code id="${id}" class="hljs language-${escHtml(langLabel)}">${highlighted}</code></pre>
-</div>`;
-  };
-
-  // Inline code
-  renderer.codespan = function(code) {
-    if (typeof code === 'object' && code !== null) code = code.text || '';
-    return `<code>${escHtml(code)}</code>`;
-  };
-
-  marked.setOptions({
-    renderer: renderer,
-    breaks: true,
-    gfm: true,
-  });
-
-  return true;
-}
-
-// Копирование кода
-window.copyCode = function(id) {
-  const el = document.getElementById(id);
-  if (!el) return;
-  const text = el.textContent || el.innerText;
-  navigator.clipboard.writeText(text).then(() => {
-    // Находим кнопку рядом с этим блоком
-    const btn = el.closest('.code-block-wrap')?.querySelector('.copy-code-btn');
-    if (btn) {
-      btn.textContent = '✅ Скопировано';
-      btn.classList.add('copied');
-      setTimeout(() => {
-        btn.textContent = '📋 Копировать';
-        btn.classList.remove('copied');
-      }, 2000);
-    }
-  }).catch(() => {
-    // Fallback для старых браузеров
-    const range = document.createRange();
-    range.selectNode(el);
-    window.getSelection().removeAllRanges();
-    window.getSelection().addRange(range);
-    document.execCommand('copy');
-    window.getSelection().removeAllRanges();
-  });
-};
-
-// ══════════════════════════════════════════════════════════════
-// SPRINT 3: renderMarkdown — используем marked.js если доступен
-// ══════════════════════════════════════════════════════════════
-
-function renderMarkdown(text) {
-  if (!text) return '';
-
-  // Используем marked.js если загружен
-  if (typeof marked !== 'undefined') {
-    // Инициализируем при первом вызове
-    if (!window._markedSetup) {
-      window._markedSetup = setupMarked();
-    }
-    try {
-      const html = marked.parse(text);
-      return html;
-    } catch (e) {
-      console.warn('marked.js error, fallback:', e);
-    }
-  }
-
-  // Fallback: собственный рендерер
-  return renderMarkdownFallback(text);
-}
-
-function renderMarkdownFallback(text) {
-  if (!text) return '';
-
-  let html = escHtml(text);
-
-  // Code blocks с кнопкой копирования
-  html = html.replace(/```(\w*)\n?([\s\S]*?)```/g, (_, lang, code) => {
-    const id = 'code-' + Math.random().toString(36).substr(2, 8);
-    const langLabel = lang || 'code';
-    return `<div class="code-block-wrap">
-  <div class="code-block-header">
-    <span class="code-lang-label">${langLabel}</span>
-    <button class="copy-code-btn" onclick="copyCode('${id}')">📋 Копировать</button>
-  </div>
-  <pre><code id="${id}" class="lang-${langLabel}">${code.trim()}</code></pre>
-</div>`;
-  });
-
-  // Inline code
-  html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
-
-  // Headers
-  html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>');
-  html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>');
-  html = html.replace(/^# (.+)$/gm, '<h1>$1</h1>');
-
-  // Bold & Italic
-  html = html.replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>');
-  html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
-  html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
-
-  // Blockquote
-  html = html.replace(/^&gt; (.+)$/gm, '<blockquote>$1</blockquote>');
-
-  // Links
-  html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
-
-  // HR
-  html = html.replace(/^---$/gm, '<hr>');
-
-  // Unordered lists
-  html = html.replace(/^[\*\-] (.+)$/gm, '<li>$1</li>');
-  html = html.replace(/(<li>.*<\/li>\n?)+/g, m => `<ul>${m}</ul>`);
-
-  // Ordered lists
-  html = html.replace(/^\d+\. (.+)$/gm, '<li>$1</li>');
-
-  // Tables
-  html = html.replace(/\|(.+)\|\n\|[-| :]+\|\n((?:\|.+\|\n?)+)/g, (_, header, rows) => {
-    const ths = header.split('|').filter(c => c.trim()).map(c => `<th>${c.trim()}</th>`).join('');
-    const trs = rows.trim().split('\n').map(row => {
-      const tds = row.split('|').filter(c => c.trim()).map(c => `<td>${c.trim()}</td>`).join('');
-      return `<tr>${tds}</tr>`;
-    }).join('');
-    return `<table><thead><tr>${ths}</tr></thead><tbody>${trs}</tbody></table>`;
-  });
-
-  // Paragraphs
-  html = html.replace(/\n\n/g, '</p><p>');
-  html = `<p>${html}</p>`;
-  html = html.replace(/\n/g, '<br>');
-
-  // Cleanup
-  html = html.replace(/<p><\/p>/g, '');
-  html = html.replace(/<p>(<h[1-6]>)/g, '$1');
-  html = html.replace(/(<\/h[1-6]>)<\/p>/g, '$1');
-  html = html.replace(/<p>(<pre>)/g, '$1');
-  html = html.replace(/(<\/pre>)<\/p>/g, '$1');
-  html = html.replace(/<p>(<ul>)/g, '$1');
-  html = html.replace(/(<\/ul>)<\/p>/g, '$1');
-  html = html.replace(/<p>(<table>)/g, '$1');
-  html = html.replace(/(<\/table>)<\/p>/g, '$1');
-  html = html.replace(/<p>(<hr>)<\/p>/g, '$1');
-  html = html.replace(/<p>(<blockquote>)/g, '$1');
-  html = html.replace(/(<\/blockquote>)<\/p>/g, '$1');
-
-  return html;
-}
-
-// ══════════════════════════════════════════════════════════════
-// TOAST
-// ══════════════════════════════════════════════════════════════
-
-function createToastContainer() {
-  if (document.getElementById('toast-container')) return;
-  const container = document.createElement('div');
-  container.className = 'toast-container';
-  container.id = 'toast-container';
-  document.body.appendChild(container);
-}
-
-function showToast(message, type = 'info', duration = 3000) {
-  const container = document.getElementById('toast-container');
-  if (!container) return;
-
-  const toast = document.createElement('div');
-  toast.className = `toast ${type}`;
-  toast.textContent = message;
-  container.appendChild(toast);
-
-  setTimeout(() => {
-    toast.style.opacity = '0';
-    toast.style.transform = 'translateX(100%)';
-    toast.style.transition = '0.3s ease';
-    setTimeout(() => toast.remove(), 300);
-  }, duration);
-}
-
-// ══════════════════════════════════════════════════════════════
-// UTILS
-// ══════════════════════════════════════════════════════════════
-
-function escHtml(str) {
-  if (!str) return '';
-  return String(str)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
-}
-
-// ══════════════════════════════════════════════════════════════
-// THEME TOGGLE (Блок 2 — Sprint 3)
-// ══════════════════════════════════════════════════════════════
-(function initTheme() {
-  var btn = document.getElementById('theme-toggle');
-  var html = document.documentElement;
-  var darkCss  = document.getElementById('hljs-theme-dark');
-  var lightCss = document.getElementById('hljs-theme-light');
-
-  function applyTheme(theme) {
-    html.setAttribute('data-theme', theme);
-    if (theme === 'light') {
-      if (darkCss)  darkCss.disabled  = true;
-      if (lightCss) lightCss.disabled = false;
-      if (btn) btn.textContent = '\u2600';
-    } else {
-      if (darkCss)  darkCss.disabled  = false;
-      if (lightCss) lightCss.disabled = true;
-      if (btn) btn.textContent = '\uD83C\uDF19';
-    }
-    localStorage.setItem('orion-theme', theme);
-  }
-
-  var saved = localStorage.getItem('orion-theme') || 'dark';
-  applyTheme(saved);
-
-  if (btn) {
-    btn.addEventListener('click', function() {
-      var current = html.getAttribute('data-theme') || 'dark';
-      applyTheme(current === 'dark' ? 'light' : 'dark');
-    });
-  }
-})();
-
-// ══════════════════════════════════════════════════════════════
-// MARKDOWN RENDER + CODE COPY (Блок 3 — Sprint 3)
-// ══════════════════════════════════════════════════════════════
-(function initMarkdown() {
-  if (typeof marked === 'undefined') return;
-
-  marked.setOptions({
-    breaks: true,
-    gfm: true
-  });
-
-  window.renderMarkdown = function(text) {
-    if (!text) return '';
-    try {
-      return marked.parse(text);
-    } catch(e) {
-      return text;
-    }
-  };
-
-  window.addCopyButtons = function(container) {
-    if (!container) return;
-    container.querySelectorAll('pre code').forEach(function(block) {
-      if (block.parentElement.querySelector('.copy-btn')) return;
-      var btn = document.createElement('button');
-      btn.className = 'copy-btn';
-      btn.textContent = 'Копировать';
-      btn.addEventListener('click', function() {
-        navigator.clipboard.writeText(block.textContent).then(function() {
-          btn.textContent = '\u2713 Скопировано';
-          setTimeout(function() { btn.textContent = 'Копировать'; }, 2000);
-        });
-      });
-      block.parentElement.style.position = 'relative';
-      block.parentElement.appendChild(btn);
-    });
-    if (typeof hljs !== 'undefined') {
-      container.querySelectorAll('pre code:not(.hljs)').forEach(function(b) {
-        hljs.highlightElement(b);
-      });
-    }
-  };
-})();
-
-// ══════════════════════════════════════════════════════════════
-// AUTO-HEIGHT TEXTAREA (Блок 3 — Sprint 3)
-// ══════════════════════════════════════════════════════════════
-document.addEventListener('DOMContentLoaded', function() {
-  var ta = document.getElementById('msgInput');
-  if (!ta) return;
-  function autoResize() {
-    ta.style.height = 'auto';
-    ta.style.height = Math.min(ta.scrollHeight, 200) + 'px';
-  }
-  ta.addEventListener('input', autoResize);
-  autoResize();
-});
+/* ── GLOBAL HELPERS (called from HTML onclick) ─────────────── */
+window.Chat = Chat;
+window.ChatList = ChatList;
+window.AdminPanel = AdminPanel;
+window.Lightbox = Lightbox;
+window.ActivityPanel = ActivityPanel;

@@ -1,301 +1,498 @@
 <!DOCTYPE html>
-<html lang="ru" data-theme="dark">
+<html lang="ru" data-theme="light">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>ORION Digital — AI Business Platform</title>
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔮</text></svg>">
-  <link rel="stylesheet" href="/style.css">
-  <!-- highlight.js — подсветка кода -->
-  <link rel="stylesheet" id="hljs-theme-dark"  href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
-  <link rel="stylesheet" id="hljs-theme-light" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css" disabled>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ORION Digital</title>
+    <link rel="manifest" href="/manifest.json">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css" id="hljs-light">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css" id="hljs-dark" disabled>
+    <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <!-- LOGIN SCREEN -->
-  <div id="login-screen" class="login-screen">
-    <div class="login-card">
-      <div class="login-logo">
-        <div class="logo-orb"></div>
-        <h1>ORION Digital</h1>
-        <p>AI Business Platform</p>
-      </div>
-      <form id="login-form" class="login-form">
-        <div class="form-group">
-          <label>Логин</label>
-          <input type="text" id="login-username" placeholder="admin" autocomplete="username" required>
+
+<!-- ==================== AUTH SCREEN ==================== -->
+<div id="auth-screen" class="auth-screen">
+    <div class="auth-card">
+        <div class="auth-logo">
+            <span class="logo-text">ORION</span>
+            <span class="logo-sub">Digital</span>
         </div>
-        <div class="form-group">
-          <label>Пароль</label>
-          <input type="password" id="login-password" placeholder="••••••••" autocomplete="current-password" required>
-        </div>
-        <div id="login-error" class="login-error hidden"></div>
-        <button type="submit" class="btn-primary btn-full" id="login-btn">
-          <span class="btn-text">Войти</span>
-          <span class="btn-loader hidden">⟳</span>
-        </button>
-      </form>
-      <div class="login-footer">ORION Digital v1.3 · Powered by DeepSeek · Gemini · Claude</div>
+        <h2 class="auth-title">Добро пожаловать</h2>
+        <p class="auth-subtitle">Войдите в систему для продолжения</p>
+        <form id="auth-form" class="auth-form">
+            <div class="form-group">
+                <label class="form-label">Логин</label>
+                <input type="text" id="auth-login" class="form-input" placeholder="Введите логин" autocomplete="username" required>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Пароль</label>
+                <div class="input-password-wrap">
+                    <input type="password" id="auth-password" class="form-input" placeholder="Введите пароль" autocomplete="current-password" required>
+                    <button type="button" class="btn-toggle-pass" id="toggle-pass">👁</button>
+                </div>
+            </div>
+            <div id="auth-error" class="auth-error hidden"></div>
+            <button type="submit" class="btn-auth" id="auth-submit">
+                <span class="btn-text">Войти</span>
+                <span class="btn-spinner hidden"></span>
+            </button>
+        </form>
     </div>
-  </div>
+</div>
 
-  <!-- MAIN APP -->
-  <div id="app" class="app hidden">
+<!-- ==================== MAIN APP ==================== -->
+<div id="app" class="app hidden">
 
-    <!-- SIDEBAR -->
+    <!-- ===== SIDEBAR ===== -->
     <aside class="sidebar" id="sidebar">
-      <div class="sidebar-header">
-        <div class="sidebar-logo">
-          <div class="logo-orb-sm"></div>
-          <span>ORION</span>
+        <!-- Sidebar Header -->
+        <div class="sidebar-header">
+            <div class="sidebar-logo">
+                <span class="logo-text">ORION</span>
+                <span class="logo-badge">Digital</span>
+            </div>
+            <button class="btn-new-chat" id="btn-new-chat">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                Новый чат
+            </button>
         </div>
-        <button class="sidebar-toggle" id="sidebar-toggle" title="Свернуть">‹</button>
-      </div>
 
-      <!-- MODE SELECTOR -->
-      <div class="mode-section">
-        <div class="mode-label">Режим</div>
-        <div class="mode-grid" id="mode-grid">
-          <button class="mode-btn active" data-mode="turbo_standard" title="Быстро и дёшево">
-            <span class="mode-icon">⚡</span>
-            <span class="mode-name">Turbo</span>
-            <span class="mode-sub">Обычный</span>
-          </button>
-          <button class="mode-btn" data-mode="turbo_premium" title="Turbo с умным общением">
-            <span class="mode-icon">⚡</span>
-            <span class="mode-name">Turbo</span>
-            <span class="mode-sub">Премиум</span>
-          </button>
-          <button class="mode-btn" data-mode="pro_standard" title="Профессиональное планирование">
-            <span class="mode-icon">🧠</span>
-            <span class="mode-name">Pro</span>
-            <span class="mode-sub">Обычный</span>
-          </button>
-          <button class="mode-btn" data-mode="pro_premium" title="Максимальное качество">
-            <span class="mode-icon">🧠</span>
-            <span class="mode-name">Pro</span>
-            <span class="mode-sub">Премиум</span>
-          </button>
+        <!-- Mode Selector -->
+        <div class="sidebar-section">
+            <div class="section-label">Режим</div>
+            <div class="mode-grid">
+                <button class="mode-btn active" data-mode="turbo_basic">
+                    <span class="mode-icon">⚡</span>
+                    <span class="mode-name">Turbo</span>
+                    <span class="mode-tier">Обычный</span>
+                </button>
+                <button class="mode-btn" data-mode="turbo_premium">
+                    <span class="mode-icon">⚡</span>
+                    <span class="mode-name">Turbo</span>
+                    <span class="mode-tier">Премиум</span>
+                </button>
+                <button class="mode-btn" data-mode="pro_basic">
+                    <span class="mode-icon">🚀</span>
+                    <span class="mode-name">Pro</span>
+                    <span class="mode-tier">Обычный</span>
+                </button>
+                <button class="mode-btn" data-mode="pro_premium">
+                    <span class="mode-icon">🚀</span>
+                    <span class="mode-name">Pro</span>
+                    <span class="mode-tier">Премиум</span>
+                </button>
+            </div>
+            <div class="mode-description" id="mode-description">
+                Быстрые ответы · DeepSeek V3 · Экономичный
+            </div>
         </div>
-        <div class="mode-info" id="mode-info">DeepSeek везде · Gemini для дизайна</div>
-      </div>
 
-      <!-- AGENTS STATUS -->
-      <div class="agents-section">
-        <div class="section-label">Агенты</div>
-        <div class="agents-list" id="agents-list">
-          <div class="agent-item" data-agent="designer">
-            <span class="agent-emoji">🎨</span>
-            <span class="agent-name">Дизайнер</span>
-            <span class="agent-model">Gemini</span>
-            <span class="agent-status idle"></span>
-          </div>
-          <div class="agent-item" data-agent="developer">
-            <span class="agent-emoji">💻</span>
-            <span class="agent-name">Разработчик</span>
-            <span class="agent-model">DeepSeek</span>
-            <span class="agent-status idle"></span>
-          </div>
-          <div class="agent-item" data-agent="devops">
-            <span class="agent-emoji">🔧</span>
-            <span class="agent-name">DevOps</span>
-            <span class="agent-model">DeepSeek</span>
-            <span class="agent-status idle"></span>
-          </div>
-          <div class="agent-item" data-agent="analyst">
-            <span class="agent-emoji">📊</span>
-            <span class="agent-name">Аналитик</span>
-            <span class="agent-model">DeepSeek</span>
-            <span class="agent-status idle"></span>
-          </div>
-          <div class="agent-item" data-agent="tester">
-            <span class="agent-emoji">🧪</span>
-            <span class="agent-name">Тестировщик</span>
-            <span class="agent-model">DeepSeek</span>
-            <span class="agent-status idle"></span>
-          </div>
-          <div class="agent-item" data-agent="integrator">
-            <span class="agent-emoji">🔌</span>
-            <span class="agent-name">Интегратор</span>
-            <span class="agent-model">DeepSeek</span>
-            <span class="agent-status idle"></span>
-          </div>
+        <!-- Budget Bar -->
+        <div class="sidebar-section">
+            <div class="budget-bar-wrap">
+                <div class="budget-label">
+                    <span>Бюджет</span>
+                    <span id="budget-text">$0.00 / $2.00</span>
+                </div>
+                <div class="budget-bar">
+                    <div class="budget-fill" id="budget-fill" style="width: 0%"></div>
+                </div>
+            </div>
         </div>
-      </div>
 
-      <!-- COST PANEL -->
-      <div class="cost-section">
-        <div class="section-label">Стоимость сессии</div>
-        <div class="cost-bar-wrap">
-          <div class="cost-bar" id="cost-bar">
-            <div class="cost-fill" id="cost-fill" style="width:0%"></div>
-          </div>
-          <div class="cost-labels">
-            <span id="cost-current">$0.000</span>
-            <span id="cost-max">/ $2.00</span>
-          </div>
+        <!-- Search -->
+        <div class="sidebar-section">
+            <div class="search-wrap">
+                <svg class="search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                <input type="text" id="chat-search" class="search-input" placeholder="Поиск чатов...">
+            </div>
         </div>
-      </div>
 
-      <!-- CHATS LIST -->
-      <div class="chats-section">
-        <div class="section-header">
-          <div class="section-label">Чаты</div>
-          <button class="btn-icon" id="new-chat-btn" title="Новый чат">+</button>
+        <!-- Chat List -->
+        <div class="chat-list-wrap" id="chat-list-wrap">
+            <div class="chat-list" id="chat-list">
+                <!-- Populated by JS -->
+            </div>
         </div>
-        <div class="chats-list" id="chats-list"></div>
-      </div>
 
-      <!-- SIDEBAR FOOTER -->
-      <div class="sidebar-footer">
-        <div class="user-info" id="user-info">
-          <div class="user-avatar" id="user-avatar">A</div>
-          <div class="user-details">
-            <div class="user-name" id="user-name">Admin</div>
-            <div class="user-role" id="user-role">Administrator</div>
-          </div>
+        <!-- Sidebar Footer -->
+        <div class="sidebar-footer">
+            <div class="user-info" id="user-info">
+                <div class="user-avatar" id="user-avatar">U</div>
+                <div class="user-details">
+                    <div class="user-name" id="user-name">Пользователь</div>
+                    <div class="user-role" id="user-role">user</div>
+                </div>
+            </div>
+            <div class="sidebar-actions">
+                <button class="btn-admin hidden" id="btn-admin" title="Панель администратора">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                    Админ
+                </button>
+                <button class="btn-icon" id="btn-theme" title="Переключить тему">☀️</button>
+                <button class="btn-icon" id="btn-settings" title="Настройки">⚙️</button>
+                <button class="btn-icon btn-logout" id="btn-logout" title="Выйти">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+                </button>
+            </div>
         </div>
-        <button class="btn-icon" id="logout-btn" title="Выйти">⏻</button>
-      </div>
     </aside>
 
-    <!-- MAIN CONTENT -->
-    <main class="main" id="main">
-
-      <!-- TOP BAR -->
-      <header class="topbar">
-        <div class="topbar-left">
-          <button class="btn-icon mobile-menu-btn" id="mobile-menu-btn">☰</button>
-          <div class="chat-title-wrap">
-            <h2 class="chat-title" id="chat-title">Новый чат</h2>
-            <div class="intent-badge hidden" id="intent-badge"></div>
-          </div>
-        </div>
-        <div class="topbar-right">
-          <div class="model-indicator" id="model-indicator">
-            <span class="model-dot"></span>
-            <span id="model-name-display">DeepSeek V3.2</span>
-          </div>
-          <button class="btn-icon" id="multi-agent-toggle" title="Мульти-агент режим">
-            <span id="multi-agent-icon">👤</span>
-          </button>
-          <!-- ☀/🌙 ПЕРЕКЛЮЧАТЕЛЬ ТЕМЫ -->
-          <button class="btn-icon theme-toggle" id="theme-toggle" title="Переключить тему">🌙</button>
-          <button class="btn-icon" id="settings-btn" title="Настройки">⚙</button>
-        </div>
-      </header>
-
-      <!-- MESSAGES AREA -->
-      <div class="messages-area" id="messages-area">
-        <div class="welcome-screen" id="welcome-screen">
-          <div class="welcome-orb"></div>
-          <h2>ORION Digital</h2>
-          <p>AI Business Platform · v1.3</p>
-          <div class="welcome-chips">
-            <button class="chip" data-prompt="Создай лендинг для SaaS продукта с красивым дизайном">🎨 Создай лендинг</button>
-            <button class="chip" data-prompt="Напиши Python скрипт для парсинга данных с сайта">💻 Напиши скрипт</button>
-            <button class="chip" data-prompt="Настрой nginx и SSL для домена example.com на сервере">🔧 Настрой сервер</button>
-            <button class="chip" data-prompt="Проанализируй рынок SaaS инструментов в России 2024">📊 Анализ рынка</button>
-            <button class="chip" data-prompt="Подключи Telegram Bot API к моему приложению">🔌 Telegram Bot</button>
-            <button class="chip" data-prompt="Протестируй мой сайт на доступность и производительность">🧪 Тест сайта</button>
-          </div>
-          <div class="welcome-models">
-            <span class="model-tag deepseek">DeepSeek V3.2</span>
-            <span class="model-tag gemini">Gemini 2.5 Pro</span>
-            <span class="model-tag sonnet">Claude Sonnet 4.6</span>
-          </div>
-        </div>
-        <div id="messages-list"></div>
-      </div>
-
-      <!-- ASK USER MODAL -->
-      <div class="ask-user-modal hidden" id="ask-user-modal">
-        <div class="ask-user-card">
-          <div class="ask-user-icon">🤔</div>
-          <div class="ask-user-question" id="ask-user-question">Уточните задачу</div>
-          <textarea class="ask-user-input" id="ask-user-input" placeholder="Ваш ответ..." rows="3"></textarea>
-          <div class="ask-user-actions">
-            <button class="btn-secondary" id="ask-user-skip">Пропустить</button>
-            <button class="btn-primary" id="ask-user-send">Ответить</button>
-          </div>
-        </div>
-      </div>
-
-      <!-- INPUT AREA -->
-      <div class="input-area">
-        <div class="input-wrap">
-          <div class="input-tools">
-            <button class="tool-btn" id="attach-btn" title="Прикрепить файл">📎</button>
-            <input type="file" id="file-input" class="hidden" multiple>
-          </div>
-          <textarea
-            id="message-input"
-            class="message-input"
-            placeholder="Напишите задачу... (Enter — отправить, Shift+Enter — новая строка)"
-            rows="1"
-          ></textarea>
-          <div class="input-actions">
-            <div class="char-count" id="char-count"></div>
-            <button class="send-btn" id="send-btn" disabled>
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <line x1="22" y1="2" x2="11" y2="13"></line>
-                <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
-              </svg>
+    <!-- ===== CHAT AREA ===== -->
+    <main class="chat-area" id="chat-area">
+        <!-- Topbar -->
+        <div class="chat-topbar">
+            <button class="btn-sidebar-toggle" id="btn-sidebar-toggle">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
             </button>
-          </div>
+            <div class="chat-title-wrap">
+                <h1 class="chat-title" id="chat-title" contenteditable="false" spellcheck="false">Новый чат</h1>
+                <button class="btn-edit-title" id="btn-edit-title" title="Переименовать">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                </button>
+            </div>
+            <div class="topbar-meta">
+                <span class="intent-badge" id="intent-badge">Общение · Быстро</span>
+                <span class="model-badge" id="model-badge">DeepSeek V3</span>
+            </div>
+            <div class="topbar-actions">
+                <button class="btn-icon" id="btn-activity-toggle" title="Активность агента">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+                </button>
+            </div>
         </div>
-        <div class="input-footer">
-          <span class="input-hint">ORION Digital · <span id="current-mode-label">Turbo Обычный</span></span>
-          <button class="stop-btn hidden" id="stop-btn">⏹ Стоп</button>
+
+        <!-- Messages -->
+        <div class="messages-wrap" id="messages-wrap">
+            <!-- Welcome Screen -->
+            <div class="welcome-screen" id="welcome-screen">
+                <div class="welcome-logo">
+                    <span class="logo-text-big">ORION</span>
+                    <span class="logo-sub-big">Digital</span>
+                </div>
+                <p class="welcome-subtitle">Мультиагентная AI-система нового поколения</p>
+                <div class="welcome-chips" id="welcome-chips">
+                    <button class="chip" data-prompt="Создай лендинг для IT-компании с современным дизайном">🎨 Создай лендинг</button>
+                    <button class="chip" data-prompt="Напиши Python скрипт для парсинга данных с сайта">🐍 Парсинг данных</button>
+                    <button class="chip" data-prompt="Настрой nginx для нового домена с SSL сертификатом">⚙️ Настрой nginx</button>
+                    <button class="chip" data-prompt="Проанализируй код и найди ошибки в моём проекте">🔍 Анализ кода</button>
+                    <button class="chip" data-prompt="Разверни Docker контейнер с PostgreSQL базой данных">🐳 Docker деплой</button>
+                    <button class="chip" data-prompt="Создай REST API на FastAPI с авторизацией JWT">🚀 REST API</button>
+                </div>
+                <div class="welcome-models">
+                    <span class="model-tag">⚡ DeepSeek V3</span>
+                    <span class="model-tag">🧠 Claude Sonnet</span>
+                    <span class="model-tag">✨ Gemini Pro</span>
+                </div>
+            </div>
+
+            <!-- Messages Container -->
+            <div class="messages-container" id="messages-container"></div>
         </div>
-      </div>
+
+        <!-- Drop Zone Overlay -->
+        <div class="drop-zone-overlay" id="drop-zone-overlay">
+            <div class="drop-zone-inner">
+                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                <p>Отпустите файл для прикрепления</p>
+            </div>
+        </div>
+
+        <!-- Input Area -->
+        <div class="input-area">
+            <!-- Attachments Preview -->
+            <div class="attachments-preview" id="attachments-preview"></div>
+
+            <!-- Input Box -->
+            <div class="input-box" id="input-box">
+                <button class="btn-attach" id="btn-attach" title="Прикрепить файл">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+                </button>
+                <input type="file" id="file-input" multiple style="display:none">
+                <textarea
+                    id="message-input"
+                    class="message-input"
+                    placeholder="Напишите сообщение... (Enter — отправить, Shift+Enter — новая строка)"
+                    rows="1"
+                ></textarea>
+                <button class="btn-send" id="btn-send" title="Отправить">
+                    <svg class="icon-send" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+                    <svg class="icon-stop hidden" width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><rect x="3" y="3" width="18" height="18" rx="2"/></svg>
+                </button>
+            </div>
+
+            <!-- Input Footer -->
+            <div class="input-footer">
+                <span id="input-footer-text">ORION Digital · Turbo Обычный · $0.00 за чат</span>
+                <span class="queue-indicator hidden" id="queue-indicator">📋 В очереди: <span id="queue-count">0</span></span>
+            </div>
+        </div>
     </main>
-  </div>
 
-  <!-- SETTINGS MODAL -->
-  <div class="modal-overlay hidden" id="settings-modal">
-    <div class="modal">
-      <div class="modal-header">
-        <h3>Настройки</h3>
-        <button class="modal-close" id="settings-close">✕</button>
-      </div>
-      <div class="modal-body">
-        <div class="settings-section">
-          <h4>SSH Сервер</h4>
-          <div class="form-row">
-            <div class="form-group">
-              <label>Host / IP</label>
-              <input type="text" id="ssh-host" placeholder="1.2.3.4">
+    <!-- ===== AGENT ACTIVITY PANEL ===== -->
+    <aside class="activity-panel" id="activity-panel">
+        <!-- Activity Header -->
+        <div class="activity-header">
+            <div class="activity-title-wrap">
+                <span class="activity-title">Активность агента</span>
+                <span class="agent-name" id="agent-name">💻 Разработчик</span>
             </div>
-            <div class="form-group">
-              <label>Пользователь</label>
-              <input type="text" id="ssh-user" placeholder="root" value="root">
+            <div class="activity-status" id="activity-status">
+                <span class="status-dot idle"></span>
+                <span class="status-text" id="status-text">Ожидает</span>
             </div>
-          </div>
-          <div class="form-group">
-            <label>Пароль</label>
-            <input type="password" id="ssh-pass" placeholder="••••••••">
-          </div>
+            <button class="btn-icon btn-collapse-activity" id="btn-collapse-activity" title="Свернуть">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+            </button>
         </div>
-        <div class="settings-section">
-          <h4>Режим работы</h4>
-          <div class="modes-detail" id="modes-detail"></div>
+
+        <!-- Task Progress -->
+        <div class="task-progress" id="task-progress">
+            <div class="progress-bar-wrap">
+                <div class="progress-bar">
+                    <div class="progress-fill" id="progress-fill" style="width: 0%"></div>
+                </div>
+                <span class="progress-label" id="progress-label">Итерация 0 / 0</span>
+            </div>
+            <div class="phase-list" id="phase-list"></div>
         </div>
-        <div class="settings-section">
-          <h4>Агенты и модели</h4>
-          <div class="agents-detail" id="agents-detail"></div>
+
+        <!-- Live Terminal -->
+        <div class="activity-log-wrap" id="activity-log-wrap">
+            <div class="activity-log" id="activity-log">
+                <div class="activity-empty">
+                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+                    <p>Активность агента появится здесь</p>
+                </div>
+            </div>
         </div>
-      </div>
-      <div class="modal-footer">
-        <button class="btn-secondary" id="settings-cancel">Отмена</button>
-        <button class="btn-primary" id="settings-save">Сохранить</button>
-      </div>
+
+        <!-- Takeover Panel -->
+        <div class="takeover-panel hidden" id="takeover-panel">
+            <div class="takeover-header">
+                <span class="takeover-icon">⚠️</span>
+                <span class="takeover-title">Агент нуждается в помощи</span>
+            </div>
+            <div class="takeover-screenshot" id="takeover-screenshot"></div>
+            <p class="takeover-desc" id="takeover-desc">Агент встретил препятствие и ожидает вашего ввода</p>
+            <div class="takeover-input-wrap">
+                <input type="text" id="takeover-input" class="takeover-input" placeholder="Введите капчу, пароль или ответ...">
+                <button class="btn-takeover-send" id="btn-takeover-send">Отправить агенту</button>
+            </div>
+        </div>
+    </aside>
+
+</div><!-- /app -->
+
+<!-- ==================== ADMIN MODAL ==================== -->
+<div class="modal-overlay hidden" id="admin-modal">
+    <div class="modal admin-modal">
+        <div class="modal-header">
+            <h2 class="modal-title">Панель администратора</h2>
+            <button class="btn-modal-close" id="btn-admin-close">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
+        </div>
+        <div class="modal-tabs">
+            <button class="tab-btn active" data-tab="users">👥 Пользователи</button>
+            <button class="tab-btn" data-tab="chats">💬 Все чаты</button>
+            <button class="tab-btn" data-tab="analytics">📊 Аналитика</button>
+        </div>
+        <div class="modal-body">
+            <!-- Users Tab -->
+            <div class="tab-content active" id="tab-users">
+                <div class="tab-toolbar">
+                    <h3>Пользователи системы</h3>
+                    <button class="btn-primary" id="btn-create-user">+ Создать пользователя</button>
+                </div>
+                <div class="table-wrap">
+                    <table class="admin-table" id="users-table">
+                        <thead>
+                            <tr>
+                                <th>Имя</th>
+                                <th>Логин</th>
+                                <th>Роль</th>
+                                <th>Создан</th>
+                                <th>Потрачено</th>
+                                <th>Лимит</th>
+                                <th>Действия</th>
+                            </tr>
+                        </thead>
+                        <tbody id="users-tbody"></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Chats Tab -->
+            <div class="tab-content" id="tab-chats">
+                <div class="tab-toolbar">
+                    <h3>Все чаты</h3>
+                    <div class="filter-wrap">
+                        <select id="filter-user" class="form-select">
+                            <option value="">Все пользователи</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="table-wrap">
+                    <table class="admin-table" id="chats-table">
+                        <thead>
+                            <tr>
+                                <th>Пользователь</th>
+                                <th>Чат</th>
+                                <th>Дата</th>
+                                <th>Сообщений</th>
+                                <th>Стоимость</th>
+                                <th>Режим</th>
+                                <th>Действия</th>
+                            </tr>
+                        </thead>
+                        <tbody id="chats-tbody"></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Analytics Tab -->
+            <div class="tab-content" id="tab-analytics">
+                <div class="analytics-stats">
+                    <div class="stat-card">
+                        <div class="stat-label">Сегодня</div>
+                        <div class="stat-value" id="stat-today">$0.00</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Неделя</div>
+                        <div class="stat-value" id="stat-week">$0.00</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Месяц</div>
+                        <div class="stat-value" id="stat-month">$0.00</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Всего запросов</div>
+                        <div class="stat-value" id="stat-total">0</div>
+                    </div>
+                </div>
+                <div class="analytics-charts">
+                    <div class="chart-card">
+                        <h4>Расходы по дням (30 дней)</h4>
+                        <canvas id="chart-daily" height="200"></canvas>
+                    </div>
+                    <div class="chart-card">
+                        <h4>Разбивка по моделям</h4>
+                        <canvas id="chart-models" height="200"></canvas>
+                    </div>
+                </div>
+                <div class="top-users-wrap">
+                    <h4>Топ пользователей по расходам</h4>
+                    <div id="top-users-list"></div>
+                </div>
+            </div>
+        </div>
     </div>
-  </div>
+</div>
 
-  <!-- marked.js — markdown рендеринг -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/9.1.6/marked.min.js"></script>
-  <!-- highlight.js — подсветка кода -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
-  <script src="/app.js"></script>
+<!-- ==================== CREATE USER MODAL ==================== -->
+<div class="modal-overlay hidden" id="create-user-modal">
+    <div class="modal modal-sm">
+        <div class="modal-header">
+            <h2 class="modal-title" id="user-modal-title">Создать пользователя</h2>
+            <button class="btn-modal-close" id="btn-user-modal-close">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
+        </div>
+        <div class="modal-body">
+            <form id="user-form">
+                <input type="hidden" id="edit-user-id">
+                <div class="form-group">
+                    <label class="form-label">Имя</label>
+                    <input type="text" id="user-form-name" class="form-input" placeholder="Полное имя">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Логин</label>
+                    <input type="text" id="user-form-login" class="form-input" placeholder="Логин" required>
+                </div>
+                <div class="form-group" id="user-form-pass-group">
+                    <label class="form-label">Пароль</label>
+                    <input type="password" id="user-form-password" class="form-input" placeholder="Пароль">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Роль</label>
+                    <select id="user-form-role" class="form-select">
+                        <option value="user">Пользователь</option>
+                        <option value="admin">Администратор</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Месячный лимит ($)</label>
+                    <input type="number" id="user-form-limit" class="form-input" placeholder="10.00" step="0.01" min="0">
+                </div>
+                <div id="user-form-error" class="auth-error hidden"></div>
+                <div class="form-actions">
+                    <button type="button" class="btn-secondary" id="btn-user-cancel">Отмена</button>
+                    <button type="submit" class="btn-primary">Сохранить</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- ==================== IMAGE LIGHTBOX ==================== -->
+<div class="lightbox hidden" id="lightbox">
+    <div class="lightbox-overlay" id="lightbox-overlay"></div>
+    <div class="lightbox-content">
+        <button class="lightbox-close" id="lightbox-close">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+        <img id="lightbox-img" src="" alt="Полный размер">
+    </div>
+</div>
+
+<!-- ==================== SETTINGS MODAL ==================== -->
+<div class="modal-overlay hidden" id="settings-modal">
+    <div class="modal modal-sm">
+        <div class="modal-header">
+            <h2 class="modal-title">Настройки</h2>
+            <button class="btn-modal-close" id="btn-settings-close">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
+        </div>
+        <div class="modal-body">
+            <div class="form-group">
+                <label class="form-label">Тема оформления</label>
+                <div class="theme-toggle-row">
+                    <button class="theme-opt active" data-theme-opt="light">☀️ Светлая</button>
+                    <button class="theme-opt" data-theme-opt="dark">🌙 Тёмная</button>
+                </div>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Размер шрифта</label>
+                <select id="font-size-select" class="form-select">
+                    <option value="14">Маленький (14px)</option>
+                    <option value="15" selected>Средний (15px)</option>
+                    <option value="16">Большой (16px)</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Отправка по Enter</label>
+                <label class="toggle-label">
+                    <input type="checkbox" id="enter-send" checked>
+                    <span class="toggle-slider"></span>
+                    <span>Enter = отправить</span>
+                </label>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ==================== TOAST NOTIFICATIONS ==================== -->
+<div class="toast-container" id="toast-container"></div>
+
+<!-- ==================== SCRIPTS ==================== -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/9.1.6/marked.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="app.js"></script>
 </body>
 </html>
