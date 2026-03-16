@@ -1886,9 +1886,14 @@ def direct_chat():
                     if ev_type in ("content", "text", "text_complete", "text_delta"):
                         assistant_content += raw_event.get("text", raw_event.get("content", ""))
 
+        except GeneratorExit:
+            pass  # Клиент отключился — не делаем yield
         except Exception as e:
             err_msg = "Ошибка агента: " + str(e)
-            yield "data: " + _json.dumps({"type": "error", "content": err_msg}) + SSE
+            try:
+                yield "data: " + _json.dumps({"type": "error", "content": err_msg}) + SSE
+            except GeneratorExit:
+                pass
             assistant_content = err_msg
         finally:
             with _agents_lock:
@@ -1907,7 +1912,7 @@ def direct_chat():
                         db3["chats"][chat_id]["updated_at"] = time.time()
                         _save_db(db3)
 
-            yield "data: " + _json.dumps({"type": "done", "chat_id": chat_id}) + SSE
+            # НЕ делаем yield в finally — это вызывает RuntimeError: generator ignored GeneratorExit
 
 
     return Response(
