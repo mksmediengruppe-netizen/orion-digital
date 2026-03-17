@@ -3094,3 +3094,339 @@ img { max-width: 100%; display: block; }
     0%, 80%, 100% { transform: scale(0.6); opacity: 0.4; }
     40% { transform: scale(1); opacity: 1; }
 }
+
+/* ═══════════════════════════════════════════════════════════
+   ORION Этап 3 — CSS для плана задачи, ask_user, multi-SSH
+   Добавить в конец /var/www/orion/frontend/style.css
+   ═══════════════════════════════════════════════════════════ */
+
+/* ── Task Plan Card ── */
+.task-plan-card {
+    background: var(--bg-main);
+    border: 1px solid var(--accent);
+    border-radius: 12px;
+    margin: 12px 0;
+    overflow: hidden;
+    animation: planSlideIn 0.3s ease;
+}
+@keyframes planSlideIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.plan-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 16px;
+    background: var(--accent-light);
+    border-bottom: 1px solid var(--border);
+    font-weight: 500;
+    font-size: 14px;
+}
+.plan-icon { font-size: 18px; }
+.plan-title { flex: 1; color: var(--text-primary); }
+.plan-mode {
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 10px;
+    background: var(--accent);
+    color: white;
+    font-weight: 500;
+}
+
+.plan-understanding {
+    padding: 10px 16px;
+    color: var(--text-secondary);
+    font-size: 13px;
+    border-bottom: 1px solid var(--border-light);
+}
+
+/* ── Plan Phases (Timeline) ── */
+.plan-phases {
+    padding: 12px 16px;
+}
+
+.plan-phase {
+    display: flex;
+    gap: 12px;
+    position: relative;
+}
+
+.plan-phase-indicator {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    width: 20px;
+    flex-shrink: 0;
+}
+
+.plan-phase-dot {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    border: 2px solid var(--border);
+    background: var(--bg-main);
+    flex-shrink: 0;
+    transition: all 0.3s;
+    z-index: 1;
+}
+
+.plan-phase-line {
+    width: 2px;
+    flex: 1;
+    background: var(--border);
+    min-height: 20px;
+    transition: background 0.3s;
+}
+
+.plan-phase-content {
+    flex: 1;
+    padding-bottom: 16px;
+}
+
+.plan-phase-name {
+    font-weight: 500;
+    font-size: 13px;
+    color: var(--text-primary);
+    margin-bottom: 2px;
+}
+
+.plan-phase-agents {
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+.plan-phase-desc {
+    font-size: 11px;
+    color: var(--text-tertiary);
+    margin-top: 2px;
+}
+
+.plan-parallel {
+    font-size: 10px;
+    color: var(--warning);
+    font-weight: 600;
+}
+
+/* Phase States */
+.plan-phase[data-status="pending"] .plan-phase-dot {
+    border-color: var(--border);
+    background: var(--bg-main);
+}
+
+.plan-phase[data-status="running"] .plan-phase-dot {
+    border-color: var(--accent);
+    background: var(--accent);
+    box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.2);
+    animation: phasePulse 1.5s ease infinite;
+}
+
+.plan-phase[data-status="running"] .plan-phase-name {
+    color: var(--accent);
+    font-weight: 600;
+}
+
+.plan-phase[data-status="running"] .plan-phase-line {
+    background: var(--accent);
+}
+
+.plan-phase[data-status="done"] .plan-phase-dot {
+    border-color: var(--success);
+    background: var(--success);
+}
+
+.plan-phase[data-status="done"] .plan-phase-dot::after {
+    content: '✓';
+    color: white;
+    font-size: 8px;
+    font-weight: bold;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    height: 100%;
+}
+
+.plan-phase[data-status="done"] .plan-phase-line {
+    background: var(--success);
+}
+
+.plan-phase[data-status="done"] .plan-phase-name {
+    color: var(--success);
+}
+
+.plan-phase[data-status="error"] .plan-phase-dot {
+    border-color: var(--danger);
+    background: var(--danger);
+}
+
+.plan-phase[data-status="error"] .plan-phase-name {
+    color: var(--danger);
+}
+
+@keyframes phasePulse {
+    0%, 100% { box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.2); }
+    50% { box-shadow: 0 0 0 8px rgba(99, 102, 241, 0.1); }
+}
+
+.plan-warnings {
+    padding: 8px 16px;
+    border-top: 1px solid var(--border-light);
+}
+.plan-warning {
+    font-size: 12px;
+    color: var(--warning);
+    padding: 2px 0;
+}
+
+.plan-time {
+    padding: 8px 16px;
+    font-size: 12px;
+    color: var(--text-tertiary);
+    border-top: 1px solid var(--border-light);
+}
+
+/* ── Ask User Card ── */
+.ask-user-card {
+    background: var(--bg-main);
+    border: 2px solid var(--warning);
+    border-radius: 12px;
+    margin: 12px 0;
+    overflow: hidden;
+    animation: planSlideIn 0.3s ease;
+}
+
+.ask-user-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 16px;
+    background: rgba(245, 158, 11, 0.08);
+    border-bottom: 1px solid rgba(245, 158, 11, 0.2);
+    font-weight: 500;
+    font-size: 13px;
+    color: var(--warning);
+}
+
+.ask-user-icon { font-size: 18px; }
+
+.ask-user-question {
+    padding: 12px 16px;
+    font-size: 14px;
+    color: var(--text-primary);
+    line-height: 1.5;
+}
+
+.ask-user-input-wrap {
+    padding: 0 16px 12px;
+}
+
+.ask-user-textarea {
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 13px;
+    font-family: inherit;
+    resize: vertical;
+    background: var(--bg-input);
+    color: var(--text-primary);
+    min-height: 44px;
+}
+.ask-user-textarea:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
+}
+
+.ask-user-actions {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+    margin-top: 8px;
+}
+
+/* ── Multi-SSH in Settings ── */
+.ssh-servers-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+}
+
+.ssh-server-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    margin-bottom: 8px;
+    transition: all 0.15s;
+}
+.ssh-server-item.active {
+    border-color: var(--success);
+    background: rgba(16, 185, 129, 0.04);
+}
+.ssh-server-item:hover {
+    border-color: var(--accent);
+}
+
+.ssh-server-name {
+    font-weight: 500;
+    font-size: 13px;
+    color: var(--text-primary);
+}
+.ssh-server-host {
+    font-size: 11px;
+    color: var(--text-tertiary);
+    font-family: var(--font-mono);
+}
+
+.ssh-server-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.ssh-active-badge {
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 10px;
+    background: var(--success);
+    color: white;
+    font-weight: 500;
+}
+
+.ssh-empty {
+    text-align: center;
+    padding: 20px;
+    color: var(--text-tertiary);
+    font-size: 13px;
+}
+
+.ssh-add-form {
+    padding: 12px;
+    background: var(--bg-hover);
+    border-radius: 8px;
+    margin-top: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+.ssh-add-form.hidden { display: none; }
+
+/* ── Utility buttons ── */
+.btn-xs {
+    padding: 2px 8px;
+    font-size: 11px;
+    border-radius: 4px;
+    border: 1px solid var(--border);
+    background: var(--bg-main);
+    cursor: pointer;
+    color: var(--text-secondary);
+}
+.btn-xs:hover { background: var(--bg-hover); }
+.btn-xs.btn-danger { color: var(--danger); border-color: var(--danger); }
+.btn-xs.btn-danger:hover { background: rgba(239,68,68,0.05); }

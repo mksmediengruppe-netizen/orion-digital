@@ -1367,6 +1367,50 @@ def send_message(chat_id):
             active_model_name = routed_model_name
         yield f"data: {json.dumps({'type': 'meta', 'variant': variant, 'model': active_model_name, 'enhanced': enhanced, 'self_check_level': self_check_level, 'agent_mode': (is_agent_task and has_ssh) or is_lite_agent, 'tier': routed_tier, 'complexity': routed_complexity})}\n\n"
 
+        # ── Orchestrator v2: определить агентов по плану ──
+        logging.info(f'[send_message] Orchestrator available: {_ORCHESTRATOR_AVAILABLE}, mode={mode}')
+        _orch_plan_send = None
+        if _ORCHESTRATOR_AVAILABLE:
+            try:
+                def _orch_llm_send(messages, model=None):
+                    import requests as _rq
+                    _llm_model = model or "deepseek/deepseek-v3.2"
+                    logging.info(f"[_orch_llm_send] Calling {_llm_model} with {len(messages)} messages")
+                    resp = _rq.post(
+                        OPENROUTER_BASE_URL,
+                        headers={"Authorization": f"Bearer {OPENROUTER_API_KEY}",
+                                 "Content-Type": "application/json"},
+                        json={"model": _llm_model, 
+                              "messages": messages, "max_tokens": 2000},
+                        timeout=30
+                    )
+                    _resp_json = resp.json()
+                    logging.info(f"[_orch_llm_send] Status: {resp.status_code}, keys: {list(_resp_json.keys())}")
+                    if "error" in _resp_json:
+                        logging.warning(f"[_orch_llm_send] API error: {_resp_json['error']}")
+                    _content = _resp_json.get("choices",[{}])[0].get("message",{}).get("content","")
+                    logging.info(f"[_orch_llm_send] Content length: {len(_content)}")
+                    return _content
+                
+                _orch_send = Orchestrator(_orch_llm_send, mode)
+                _orch_plan_send = _orch_send.plan(user_message, history, 
+                                                   has_ssh=bool(ssh_credentials.get("host")))
+                logging.info(f'[send_message] Orchestrator plan result: {_orch_plan_send}')
+                
+                # Отправить план клиенту
+                if _orch_plan_send and _orch_plan_send.get("mode") != "chat":
+                    logging.info(f"[send_message] Sending SSE task_plan event: {json.dumps(format_plan_sse(_orch_plan_send))[:200]}")
+                    yield f"data: {json.dumps(format_plan_sse(_orch_plan_send))}\n\n"
+                
+                # Переопределить модель если нужно
+                _pm = _orch_plan_send.get("primary_model", "")
+                if _pm and _pm in MODEL_MAP:
+                    agent_model = MODEL_MAP[_pm]
+                    
+            except Exception as _oe:
+                logging.warning(f"Orchestrator in send_message: {_oe}"); import traceback; logging.warning(f"Orchestrator traceback: {traceback.format_exc()}")
+        
+
         if is_lite_agent:
             # ═══ LITE AGENT MODE: File/Image generation without SSH ═══
             _lite_mode_text = 'Открываю браузер...' if is_browser_task else 'Генерирую файл...'
@@ -1415,38 +1459,6 @@ def send_message(chat_id):
                 pm = None
                 memory_context = ""
 
-            # ── Orchestrator v2: определить агентов по плану ──
-            _orch_plan_send = None
-            if _ORCHESTRATOR_AVAILABLE:
-                try:
-                    def _orch_llm_send(messages, model=None):
-                        import requests as _rq
-                        resp = _rq.post(
-                            OPENROUTER_BASE_URL + "/chat/completions",
-                            headers={"Authorization": f"Bearer {OPENROUTER_API_KEY}",
-                                     "Content-Type": "application/json"},
-                            json={"model": model or "deepseek/deepseek-v3.2", 
-                                  "messages": messages, "max_tokens": 2000},
-                            timeout=30
-                        )
-                        return resp.json().get("choices",[{}])[0].get("message",{}).get("content","")
-                    
-                    _orch_send = Orchestrator(_orch_llm_send, mode)
-                    _orch_plan_send = _orch_send.plan(user_message, history, 
-                                                       has_ssh=bool(ssh_credentials.get("host")))
-                    
-                    # Отправить план клиенту
-                    if _orch_plan_send and _orch_plan_send.get("mode") != "chat":
-                        yield f"data: {json.dumps(format_plan_sse(_orch_plan_send))}\n\n"
-                    
-                    # Переопределить модель если нужно
-                    _pm = _orch_plan_send.get("primary_model", "")
-                    if _pm and _pm in MODEL_MAP:
-                        agent_model = MODEL_MAP[_pm]
-                        
-                except Exception as _oe:
-                    logger.warning(f"Orchestrator in send_message: {_oe}")
-            
             # ── Select agent execution mode ──
             selected_agents = select_agents_for_task(user_message, mode)
             use_parallel = len(selected_agents) >= 2 and enhanced
@@ -2087,7 +2099,7 @@ def direct_chat():
                         import requests as _req
                         _model = model or "deepseek/deepseek-v3.2"
                         resp = _req.post(
-                            OPENROUTER_BASE_URL + "/chat/completions",
+                            OPENROUTER_BASE_URL,
                             headers={"Authorization": f"Bearer {OPENROUTER_API_KEY}",
                                      "Content-Type": "application/json"},
                             json={"model": _model, "messages": messages, "max_tokens": 2000},

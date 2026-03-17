@@ -1291,6 +1291,20 @@ const Chat = {
             case 'human_handoff':
                 ActivityPanel.showTakeover(evt.message || 'Агент нуждается в помощи', evt.screenshot || '');
                 break;
+            case 'task_plan':
+                // Оркестратор прислал план выполнения задачи
+                TaskPlan.show(evt);
+                break;
+            case 'phase_start':
+                TaskPlan.startPhase(evt.phase_index, evt.phase_name, evt.agents);
+                break;
+            case 'phase_complete':
+                TaskPlan.completePhase(evt.phase_index, evt.success);
+                break;
+            case 'ask_user':
+                // Агент спрашивает пользователя
+                AskUser.show(evt.question);
+                break;
             case 'error':
                 ActivityPanel.addLine('error', '❌', evt.message || evt.error || 'Ошибка');
                 break;
@@ -2567,6 +2581,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     initResizable();
 
+    MultiSSH.init();
     console.log('%cORION Digital v1.4', 'color:#6366F1;font-size:18px;font-weight:bold');
     console.log('%cReady. Auth:', 'color:#10B981', state.user ? 'logged in' : 'not logged in');
 });
@@ -2605,9 +2620,328 @@ function initResizable() {
     });
 }
 
+const TaskPlan = {
+    currentPlan: null,
+    planEl: null,
+
+    show(plan) {
+        this.currentPlan = plan;
+
+        // Если чат, не показываем план
+        if (plan.mode === 'chat' || !plan.steps || plan.steps.length <= 1) return;
+
+        // Создать элемент плана в чате
+        const container = document.querySelector('.chat-messages, #chat-messages, .messages-list, #messages-container, .messages-container');
+        if (!container) return;
+
+        const el = document.createElement('div');
+        el.className = 'task-plan-card';
+        el.id = 'task-plan-current';
+
+        // Заголовок
+        let html = `
+            <div class="plan-header">
+                <span class="plan-icon">📋</span>
+                <span class="plan-title">План выполнения</span>
+                <span class="plan-mode">${this._modeLabel(plan.mode)}</span>
+            </div>
+        `;
+
+        // Понимание задачи
+        if (plan.understanding) {
+            html += `<div class="plan-understanding">${this._escapeHtml(plan.understanding)}</div>`;
+        }
+
+        // Фазы
+        html += '<div class="plan-phases">';
+        (plan.steps || []).forEach((step, i) => {
+            const agents = (step.agents || []).map(a => this._agentEmoji(a) + ' ' + this._agentName(a)).join(', ');
+            const parallel = step.parallel ? ' <span class="plan-parallel">⚡ параллельно</span>' : '';
+            html += `
+                <div class="plan-phase" id="plan-phase-${i}" data-status="pending">
+                    <div class="plan-phase-indicator">
+                        <span class="plan-phase-dot"></span>
+                        ${i < (plan.steps.length - 1) ? '<span class="plan-phase-line"></span>' : ''}
+                    </div>
+                    <div class="plan-phase-content">
+                        <div class="plan-phase-name">${step.name}${parallel}</div>
+                        <div class="plan-phase-agents">${agents}</div>
+                        ${step.description ? `<div class="plan-phase-desc">${this._escapeHtml(step.description)}</div>` : ''}
+                    </div>
+                </div>
+            `;
+        });
+        html += '</div>';
+
+        // Предупреждения
+        if (plan.warnings && plan.warnings.length) {
+            html += '<div class="plan-warnings">';
+            plan.warnings.forEach(w => {
+                html += `<div class="plan-warning">⚠️ ${this._escapeHtml(w)}</div>`;
+            });
+            html += '</div>';
+        }
+
+        // Время
+        if (plan.estimated_time) {
+            html += `<div class="plan-time">⏱ Примерное время: ${plan.estimated_time}</div>`;
+        }
+
+        el.innerHTML = html;
+        container.appendChild(el);
+        this.planEl = el;
+
+        // Автоскролл
+        container.scrollTop = container.scrollHeight;
+    },
+
+    startPhase(index, name, agents) {
+        const phaseEl = document.getElementById(`plan-phase-${index}`);
+        if (phaseEl) {
+            phaseEl.dataset.status = 'running';
+            // Обновить все предыдущие как done (на случай пропуска)
+            for (let i = 0; i < index; i++) {
+                const prev = document.getElementById(`plan-phase-${i}`);
+                if (prev && prev.dataset.status !== 'done') prev.dataset.status = 'done';
+            }
+        }
+    },
+
+    completePhase(index, success) {
+        const phaseEl = document.getElementById(`plan-phase-${index}`);
+        if (phaseEl) {
+            phaseEl.dataset.status = success ? 'done' : 'error';
+        }
+    },
+
+    // Helpers
+    _modeLabel(mode) {
+        const labels = {
+            'single': '1 агент',
+            'multi_sequential': 'Последовательно',
+            'multi_parallel': 'Параллельно ⚡'
+        };
+        return labels[mode] || mode;
+    },
+
+    _agentEmoji(key) {
+        const emojis = { designer: '🎨', developer: '💻', devops: '🔧', integrator: '🔌', tester: '🧪', analyst: '📊' };
+        return emojis[key] || '⚡';
+    },
+
+    _agentName(key) {
+        const names = { designer: 'Дизайнер', developer: 'Разработчик', devops: 'DevOps', integrator: 'Интегратор', tester: 'Тестировщик', analyst: 'Аналитик' };
+        return names[key] || key;
+    },
+
+    _escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+};
+
+
+// ═══════════════════════════════════════════════════════════════
+// ЧАСТЬ 3: Модуль Ask User — агент спрашивает пользователя
+// ═══════════════════════════════════════════════════════════════
+
+const AskUser = {
+    show(question) {
+        // Показать вопрос в чате как специальное сообщение
+        const container = document.querySelector('.chat-messages, #chat-messages, .messages-list, #messages-container, .messages-container');
+        if (!container) return;
+
+        const el = document.createElement('div');
+        el.className = 'ask-user-card';
+        el.innerHTML = `
+            <div class="ask-user-header">
+                <span class="ask-user-icon">🤔</span>
+                <span>Агент задаёт вопрос</span>
+            </div>
+            <div class="ask-user-question">${this._escapeHtml(question)}</div>
+            <div class="ask-user-input-wrap">
+                <textarea class="ask-user-textarea" placeholder="Ваш ответ..." rows="2"></textarea>
+                <div class="ask-user-actions">
+                    <button class="btn-secondary ask-user-skip">Пропустить</button>
+                    <button class="btn-primary ask-user-send">Ответить</button>
+                </div>
+            </div>
+        `;
+
+        container.appendChild(el);
+        container.scrollTop = container.scrollHeight;
+
+        // Фокус на textarea
+        const textarea = el.querySelector('.ask-user-textarea');
+        if (textarea) textarea.focus();
+
+        // Обработчики
+        el.querySelector('.ask-user-send').addEventListener('click', () => {
+            const answer = textarea.value.trim();
+            if (answer) {
+                // Отправить ответ как обычное сообщение
+                Chat.send(answer);
+                el.remove();
+            }
+        });
+
+        el.querySelector('.ask-user-skip').addEventListener('click', () => {
+            Chat.send('[пропущено]');
+            el.remove();
+        });
+
+        // Enter для отправки
+        textarea.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                el.querySelector('.ask-user-send').click();
+            }
+        });
+    },
+
+    _escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+};
+
+
+// ═══════════════════════════════════════════════════════════════
+// ЧАСТЬ 4: Multi-SSH — поддержка нескольких серверов
+// Вставить в HTML настроек (settings modal)
+// ═══════════════════════════════════════════════════════════════
+
+const MultiSSH = {
+    servers: [],
+
+    init() {
+        // Загрузить из localStorage
+        try {
+            this.servers = JSON.parse(localStorage.getItem('orion_ssh_servers') || '[]');
+        } catch { this.servers = []; }
+    },
+
+    addServer(name, host, user, password, port) {
+        this.servers.push({
+            id: Date.now().toString(),
+            name: name || host,
+            host, user, password,
+            port: port || 22,
+            active: this.servers.length === 0  // Первый = активный
+        });
+        this.save();
+    },
+
+    removeServer(id) {
+        this.servers = this.servers.filter(s => s.id !== id);
+        this.save();
+    },
+
+    setActive(id) {
+        this.servers.forEach(s => s.active = (s.id === id));
+        this.save();
+    },
+
+    getActive() {
+        return this.servers.find(s => s.active) || this.servers[0] || null;
+    },
+
+    getAll() {
+        return this.servers;
+    },
+
+    save() {
+        localStorage.setItem('orion_ssh_servers', JSON.stringify(this.servers));
+    },
+
+    // Для отправки с сообщением — активный сервер
+    getCredentials() {
+        const active = this.getActive();
+        if (!active) return {};
+        return {
+            ssh_host: active.host,
+            ssh_user: active.user,
+            ssh_password: active.password,
+            ssh_port: active.port
+        };
+    },
+
+    // Рендер списка серверов в настройках
+    renderInSettings(container) {
+        let html = `
+            <div class="ssh-servers-list">
+                <div class="ssh-servers-header">
+                    <h4>SSH Серверы</h4>
+                    <button class="btn-sm btn-primary" onclick="MultiSSH.showAddForm()">+ Добавить</button>
+                </div>
+        `;
+
+        if (this.servers.length === 0) {
+            html += '<div class="ssh-empty">Нет серверов. Добавьте для деплоя и управления.</div>';
+        } else {
+            this.servers.forEach(s => {
+                html += `
+                    <div class="ssh-server-item ${s.active ? 'active' : ''}">
+                        <div class="ssh-server-info">
+                            <div class="ssh-server-name">${s.name}</div>
+                            <div class="ssh-server-host">${s.user}@${s.host}:${s.port}</div>
+                        </div>
+                        <div class="ssh-server-actions">
+                            ${!s.active ? `<button class="btn-xs" onclick="MultiSSH.setActive('${s.id}')">Активировать</button>` : '<span class="ssh-active-badge">Активный</span>'}
+                            <button class="btn-xs btn-danger" onclick="MultiSSH.removeServer('${s.id}'); MultiSSH.renderInSettings(this.closest('.ssh-servers-list').parentElement)">✕</button>
+                        </div>
+                    </div>
+                `;
+            });
+        }
+
+        html += `
+                <div class="ssh-add-form hidden" id="ssh-add-form">
+                    <input type="text" placeholder="Название (мой сервер)" id="ssh-add-name" class="form-input">
+                    <div style="display:flex;gap:8px">
+                        <input type="text" placeholder="IP / хост" id="ssh-add-host" class="form-input" style="flex:2">
+                        <input type="number" placeholder="22" id="ssh-add-port" class="form-input" style="flex:1" value="22">
+                    </div>
+                    <input type="text" placeholder="Пользователь (root)" id="ssh-add-user" class="form-input" value="root">
+                    <input type="password" placeholder="Пароль" id="ssh-add-pass" class="form-input">
+                    <div style="display:flex;gap:8px;justify-content:flex-end">
+                        <button class="btn-secondary btn-sm" onclick="document.getElementById('ssh-add-form').classList.add('hidden')">Отмена</button>
+                        <button class="btn-primary btn-sm" onclick="MultiSSH.saveFromForm()">Сохранить</button>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        container.innerHTML = html;
+    },
+
+    showAddForm() {
+        const form = document.getElementById('ssh-add-form');
+        if (form) form.classList.remove('hidden');
+    },
+
+    saveFromForm() {
+        const name = document.getElementById('ssh-add-name').value;
+        const host = document.getElementById('ssh-add-host').value;
+        const port = document.getElementById('ssh-add-port').value;
+        const user = document.getElementById('ssh-add-user').value;
+        const pass = document.getElementById('ssh-add-pass').value;
+        if (!host) return alert('Укажите хост');
+        this.addServer(name, host, user || 'root', pass, parseInt(port) || 22);
+        // Перерендерить
+        const container = document.querySelector('.ssh-servers-list')?.parentElement;
+        if (container) this.renderInSettings(container);
+    }
+};
+
 /* ── GLOBAL HELPERS (called from HTML onclick) ─────────────── */
 window.Chat = Chat;
 window.ChatList = ChatList;
+window.TaskPlan = TaskPlan;
+window.AskUser = AskUser;
+window.MultiSSH = MultiSSH;
 window.AdminPanel = AdminPanel;
 window.Lightbox = Lightbox;
 window.ActivityPanel = ActivityPanel;

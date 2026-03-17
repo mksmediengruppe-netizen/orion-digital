@@ -149,12 +149,16 @@ class Orchestrator:
 
         try:
             response = self.call_llm(messages, model="deepseek/deepseek-v3.2")
+            logging.info(f"[Orchestrator] LLM raw response: {response[:3000] if response else 'EMPTY'}")
             plan = self._parse_json(response)
+            logging.info(f"[Orchestrator] Parsed plan: {plan}")
             if plan:
                 self.project_context += f"\n[{time.strftime('%H:%M')}] {message[:100]}\n"
                 return plan
         except Exception as e:
-            logger.warning(f"LLM planning failed: {e}")
+            import traceback
+            logging.warning(f"LLM planning failed: {e}")
+            logging.warning(f"Orchestrator traceback: {traceback.format_exc()}")
 
         return {"mode":"single","phases":[{"name":"Выполнение","agents":["developer"],"model":"deepseek"}],
                 "primary_model":"deepseek","primary_agent":"developer","understanding":"Fallback","ask_user":None}
@@ -164,19 +168,45 @@ class Orchestrator:
         text = re.sub(r'^```json\s*','',text)
         text = re.sub(r'\s*```$','',text)
         text = re.sub(r'^```\s*','',text)
+        # Also handle ``` in middle of text
+        text = re.sub(r'```', '', text).strip()
+        logging.info(f"[Orchestrator._parse_json] Text after cleanup (first 200): {text[:200]}")
+        logging.info(f"[Orchestrator._parse_json] Text after cleanup (last 100): {text[-100:]}")
         try:
             plan = json.loads(text)
+            logging.info(f"[Orchestrator._parse_json] json.loads OK, mode={plan.get('mode')}")
             plan.setdefault("phases",[{"name":"Выполнение","agents":["developer"],"model":"deepseek"}])
             plan.setdefault("mode","single" if len(plan["phases"])==1 else "multi_sequential")
             plan.setdefault("primary_model",plan["phases"][0].get("model","deepseek"))
             plan.setdefault("primary_agent",plan["phases"][0].get("agents",["developer"])[0])
             plan.setdefault("ask_user",None)
+            # Normalize ask_user: convert objects to strings
+            if isinstance(plan.get("ask_user"), list):
+                normalized = []
+                for item in plan["ask_user"]:
+                    if isinstance(item, dict):
+                        normalized.append(item.get("question", str(item)))
+                    else:
+                        normalized.append(str(item))
+                plan["ask_user"] = normalized
             return plan
-        except json.JSONDecodeError:
+        except json.JSONDecodeError as e:
+            logging.warning(f"[Orchestrator._parse_json] JSONDecodeError: {e}")
+            logging.warning(f"[Orchestrator._parse_json] Problematic text around error: {text[max(0,e.pos-50):e.pos+50]}")
             match = re.search(r'\{[\s\S]*\}', text)
             if match:
-                try: return json.loads(match.group())
-                except: pass
+                logging.info(f"[Orchestrator._parse_json] Trying regex match ({len(match.group())} chars)")
+                try:
+                    plan = json.loads(match.group())
+                    logging.info(f"[Orchestrator._parse_json] Regex parse OK")
+                    plan.setdefault("phases",[{"name":"Выполнение","agents":["developer"],"model":"deepseek"}])
+                    plan.setdefault("mode","single" if len(plan["phases"])==1 else "multi_sequential")
+                    plan.setdefault("primary_model",plan["phases"][0].get("model","deepseek"))
+                    plan.setdefault("primary_agent",plan["phases"][0].get("agents",["developer"])[0])
+                    plan.setdefault("ask_user",None)
+                    return plan
+                except Exception as e2:
+                    logging.warning(f"[Orchestrator._parse_json] Regex parse also failed: {e2}")
             return None
 
     def update_context(self, result_summary):
