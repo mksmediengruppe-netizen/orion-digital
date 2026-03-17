@@ -1184,6 +1184,7 @@ const Messages = {
             bubble.innerHTML = this.renderMarkdown(msg.content);
             this.highlightCode(bubble);
             this.addCopyButtons(bubble);
+        this.enhanceHtmlBlocks(bubble);
             if (msg.meta) {
                 body.appendChild(bubble);
                 body.appendChild(this.renderMeta(msg.meta));
@@ -1229,10 +1230,47 @@ const Messages = {
         bubble.innerHTML = this.renderMarkdown(content);
         this.highlightCode(bubble);
         this.addCopyButtons(bubble);
+        this.enhanceHtmlBlocks(bubble);
         const body = wrapper.querySelector('.msg-body');
         if (body) {
             body.appendChild(this.renderActions(content));
         }
+    },
+
+    enhanceHtmlBlocks(messageEl) {
+        // Ищем ВСЕ pre code блоки - по классу language-html ИЛИ по содержимому
+        const allCodeBlocks = messageEl.querySelectorAll('pre code');
+        allCodeBlocks.forEach(block => {
+            // Пропускаем уже обработанные
+            if (block.closest('.artifact-card')) return;
+            const cls = block.className || '';
+            const isHtmlClass = cls.includes('language-html') || cls.includes('language-htm') || cls.includes('lang-html');
+            const rawText = block.textContent || '';
+            const isHtmlContent = rawText.length > 100 && (
+                rawText.includes('<!DOCTYPE') || rawText.includes('<!doctype') ||
+                rawText.includes('<html') || rawText.includes('<HTML')
+            );
+            if (!isHtmlClass && !isHtmlContent) return;
+            const html = rawText;
+            const wrapper = document.createElement('div');
+            wrapper.className = 'artifact-card';
+            const header = `<div class="artifact-header"><span class="artifact-title">🌐 HTML Превью</span><div class="artifact-actions"><button class="art-btn active" data-view="preview">👁 Превью</button><button class="art-btn" data-view="code">💻 Код</button><button class="art-btn" data-view="open">↗ Открыть</button></div></div>`;
+            const preview = `<div class="artifact-preview active"><iframe sandbox="allow-scripts allow-same-origin" style="width:100%;height:450px;border:none;background:#fff;border-radius:0 0 12px 12px"></iframe></div>`;
+            const codeHtml = `<div class="artifact-code">${block.parentElement.outerHTML}</div>`;
+            wrapper.innerHTML = header + preview + codeHtml;
+            wrapper.querySelectorAll('.art-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const view = btn.dataset.view;
+                    if (view === 'open') { const win = window.open('', '_blank'); win.document.write(html); win.document.close(); return; }
+                    wrapper.querySelectorAll('.art-btn').forEach(b => b.classList.remove('active'));
+                    btn.classList.add('active');
+                    wrapper.querySelector('.artifact-preview').classList.toggle('active', view === 'preview');
+                    wrapper.querySelector('.artifact-code').classList.toggle('active', view === 'code');
+                });
+            });
+            wrapper.querySelector('iframe').srcdoc = html;
+            block.parentElement.replaceWith(wrapper);
+        });
     },
 
     renderMarkdown(text) {

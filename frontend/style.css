@@ -2966,3 +2966,17 @@ img { max-width: 100%; display: block; }
     opacity: 0;
     pointer-events: none;
 }
+
+/* ── КРИТ-3: HTML Preview Artifact ───────────────────────── */
+.artifact-card { border: 1px solid var(--border); border-radius: 12px; overflow: hidden; margin: 12px 0; }
+.artifact-header { display: flex; justify-content: space-between; align-items: center; padding: 10px 16px; background: var(--bg-hover); border-bottom: 1px solid var(--border); }
+.artifact-title { font-size: 13px; font-weight: 600; color: var(--text-primary); }
+.artifact-actions { display: flex; gap: 6px; }
+.art-btn { padding: 4px 10px; border: 1px solid var(--border); border-radius: 6px; cursor: pointer; font-size: 12px; background: var(--bg-main); color: var(--text-secondary); transition: all 0.15s ease; }
+.art-btn:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-light); }
+.art-btn.active { background: var(--accent-light); border-color: var(--accent); color: var(--accent); font-weight: 600; }
+.artifact-preview { display: none; }
+.artifact-preview.active { display: block; }
+.artifact-code { display: none; }
+.artifact-code.active { display: block; }
+.artifact-code pre { margin: 0; border-radius: 0; }
