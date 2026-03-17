@@ -291,9 +291,14 @@ const Auth = {
 /* ── THEME ────────────────────────────────────────────────── */
 const Theme = {
     init() {
-        // Always start with light theme — reset any saved dark preference
-        localStorage.setItem('orion_theme', 'light');
-        this.set('light');
+        // One-time migration: reset dark theme preference
+        if (!localStorage.getItem('orion_theme_v2')) {
+            localStorage.removeItem('orion_theme');
+            localStorage.setItem('orion_theme_v2', '1');
+        }
+        const saved = localStorage.getItem('orion_theme');
+        const theme = saved || 'light';
+        this.set(theme);
     },
     toggle() {
         this.set(state.theme === 'light' ? 'dark' : 'light');
@@ -321,7 +326,7 @@ const UI = {
     },
 
     renderModes() {
-        const grid = document.querySelector('.modes-grid');
+        const grid = document.querySelector('.modes-grid, .mode-grid');
         if (!grid) return;
         grid.innerHTML = '';
         Object.entries(MODES).forEach(([key, m]) => {
@@ -393,11 +398,15 @@ const UI = {
     },
 
     updateFooterInfo() {
-        const info = document.querySelector('.input-footer-info');
+        const info = document.querySelector('.input-footer-info') || document.getElementById('input-footer-text');
         if (info) {
             const mode = MODES[state.mode];
-            info.textContent = `ORION Digital · ${mode?.label || ''} · ${Utils.formatCost(state.totalCost)} за чат`;
+            const chatCost = state.currentChatCost || 0;
+            info.textContent = `ORION Digital · ${mode?.label || ''} · $${chatCost.toFixed(3)} за чат`;
         }
+        // Also update budget elements
+        const budgetEl = document.querySelector('.sidebar-budget-current, .budget-current');
+        if (budgetEl) budgetEl.textContent = '$' + (state.currentChatCost || 0).toFixed(2);
     },
 
     updateChatTitle(title) {
@@ -409,8 +418,24 @@ const UI = {
         state.isStreaming = active;
         const sendBtn = $('btn-send');
         const stopBtn = $('btn-stop');
-        if (sendBtn) sendBtn.style.display = active ? 'none' : '';
-        if (stopBtn) stopBtn.style.display = active ? '' : 'none';
+        // Используем classList вместо style.display — класс hidden имеет !important
+        if (sendBtn) {
+            if (active) {
+                sendBtn.classList.add('hidden');
+            } else {
+                sendBtn.classList.remove('hidden');
+                sendBtn.style.display = '';
+            }
+        }
+        if (stopBtn) {
+            if (active) {
+                stopBtn.classList.remove('hidden');
+                stopBtn.style.display = 'flex';
+            } else {
+                stopBtn.classList.add('hidden');
+                stopBtn.style.display = '';
+            }
+        }
         const textarea = $('message-input');
         if (textarea) textarea.placeholder = active ? 'Можно писать — сообщение встанет в очередь...' : 'Напишите сообщение...';
     },
@@ -469,6 +494,22 @@ const UI = {
         // Stop button
         const stopBtn = $('btn-stop');
         if (stopBtn) stopBtn.addEventListener('click', () => Chat.stop());
+
+        // Settings modal
+        const settingsBtn = $('btn-settings');
+        const settingsModal = $('settings-modal');
+        const settingsClose = $('btn-settings-close');
+        if (settingsBtn && settingsModal) {
+            settingsBtn.addEventListener('click', () => settingsModal.classList.remove('hidden'));
+        }
+        if (settingsClose && settingsModal) {
+            settingsClose.addEventListener('click', () => settingsModal.classList.add('hidden'));
+        }
+        if (settingsModal) {
+            settingsModal.addEventListener('click', (e) => {
+                if (e.target === settingsModal) settingsModal.classList.add('hidden');
+            });
+        }
 
         // Attach button
         const attachBtn = $('btn-attach');
@@ -667,7 +708,8 @@ const ChatList = {
 
     async deleteChat(e, chatId) {
         e.stopPropagation();
-        if (!confirm('Удалить этот чат?')) return;
+        e.preventDefault();
+        if (!confirm('Удалить чат? Это необратимо.')) return;
         try {
             await API.delete('/chats/' + chatId);
             state.chats = state.chats.filter(c => c.id !== chatId);
@@ -701,6 +743,7 @@ const Chat = {
         state.currentChatId = null;
         state.messages = [];
         state.attachments = [];
+        state.currentChatCost = 0;
         Attachments.renderPreviews();
         UI.renderWelcome();
         UI.updateChatTitle('Новый чат');
@@ -885,6 +928,15 @@ const Chat = {
             UI.setStreaming(false);
             ActivityPanel.setStatus('done');
 
+            // Auto-generate title after first message
+            if (state.currentChatId && text) {
+                const chat = state.chats.find(c => c.id === state.currentChatId);
+                const msgCount = state.messages.filter(m => m.role === 'user').length;
+                if (chat && (chat.title === 'Новый чат' || chat.title === text.slice(0, 50)) && msgCount <= 1) {
+                    setTimeout(() => Chat.autoGenerateTitle(state.currentChatId, text), 500);
+                }
+            }
+
             // Process queue
             if (state.messageQueue.length > 0) {
                 const next = state.messageQueue.shift();
@@ -905,6 +957,7 @@ const Chat = {
             case 'done':  // backend sends {type: 'done', cost: X, tokens_in: X, tokens_out: X}
                 if (evt.cost && evt.cost > 0) {
                     state.totalCost += evt.cost;
+                    state.currentChatCost = (state.currentChatCost || 0) + evt.cost;
                     UI.updateCostBar();
                     UI.updateFooterInfo();
                     if (state.currentChatId) {
@@ -921,11 +974,24 @@ const Chat = {
             case 'thinking':
                 ActivityPanel.addLine('thinking', '🤔', evt.content || evt.text || '');
                 break;
+            case 'tool':
             case 'tool_start':
-                ActivityPanel.addLine('tool-start', this._toolEmoji(evt.tool), evt.tool + ': ' + (evt.args || ''));
+                ActivityPanel.show();
+                ActivityPanel.addLine('tool-start', this._toolEmoji(evt.tool || evt.name), (evt.tool || evt.name || 'tool') + ': ' + (evt.args ? JSON.stringify(evt.args).substring(0, 100) : ''));
                 break;
             case 'tool_result':
-                ActivityPanel.addLine('tool-result', '📄', evt.result || '', true);
+                if (evt.file_path || evt.download_url || evt.file_id) {
+                    const dlUrl = evt.download_url || evt.file_path || ('/api/files/' + evt.file_id + '/download');
+                    const dlName = evt.filename || dlUrl.split('/').pop() || 'file';
+                    const downloadBtn = document.createElement('a');
+                    downloadBtn.href = dlUrl;
+                    downloadBtn.download = dlName;
+                    downloadBtn.className = 'file-download-btn';
+                    downloadBtn.innerHTML = '📥 Скачать ' + dlName;
+                    const msgContainer = document.querySelector('#messages-container .message.ai:last-child .msg-bubble');
+                    if (msgContainer) msgContainer.appendChild(downloadBtn);
+                }
+                ActivityPanel.addLine('tool-result', '📄', evt.result || evt.output || '', true);
                 break;
             case 'code_write':
                 ActivityPanel.addCodeBlock(evt.filename || 'file', evt.content || '');
@@ -954,10 +1020,20 @@ const Chat = {
                 ActivityPanel.addLine('error', '❌', evt.message || evt.error || 'Ошибка');
                 break;
             case 'cost':
-                state.totalCost += evt.amount || 0;
-                UI.updateCostBar();
-                UI.updateFooterInfo();
-                if (state.currentChatId) ChatList.updateChatCost(state.currentChatId, evt.chat_total || state.totalCost);
+                {
+                    const costVal = evt.cost || evt.amount || 0;
+                    state.totalCost += costVal;
+                    state.currentChatCost = (state.currentChatCost || 0) + costVal;
+                    UI.updateCostBar();
+                    UI.updateFooterInfo();
+                    if (state.currentChatId) {
+                        const chatObj = state.chats.find(c => c.id === state.currentChatId);
+                        if (chatObj) {
+                            chatObj.total_cost = (chatObj.total_cost || 0) + costVal;
+                            ChatList.updateChatCost(state.currentChatId, chatObj.total_cost);
+                        }
+                    }
+                }
                 break;
             case 'title':
                 if (evt.title) {
@@ -1021,6 +1097,26 @@ const Chat = {
         } catch (e) {
             console.warn('Rename error:', e);
         }
+    },
+
+    async autoGenerateTitle(chatId, userMessage) {
+        try {
+            const res = await fetch(API_BASE + '/chat/quick', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + state.token },
+                body: JSON.stringify({
+                    message: 'Придумай короткое название (3-5 слов) для чата где пользователь спросил: "' + userMessage.substring(0, 100) + '". Ответь ТОЛЬКО названием, без кавычек и пояснений.',
+                    model: 'deepseek/deepseek-v3.2'
+                })
+            });
+            const data = await res.json();
+            const title = (data.response || data.text || data.content || '').trim().substring(0, 50);
+            if (title && title.length > 2) {
+                await this.renameChat(chatId, title);
+                const titleEl = document.querySelector('.chat-title') || document.getElementById('chat-title');
+                if (titleEl) titleEl.textContent = title;
+            }
+        } catch (e) { console.warn('Auto title failed:', e); }
     }
 };
 
@@ -2097,9 +2193,45 @@ document.addEventListener('DOMContentLoaded', () => {
     const userCancel = $('btn-user-cancel');
     if (userCancel) userCancel.addEventListener('click', () => $('user-modal').classList.add('hidden'));
 
+    initResizable();
+
     console.log('%cORION Digital v1.4', 'color:#6366F1;font-size:18px;font-weight:bold');
     console.log('%cReady. Auth:', 'color:#10B981', state.user ? 'logged in' : 'not logged in');
 });
+
+function initResizable() {
+    document.querySelectorAll('.resize-handle').forEach(handle => {
+        let startX, startWidth, target;
+        handle.addEventListener('mousedown', (e) => {
+            e.preventDefault();
+            const targetId = handle.dataset.target;
+            target = document.getElementById(targetId);
+            if (!target) return;
+            startX = e.clientX;
+            startWidth = target.offsetWidth;
+            handle.classList.add('active');
+            const onMouseMove = (e) => {
+                const delta = targetId === 'activity-panel' ? startX - e.clientX : e.clientX - startX;
+                const newWidth = Math.max(200, Math.min(600, startWidth + delta));
+                target.style.width = newWidth + 'px';
+                target.style.minWidth = newWidth + 'px';
+            };
+            const onMouseUp = () => {
+                handle.classList.remove('active');
+                document.removeEventListener('mousemove', onMouseMove);
+                document.removeEventListener('mouseup', onMouseUp);
+                localStorage.setItem('orion_' + targetId + '_width', target.style.width);
+            };
+            document.addEventListener('mousemove', onMouseMove);
+            document.addEventListener('mouseup', onMouseUp);
+        });
+    });
+    ['sidebar', 'activity-panel'].forEach(id => {
+        const saved = localStorage.getItem('orion_' + id + '_width');
+        const el = document.getElementById(id);
+        if (saved && el) { el.style.width = saved; el.style.minWidth = saved; }
+    });
+}
 
 /* ── GLOBAL HELPERS (called from HTML onclick) ─────────────── */
 window.Chat = Chat;
