@@ -995,37 +995,77 @@ const Chat = {
                 break;
             case 'meta':  // backend sends metadata at start, ignore
                 break;
+
+            // ── BUG-4 FIX: thinking ──────────────────────────────────
             case 'thinking':
+                ActivityPanel.show();
+                ActivityPanel.setStatus('running');
                 ActivityPanel.addLine('thinking', '🤔', evt.content || evt.text || '');
                 break;
+
+            // ── BUG-4 FIX: tool_start / tool ─────────────────────────
             case 'tool':
             case 'tool_start':
                 ActivityPanel.show();
+                ActivityPanel.setStatus('running');
                 ActivityPanel.addLine('tool-start', this._toolEmoji(evt.tool || evt.name), (evt.tool || evt.name || 'tool') + ': ' + (evt.args ? JSON.stringify(evt.args).substring(0, 100) : ''));
                 break;
+
+            // ── BUG-4 FIX: tool_result — backend sends evt.preview, not evt.result ──
             case 'tool_result':
-                if (evt.file_path || evt.download_url || evt.file_id) {
-                    const dlUrl = evt.download_url || evt.file_path || ('/api/files/' + evt.file_id + '/download');
-                    const dlName = evt.filename || dlUrl.split('/').pop() || 'file';
-                    const downloadBtn = document.createElement('a');
-                    downloadBtn.href = dlUrl;
-                    downloadBtn.download = dlName;
-                    downloadBtn.className = 'file-download-btn';
-                    downloadBtn.innerHTML = '📥 Скачать ' + dlName;
-                    const msgContainer = document.querySelector('#messages-container .message.ai:last-child .msg-bubble');
-                    if (msgContainer) msgContainer.appendChild(downloadBtn);
+                {
+                    // Download button for file results
+                    if (evt.file_path || evt.download_url || evt.file_id) {
+                        const dlUrl = evt.download_url || evt.file_path || ('/api/files/' + evt.file_id + '/download');
+                        const dlName = evt.filename || dlUrl.split('/').pop() || 'file';
+                        const downloadBtn = document.createElement('a');
+                        downloadBtn.href = dlUrl;
+                        downloadBtn.download = dlName;
+                        downloadBtn.className = 'file-download-btn';
+                        downloadBtn.innerHTML = '📥 Скачать ' + dlName;
+                        const msgContainer = document.querySelector('#messages-container .message.ai:last-child .msg-bubble');
+                        if (msgContainer) msgContainer.appendChild(downloadBtn);
+                    }
+                    // BUG-4 FIX: backend sends 'preview' field, also check result/output/summary/text
+                    const resultText = evt.preview || evt.summary || evt.result || evt.output || evt.text || '';
+                    const isError = evt.error || (evt.success === false);
+                    ActivityPanel.addLine(
+                        isError ? 'error' : 'tool-result',
+                        isError ? '❌' : '📄',
+                        resultText.substring(0, 300),
+                        true
+                    );
+                    // Screenshot from browser tools
+                    if (evt.screenshot) {
+                        ActivityPanel.addScreenshot(evt.url || '', evt.screenshot, evt.status || '');
+                    }
                 }
-                ActivityPanel.addLine('tool-result', '📄', evt.result || evt.output || '', true);
                 break;
+
             case 'code_write':
                 ActivityPanel.addCodeBlock(evt.filename || 'file', evt.content || '');
                 break;
+
             case 'browser_update':
                 ActivityPanel.addScreenshot(evt.url || '', evt.screenshot || '', evt.status || '');
                 break;
+
+            // ── BUG-4 FIX: agent_iteration — backend sends this, not 'iteration' ──
+            case 'agent_iteration':
+                ActivityPanel.show();
+                ActivityPanel.setStatus('running');
+                ActivityPanel.updateProgress(evt.iteration || evt.current, evt.max || evt.total, evt.steps || []);
+                ActivityPanel.addLine('iteration', '🔄', `Итерация ${evt.iteration || evt.current || '?'} / ${evt.max || evt.total || '?'}`);
+                break;
+
             case 'iteration':
                 ActivityPanel.updateProgress(evt.current, evt.total, evt.steps);
                 ActivityPanel.addLine('iteration', '🔄', `Итерация ${evt.current}/${evt.total}`);
+                break;
+
+            // ── BUG-4 FIX: self_heal — показываем в панели ───────────
+            case 'self_heal':
+                ActivityPanel.addLine('thinking', '🔁', `Самоисправление #${evt.attempt || 1}: ${evt.fix_description || 'применяю фикс...'}`);
                 break;
             case 'artifact':
                 Messages.addArtifact(aiMsgEl, evt);
@@ -1584,7 +1624,14 @@ const ActivityPanel = {
 
     clear() {
         const log = $('activity-log');
-        if (log) log.innerHTML = '';
+        if (log) {
+            log.innerHTML = '';
+            // BUG-4 FIX: restore empty placeholder
+            const emptyDiv = document.createElement('div');
+            emptyDiv.className = 'activity-empty';
+            emptyDiv.innerHTML = '<svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg><p>Активность агента появится здесь</p>';
+            log.appendChild(emptyDiv);
+        }
         state.activityLines = [];
         this.updateProgress(0, 0, []);
         this.hideTakeover();
@@ -1602,6 +1649,10 @@ const ActivityPanel = {
     addLine(type, emoji, text, collapsible = false) {
         const log = $('activity-log');
         if (!log) return;
+
+        // BUG-4 FIX: remove empty placeholder on first line
+        const emptyEl = log.querySelector('.activity-empty');
+        if (emptyEl) emptyEl.remove();
 
         const line = el('div', 'activity-line ' + type);
         const time = el('span', 'activity-time', Utils.formatTime());
@@ -1721,7 +1772,7 @@ const ActivityPanel = {
         if (!total) { progressEl.style.display = 'none'; return; }
         progressEl.style.display = '';
 
-        const fill = progressEl.querySelector('.progress-bar-fill');
+        const fill = progressEl.querySelector('.progress-fill, .progress-bar-fill') || $('progress-fill');
         const label = progressEl.querySelector('.progress-label');
         const stepsEl = progressEl.querySelector('.progress-steps');
 
