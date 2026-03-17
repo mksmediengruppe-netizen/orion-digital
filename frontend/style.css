@@ -2980,3 +2980,37 @@ img { max-width: 100%; display: block; }
 .artifact-code { display: none; }
 .artifact-code.active { display: block; }
 .artifact-code pre { margin: 0; border-radius: 0; }
+
+/* ── УЛУЧ-2: Метаданные под ответом AI (streaming) ─────── */
+.msg-meta-stream {
+    display: block;
+    font-size: 11px;
+    color: var(--text-tertiary);
+    margin-top: 4px;
+    padding: 0 4px;
+    opacity: 0.85;
+    animation: fadeIn 0.3s ease;
+}
+
+/* ── УЛУЧ-3: Инфо-бар режима ────────────────────────────── */
+.mode-info-bar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 8px;
+    margin-top: 6px;
+    font-size: 11px;
+    color: var(--text-tertiary);
+    background: var(--bg-secondary);
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    transition: opacity 0.2s ease;
+    min-height: 26px;
+}
+.mode-info-icon {
+    font-size: 13px;
+    flex-shrink: 0;
+}
+.mode-info-text {
+    line-height: 1.3;
+}

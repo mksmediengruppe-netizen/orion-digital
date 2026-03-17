@@ -1091,6 +1091,11 @@ class AgentLoop:
                 if not host or not path:
                     return {"success": False, "error": "host and path are required"}
 
+                # УЛУЧ-4: Large file write — файлы >40KB пишем по SSH чанками
+                if len(content) > 40000 and self.ssh_credentials.get("host"):
+                    logger.info(f"[large_file_write] File {path} is {len(content)} bytes, using SSH chunked write")
+                    return self._write_large_file_via_ssh(host, username, password, path, content)
+
                 # Idempotency: check if same file with same content
                 idem_key = make_file_key(host, path, content)
                 file_store = get_file_store()
@@ -1391,6 +1396,53 @@ class AgentLoop:
     def _file_write_with_retry(self, host, username, password, path, content):
         ssh = ssh_pool.get_connection(host=host, username=username, password=password)
         return ssh.file_write(path, content)
+
+    def _write_large_file_via_ssh(self, host, username, password, path, content):
+        """УЛУЧ-4: Запись большого файла (>40KB) по SSH чанками по 30000 байт.
+        Первый чанк: printf '...' > filepath
+        Остальные:   printf '...' >> filepath
+        """
+        import shlex
+        try:
+            ssh = ssh_pool.get_connection(host=host, username=username, password=password)
+            chunk_size = 30000
+            chunks = [content[i:i+chunk_size] for i in range(0, len(content), chunk_size)]
+            total_chunks = len(chunks)
+            logger.info(f"[large_file_write] Writing {len(content)} bytes in {total_chunks} chunks to {path}")
+
+            # Создаём директорию если нужно
+            dir_path = '/'.join(path.split('/')[:-1])
+            if dir_path:
+                ssh.execute_command(f"mkdir -p {shlex.quote(dir_path)}", timeout=30)
+
+            for i, chunk in enumerate(chunks):
+                # Экранируем содержимое для printf: % -> %%, \ -> \\
+                escaped = chunk.replace('\\', '\\\\').replace('%', '%%').replace("'", "'\''")
+                if i == 0:
+                    cmd = f"printf '%s' '{escaped}' > {shlex.quote(path)}"
+                else:
+                    cmd = f"printf '%s' '{escaped}' >> {shlex.quote(path)}"
+                result = ssh.execute_command(cmd, timeout=60)
+                if not result.get("success") and result.get("exit_code", 0) != 0:
+                    logger.error(f"[large_file_write] Chunk {i+1}/{total_chunks} failed: {result}")
+                    return {"success": False, "error": f"Chunk {i+1} write failed: {result.get('stderr', '')}"}
+                logger.info(f"[large_file_write] Chunk {i+1}/{total_chunks} written OK")
+
+            # Проверяем размер записанного файла
+            verify = ssh.execute_command(f"wc -c < {shlex.quote(path)}", timeout=15)
+            written_bytes = int(verify.get("stdout", "0").strip()) if verify.get("success") else 0
+            logger.info(f"[large_file_write] Done: {written_bytes} bytes written to {path}")
+
+            return {
+                "success": True,
+                "path": path,
+                "bytes_written": written_bytes,
+                "chunks": total_chunks,
+                "method": "ssh_chunked"
+            }
+        except Exception as e:
+            logger.error(f"[large_file_write] Exception: {e}")
+            return {"success": False, "error": str(e)}
 
     @retry(max_attempts=3, base_delay=1.0, max_delay=10.0, jitter=0.5,
            retryable_exceptions=(ConnectionError, TimeoutError, OSError, IOError, EOFError),

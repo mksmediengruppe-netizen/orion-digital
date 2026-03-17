@@ -17,6 +17,18 @@ const MODES = {
     'pro-premium':   { label: 'Pro Премиум',    tag: 'ELITE', desc: 'Мультиагент: Designer + Developer + DevOps одновременно.' }
 };
 
+/* ── MODE_INFO (УЛУЧ-3) ──────────────────────────────────── */
+const MODE_INFO = {
+    'turbo-basic':    { text: 'Быстрые ответы · DeepSeek V3 · Экономичный', icon: '⚡' },
+    'turbo_basic':    { text: 'Быстрые ответы · DeepSeek V3 · Экономичный', icon: '⚡' },
+    'turbo-premium':  { text: 'Sonnet общение · DeepSeek работа · Умный и дешёвый', icon: '✨' },
+    'turbo_premium':  { text: 'Sonnet общение · DeepSeek работа · Умный и дешёвый', icon: '✨' },
+    'pro-basic':      { text: 'Sonnet планирует · DeepSeek исполняет · Качество', icon: '🧠' },
+    'pro_basic':      { text: 'Sonnet планирует · DeepSeek исполняет · Качество', icon: '🧠' },
+    'pro-premium':    { text: 'Claude Sonnet 4.6 · Максимум качества', icon: '🚀' },
+    'pro_premium':    { text: 'Claude Sonnet 4.6 · Максимум качества', icon: '🚀' },
+};
+
 const WELCOME_CHIPS = [
     'Создай лендинг для SaaS продукта',
     'Разверни Docker контейнер на сервере',
@@ -339,9 +351,46 @@ const UI = {
             btn.dataset.mode = key;
             btn.innerHTML = `<span class="mode-name">${m.label}</span><span class="mode-tag">${m.tag}</span>`;
             btn.addEventListener('click', () => this.setMode(key));
+            // УЛУЧ-3: показывать MODE_INFO при наведении
+            btn.addEventListener('mouseenter', () => this.showModeInfo(key));
+            btn.addEventListener('mouseleave', () => this.showModeInfo(state.mode));
             grid.appendChild(btn);
         });
         this.updateModeDesc();
+        this.renderModeInfoBar();
+    },
+
+    renderModeInfoBar() {
+        // Используем существующий #mode-description или создаём mode-info-bar
+        let infoBar = document.getElementById('mode-info-bar') || document.getElementById('mode-description');
+        if (!infoBar) {
+            const grid = document.querySelector('.modes-grid, .mode-grid');
+            if (!grid) return;
+            infoBar = document.createElement('div');
+            infoBar.id = 'mode-info-bar';
+            infoBar.className = 'mode-info-bar';
+            grid.parentElement.insertBefore(infoBar, grid.nextSibling);
+        } else if (!infoBar.id || infoBar.id === 'mode-description') {
+            infoBar.id = 'mode-info-bar';
+            infoBar.classList.add('mode-info-bar');
+        }
+        this.showModeInfo(state.mode);
+    },
+
+    showModeInfo(key) {
+        const infoBar = document.getElementById('mode-info-bar');
+        if (!infoBar) return;
+        const info = MODE_INFO[key];
+        if (info) {
+            infoBar.innerHTML = `<span class="mode-info-icon">${info.icon}</span><span class="mode-info-text">${info.text}</span>`;
+            infoBar.style.opacity = '1';
+        } else {
+            // Fallback: показываем desc из MODES
+            const modeData = MODES[key];
+            if (modeData) {
+                infoBar.innerHTML = `<span class="mode-info-text">${modeData.desc || ''}</span>`;
+            }
+        }
     },
 
     setMode(key) {
@@ -349,6 +398,7 @@ const UI = {
         $$('.mode-btn').forEach(b => b.classList.toggle('active', b.dataset.mode === key));
         this.updateModeDesc();
         this.updateFooterInfo();
+        this.showModeInfo(key);  // УЛУЧ-3: обновить инфо-бар при выборе
     },
 
     updateModeDesc() {
@@ -467,6 +517,19 @@ const UI = {
         // Auth form
         const authForm = $('auth-form');
         if (authForm) authForm.addEventListener('submit', e => Auth.handleLogin(e));
+
+        // УЛУЧ-3: Привязываем hover к HTML-кнопкам режимов (если они уже в DOM)
+        setTimeout(() => {
+            $$('.mode-btn[data-mode]').forEach(btn => {
+                const key = btn.dataset.mode;
+                if (!btn._modeInfoBound) {
+                    btn.addEventListener('mouseenter', () => UI.showModeInfo(key));
+                    btn.addEventListener('mouseleave', () => UI.showModeInfo(state.mode));
+                    btn._modeInfoBound = true;
+                }
+            });
+            UI.renderModeInfoBar();
+        }, 100);
 
         // New chat
         const newChatBtn = $('btn-new-chat');
@@ -819,6 +882,15 @@ const Chat = {
         }
     },
 
+    smartScroll() {
+        const wrap = $('messages-wrap');
+        if (!wrap) return;
+        const isAtBottom = wrap.scrollHeight - wrap.scrollTop - wrap.clientHeight < 100;
+        if (isAtBottom) {
+            wrap.scrollTop = wrap.scrollHeight;
+        }
+    },
+
     async send() {
         const textarea = $('message-input');
         if (!textarea) return;
@@ -973,6 +1045,7 @@ const Chat = {
             case 'delta':
                 aiContent += evt.text || evt.content || evt.delta || '';
                 Messages.updateStreamContent(aiMsgEl, aiContent);
+                Chat.smartScroll();  // УЛУЧ-1: автоскролл при каждом чанке
                 break;
             case 'done':  // backend sends {type: 'done', cost: X, tokens_in: X, tokens_out: X}
                 {
@@ -990,6 +1063,20 @@ const Chat = {
                             chat.total_cost = (chat.total_cost || 0) + doneCost;
                             ChatList.updateChatCost(state.currentChatId, chat.total_cost);
                         }
+                    }
+                    // УЛУЧ-2: метаданные под ответом AI
+                    if (aiMsgEl) {
+                        const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+                        const metaDiv = document.createElement('div');
+                        metaDiv.className = 'msg-meta msg-meta-stream';
+                        const modelName = evt.model || 'DeepSeek V3';
+                        const costStr = doneCost > 0 ? '$' + doneCost.toFixed(3) : '';
+                        const tokensOut = evt.tokens_out || evt.tokens || 0;
+                        const parts = [modelName, costStr, elapsed + 'с'];
+                        if (tokensOut > 0) parts.push(tokensOut + ' токенов');
+                        metaDiv.textContent = parts.filter(Boolean).join(' · ');
+                        const msgWrapper = aiMsgEl.closest('.message') || aiMsgEl.parentElement;
+                        if (msgWrapper) msgWrapper.appendChild(metaDiv);
                     }
                 }
                 break;
