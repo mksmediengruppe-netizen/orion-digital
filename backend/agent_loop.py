@@ -874,18 +874,15 @@ CMS (Битрикс/WordPress):
 """
 
 # AGENT_SYSTEM_PROMPT_PRO - minimal prompt for smart models (Sonnet, Opus)
-AGENT_SYSTEM_PROMPT_PRO = """Ты — ORION Digital, автономный AI агент.
+AGENT_SYSTEM_PROMPT_PRO = """Ты — автономный AI агент ORION Digital.
 
-ИНСТРУМЕНТЫ: ssh_execute, file_write, file_read, http_request, browser_navigate, browser_click, browser_input, browser_screenshot, web_search, web_fetch, python_execute, ask_user.
+У тебя есть инструменты: ssh_execute, file_write, file_read, browser_navigate, browser_click, browser_fill, browser_submit, browser_screenshot, generate_image, create_artifact, generate_file, web_search, web_fetch, code_interpreter, analyze_image, ftp_upload, ftp_download, ftp_list, store_memory, recall_memory, task_complete.
 
-ЗАДАЧА: Получи задачу → выполни от начала до конца → проверь результат.
-
-ПРИНЦИПЫ:
-- Если один способ не работает — попробуй другой
-- Проверяй результат после каждого важного шага
-- Если застрял — спроси пользователя через ask_user
-
-DNS: Используй API хостинга или браузер. Справочник: /var/www/orion/backend/data/knowledge_base/hosting_universal.md
+Пользователь дал задачу. Сделай её от начала до конца.
+Сначала подумай и составь план. Потом выполняй пошагово.
+Если способ не работает — попробуй другой.
+Проверь результат перед завершением.
+Не давай инструкции пользователю — делай сам.
 """
 
 # Pro modes use minimal prompt
@@ -3449,7 +3446,8 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);
                 messages.append({"role": "user", "content": user_message})
         else:
             messages = [{"role": "system", "content": _effective_system_prompt}]
-            for msg in chat_history[-10:]:
+            _ctx_limit = 50 if self.orion_mode in PRO_MODES else 10
+            for msg in chat_history[-_ctx_limit:]:
                 messages.append({"role": msg.get("role", "user"), "content": msg.get("content", "")})
             full_message = user_message
             if file_content:
@@ -3774,6 +3772,27 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);
                             continue
                     except Exception as _ht_err:
                         logger.debug(f"memory.handle_tool error: {_ht_err}")
+
+                # ═══ ANTI-LOOP DETECTION ═══
+                _last_tools = [(a["tool"], str(a.get("args", "")))
+                               for a in self.actions_log[-3:]]
+                if len(_last_tools) == 3 and len(set(_last_tools)) == 1:
+                    # Three identical tool calls in a row — loop detected
+                    _loop_mode = getattr(self, 'orion_mode', 'turbo_standard')
+                    if _loop_mode in PRO_MODES:
+                        # Pro/Architect: warn the model to try different approach
+                        messages.append({"role": "system", "content":
+                            "СТОП. Ты зацикливаешься — вызвал один и тот же инструмент "
+                            "3 раза с тем же результатом. Попробуй ДРУГОЙ подход."})
+                        logging.warning(f"[ANTI-LOOP] Pro mode loop detected: {_last_tools[0][0]}")
+                    else:
+                        # Turbo: escalate to Sonnet
+                        self.model = "anthropic/claude-sonnet-4-20250514"
+                        messages.append({"role": "system", "content":
+                            "Предыдущий подход не сработал. Ты переключен на более "
+                            "умную модель. Проанализируй что пошло не так и "
+                            "попробуй другой способ."})
+                        logging.warning(f"[ANTI-LOOP] Turbo mode loop → escalated to Sonnet")
 
                 # Execute the tool
                 start_time = time.time()
@@ -4174,14 +4193,19 @@ class MultiAgentLoop(AgentLoop):
             })
             
             # Switch model for this phase agent
-            try:
-                from orchestrator_v2 import get_model_for_agent
-                _phase_model = get_model_for_agent(agent_key, getattr(self, '_orion_mode', 'turbo_standard'))
-                _old_model = self.model
-                self.model = _phase_model
-                _plog.info(f"[Pipeline] Phase model: {agent_key} → {_phase_model}")
-            except Exception as _me:
-                _plog.warning(f"[Pipeline] Could not switch model for {agent_key}: {_me}")
+            # For Pro/Architect: keep ONE model for entire pipeline (no switching)
+            _current_orion_mode = getattr(self, 'orion_mode', getattr(self, '_orion_mode', 'turbo_standard'))
+            if _current_orion_mode in PRO_MODES:
+                _plog.info(f"[Pipeline] Pro/Architect mode: keeping model {self.model} (no switch)")
+            else:
+                try:
+                    from orchestrator_v2 import get_model_for_agent
+                    _phase_model = get_model_for_agent(agent_key, _current_orion_mode)
+                    _old_model = self.model
+                    self.model = _phase_model
+                    _plog.info(f"[Pipeline] Phase model: {agent_key} → {_phase_model}")
+                except Exception as _me:
+                    _plog.warning(f"[Pipeline] Could not switch model for {agent_key}: {_me}")
             
             # Build phase prompt
             phase_prompt = f"""ТЕКУЩАЯ ФАЗА ({idx+1}/{total_phases}): {phase_name}

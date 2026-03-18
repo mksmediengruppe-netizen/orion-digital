@@ -60,6 +60,16 @@ from parallel_agents import ParallelAgentOrchestrator
 from project_memory import ProjectMemory
 import logging
 
+# ═══ LOGGING: File + Console ═══
+logging.basicConfig(
+    level=logging.INFO,
+    handlers=[
+        logging.FileHandler("/var/log/orion-backend.log"),
+        logging.StreamHandler()
+    ],
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s"
+)
+
 app = Flask(__name__)
 app.secret_key = secrets.token_hex(32)
 app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024  # 100MB max
@@ -1395,6 +1405,9 @@ def send_message(chat_id):
             "парсер", "бот", "скрипт", "api", "база", "домен",
         ])
     )
+    # Pro/Architect: bypass quick checks — model decides everything
+    if orion_mode in ("pro_standard", "pro_premium", "architect"):
+        _is_quick_msg = False
     
     if ssh_from_msg:
         intent = {"mode": "deploy", "reason": "SSH креденциалы в сообщении", "confidence": 1.0}
@@ -1469,7 +1482,9 @@ def send_message(chat_id):
         logging.info(f"[send_message] CRITICAL FIX: mode={mode} → lite_agent=True (agent with tools)")
 
     # Build chat history for context
-    history = [{"role": m["role"], "content": m["content"]} for m in chat["messages"][-10:]]
+    # Context: 50 messages for Pro/Architect, 10 for Turbo
+    _ctx_limit_app = 50 if orion_mode in ("pro_standard", "pro_premium", "architect") else 10
+    history = [{"role": m["role"], "content": m["content"]} for m in chat["messages"][-_ctx_limit_app:]]
 
     def generate():
         nonlocal routed_model_name, model_name, agent_model_name
@@ -2329,7 +2344,8 @@ def direct_chat():
         _save_db(db2)
 
     # Получаем историю (BUG-4 FIX: ограничиваем до 10 сообщений чтобы не переполнять контекст)
-    history = db2["chats"][chat_id]["messages"][-10:]
+    _ctx_limit_v2 = 50 if orion_mode in ("pro_standard", "pro_premium", "architect") else 10
+    history = db2["chats"][chat_id]["messages"][-_ctx_limit_v2:]
     user_settings = request.user.get("settings", {})
 
     # ── SSH credentials: from request, settings, and message text ──

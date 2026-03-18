@@ -1,29 +1,47 @@
-# ORION Digital — AI IT-Studio
+# ORION Digital — Autonomous AI IT-Studio
 
-**ORION** is an autonomous multi-agent AI system designed to independently execute web development tasks: server management, CMS administration, browser automation, and full-stack development.
+**ORION** is an autonomous multi-agent AI system that independently executes web development tasks: server management, CMS administration, browser automation, and full-stack development.
+
+**Live Demo:** [orion.mksitdev.ru](https://orion.mksitdev.ru)
+
+---
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────┐
-│                  Frontend                    │
-│        HTML + CSS + Vanilla JS               │
-│        SSE streaming, Activity Panel         │
-├─────────────────────────────────────────────┤
-│                  Backend                     │
-│        Flask + Gunicorn (Python 3.11)        │
-│        Agent Loop + Orchestrator v2          │
-├─────────────────────────────────────────────┤
-│               AI Models                      │
-│   DeepSeek V3 · Claude Sonnet · Gemini Pro   │
-│   Qwen3 · GPT-4.1                           │
-├─────────────────────────────────────────────┤
-│              Capabilities                    │
-│   SSH/FTP · Browser Automation (Playwright)  │
-│   Code Generation · Image Generation         │
-│   Bitrix/WordPress CMS · SEO · Copywriting   │
-└─────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────┐
+│                   Frontend                        │
+│          HTML + CSS + Vanilla JS                  │
+│          SSE streaming, Activity Panel            │
+├──────────────────────────────────────────────────┤
+│                   Backend                         │
+│          Flask + Gunicorn (Python 3.12)           │
+│          Agent Loop + Orchestrator v2             │
+├──────────────────────────────────────────────────┤
+│                 AI Models                         │
+│    DeepSeek V3 · Claude Sonnet · Claude Opus      │
+│    Gemini Pro · GPT-4.1                           │
+├──────────────────────────────────────────────────┤
+│                Capabilities                       │
+│    SSH/FTP · Browser Automation (Playwright)      │
+│    Code Generation · Image Generation             │
+│    Bitrix/WordPress CMS · SEO · Copywriting       │
+└──────────────────────────────────────────────────┘
 ```
+
+## Dual Prompt Architecture (BUG-11)
+
+ORION uses a **dual prompt system** that adapts to model capabilities:
+
+| Mode | Model | System Prompt | Context Window |
+|------|-------|---------------|----------------|
+| Turbo Standard | DeepSeek V3 | Full (50+ rules) | 10 messages |
+| Turbo Premium | DeepSeek V3 | Full (50+ rules) | 10 messages |
+| Pro Standard | Claude Sonnet | Minimal (20 lines) | 50 messages |
+| Pro Premium | Claude Sonnet | Minimal (20 lines) | 50 messages |
+| Architect | Claude Opus | Minimal (20 lines) | 50 messages |
+
+**Philosophy:** Trust smart models. Sonnet and Opus already know how to work with nginx, Docker, Bitrix, etc. They don't need 50 rules teaching them. DeepSeek, being weaker, still benefits from detailed instructions.
 
 ## Key Features
 
@@ -31,83 +49,105 @@
 - **Browser Automation** — Full Playwright integration: click, fill, submit, select, screenshot, login detection
 - **FTP Tools** — Direct file upload/download via `ftplib` (no SSH required)
 - **SSH Execution** — Remote command execution with auto-backup before destructive operations
+- **Anti-Loop Detection** — Detects 3 identical tool calls in a row; Pro mode warns the model, Turbo mode escalates to Sonnet
 - **Memory System** — v9 memory engine with semantic search, working memory, and aggressive context compression
 - **Solution Cache** — Learns from successful solutions and reuses patterns
 - **Cross-Learning** — Shares knowledge between agents via error patterns database
-- **Auth Flow** — Secure browser login: agent detects login forms, asks user for credentials via UI (no passwords stored in chat)
+- **Auth Flow** — Secure browser login: agent detects login forms, asks user for credentials via UI
 - **Task Planning** — Generates execution plan before starting, shows progress in Activity Panel
-- **Auto-Estimate** — `/api/estimate` endpoint for project cost estimation
+- **Chain of Thought** — Pro/Architect modes think and plan before acting (visible in Activity Panel)
+- **File Logging** — All backend activity logged to `/var/log/orion-backend.log`
 
 ## Project Structure
 
 ```
-backend/
-├── app.py                  # Flask API, routing, auth
-├── agent_loop.py           # Agent loop, tools, prompts (TOOLS_SCHEMA)
-├── orchestrator_v2.py      # Task planner, model selection, agent prompts
-├── parallel_agents.py      # Parallel/sequential agent execution
-├── browser_agent.py        # Playwright browser automation + FTP
-├── specialized_agents.py   # Agent definitions and pipelines
-├── solution_cache.py       # Successful solution caching
-├── ssh_executor.py         # SSH/SFTP execution
-├── model_router.py         # LLM model routing
-├── database.py             # SQLite database operations
-├── memory_v9/              # Memory engine
-│   ├── config.py           # Memory thresholds
-│   ├── engine.py           # Core memory engine
-│   ├── working.py          # Working memory with compression
-│   └── semantic.py         # Semantic search
-└── data/                   # Runtime data (gitignored)
-
-frontend/
-├── index.html              # Main UI
-├── app.js                  # UI logic, SSE handling, AuthForm
-└── style.css               # Styles
+orion/
+├── backend/
+│   ├── app.py                  # Flask API, routing, auth
+│   ├── agent_loop.py           # Agent loop, tools, prompts (TOOLS_SCHEMA)
+│   ├── orchestrator_v2.py      # Task planner, model selection, agent prompts
+│   ├── parallel_agents.py      # Parallel/sequential agent execution
+│   ├── browser_agent.py        # Playwright browser automation + FTP
+│   ├── specialized_agents.py   # Agent definitions and pipelines
+│   ├── solution_cache.py       # Successful solution caching
+│   ├── ssh_executor.py         # SSH/SFTP execution
+│   ├── model_router.py         # LLM model routing
+│   ├── database.py             # SQLite database operations
+│   ├── memory_v9/              # Memory engine
+│   │   ├── config.py
+│   │   ├── engine.py
+│   │   ├── working.py
+│   │   └── semantic.py
+│   └── data/
+│       └── knowledge_base/     # Hosting guides, DNS configs
+├── frontend/
+│   ├── app.js                  # SPA frontend
+│   └── index.html              # Entry point
+├── docs/
+│   └── BUG-11-report.md        # Architecture change report
+├── robots.txt                  # Allow all crawlers
+└── README.md
 ```
 
-## Deployment
+## Modes
 
-**Server:** Ubuntu 22.04 with Gunicorn + Nginx
+### Turbo (DeepSeek V3)
+Best for simple tasks. Cheap and fast. Uses detailed prompts with 50+ rules to guide the model.
+
+### Pro (Claude Sonnet)
+Best for complex tasks. Minimal prompt — the model decides how to approach the task. 5x larger context window. Chain of thought planning.
+
+### Architect (Claude Opus)
+Best for system design and architecture. Uses the most capable model with full autonomy.
+
+## Quick Start
 
 ```bash
-# Service
-sudo systemctl restart orion-api
-sudo systemctl status orion-api
+# Clone
+git clone https://github.com/mksmediengruppe-netizen/orion.git
+cd orion
 
-# Logs
-journalctl -u orion-api -n 50
+# Setup
+cd backend
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
 
-# Service file
-/etc/systemd/system/orion-api.service
+# Configure
+cp .env.example .env
+# Edit .env with your API keys
+
+# Run
+gunicorn --worker-class gthread --workers 1 --threads 8 --bind 0.0.0.0:3510 app:app
 ```
-
-## Applied Patches
-
-| Patch | Description |
-|-------|-------------|
-| A1-A3 | Brain + UI Polish |
-| A4-A6 | Orchestrator v2 |
-| A7-A9 | Frontend TaskPlan, AskUser, MultiSSH |
-| Task 1 | Browser Automation (Playwright) + FTP tools + browser_ask_auth |
-| Task 4 | Professional Developer Prompt |
-| W1-1 | Mode persistence in localStorage |
-| W1-2 | Task plan before execution |
-| W1-3 | Auto-backup before destructive operations |
-| W1-4 | Enhanced task queue UI |
-| W1-5 | Screenshot auto-analysis |
-| W2-1 | Aggressive context compression |
-| W2-2 | Activity Panel task progress |
-| W2-3 | Copywriter + SEO agent |
-| W2-4 | Auto-estimate /api/estimate |
-| W2-5 | Parallel agents improvements |
 
 ## Environment Variables
 
-```
-OPENROUTER_API_KEY=...    # LLM API access
-ANTHROPIC_API_KEY=...     # Claude models
-```
+| Variable | Description |
+|----------|-------------|
+| `OPENROUTER_API_KEY` | OpenRouter API key for model access |
+| `DATA_DIR` | Data directory path (default: `./data`) |
+| `PLAYWRIGHT_BROWSERS_PATH` | Playwright browser path |
+
+## API Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/login` | POST | User authentication |
+| `/api/chats` | GET | List user chats |
+| `/api/chats/<id>/send` | POST | Send message (SSE stream) |
+| `/api/chats/<id>/send_v2` | POST | Send message v2 (SSE stream) |
+| `/api/estimate` | POST | Project cost estimation |
+| `/api/admin/stats` | GET | Admin statistics |
 
 ## License
 
-Proprietary — MKS Mediengruppe / Netizen
+Proprietary. MKS Mediengruppe / Netizen.
+
+## Changelog
+
+- **v6.1** (2026-03-18) — Dual prompt architecture, anti-loop detection, file logging
+- **v6.0** (2026-03-17) — Creative Suite, Web Search, Memory & Projects, Canvas, Multi-Model Routing
+- **v5.0** — Browser Automation, FTP Tools, Professional Prompts
+- **v4.0** — Multi-Agent Orchestrator, Parallel Execution
+- **v3.0** — Memory v9, Solution Cache, Cross-Learning
