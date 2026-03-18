@@ -851,7 +851,52 @@ CMS (Битрикс/WordPress):
 - Каждый проект — отдельный контекст в памяти
 - Не путай доступы между проектами
 - Называй проект по домену: "проект test.blacks-art.ru"
+
+ПРАВИЛО НЕЗНАКОМОГО ХОСТИНГА:
+Если встретил хостинг которого нет в базе знаний:
+1. web_search '[название хостинга] API DNS documentation'
+2. Прочитай документацию через web_fetch [URL]
+3. Попробуй API запрос на изменение A-записи
+4. Если API не работает — зайди в панель через browser_navigate
+5. НИКОГДА не говори пользователю 'измените DNS сами' или 'не могу'
+6. Используй файл /var/www/orion/backend/data/knowledge_base/hosting_universal.md
+   как справочник по популярным хостингам (Beget, Timeweb, REG.RU, Selectel, Hetzner, DigitalOcean, Cloudflare)
+
+ПРАВИЛО НЕЗНАКОМОГО ИНТЕРФЕЙСА:
+Если зашёл на незнакомый сайт или панель управления:
+1. browser_screenshot — посмотри что на странице
+2. Проанализируй скриншот: 'Что на этой странице? Где находится [то что ищу]? Какую кнопку нажать?'
+3. browser_click на нужный элемент
+4. Повтори: скриншот → анализ → клик
+5. Максимум 10 шагов навигации
+Ты ВИДИШЬ страницу через скриншоты. Используй это.
+Не нужна документация если можешь просто посмотреть и кликнуть.
 """
+
+# AGENT_SYSTEM_PROMPT_PRO - minimal prompt for smart models (Sonnet, Opus)
+AGENT_SYSTEM_PROMPT_PRO = """Ты — ORION Digital, автономный AI агент.
+
+ИНСТРУМЕНТЫ: ssh_execute, file_write, file_read, http_request, browser_navigate, browser_click, browser_input, browser_screenshot, web_search, web_fetch, python_execute, ask_user.
+
+ЗАДАЧА: Получи задачу → выполни от начала до конца → проверь результат.
+
+ПРИНЦИПЫ:
+- Если один способ не работает — попробуй другой
+- Проверяй результат после каждого важного шага
+- Если застрял — спроси пользователя через ask_user
+
+DNS: Используй API хостинга или браузер. Справочник: /var/www/orion/backend/data/knowledge_base/hosting_universal.md
+"""
+
+# Pro modes use minimal prompt
+PRO_MODES = {"pro_standard", "pro_premium", "architect"}
+
+def get_system_prompt(orion_mode):
+    if orion_mode in PRO_MODES:
+        return AGENT_SYSTEM_PROMPT_PRO
+    return AGENT_SYSTEM_PROMPT
+
+
 
 
 
@@ -3277,7 +3322,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);
         if any(t in _msg_lower_pre for t in _code_triggers_pre):
             self._force_file_save = True
 
-        _effective_system_prompt = AGENT_SYSTEM_PROMPT
+        _effective_system_prompt = get_system_prompt(self.orion_mode)
         # BUG-4 FIX: Search Knowledge Base
         try:
             _kb_context = self._search_knowledge_base(user_message if isinstance(user_message, str) else str(user_message))
@@ -3398,7 +3443,8 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);
             except Exception as _mem_err2:
                 logger.warning(f"memory_v9 build_messages failed: {_mem_err2}")
                 messages = [{"role": "system", "content": _effective_system_prompt}]
-                for msg in chat_history[-10:]:
+                _ctx_limit = 50 if self.orion_mode in PRO_MODES else 10
+                for msg in chat_history[-_ctx_limit:]:
                     messages.append({"role": msg.get("role", "user"), "content": msg.get("content", "")})
                 messages.append({"role": "user", "content": user_message})
         else:
@@ -3508,6 +3554,11 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);
         iteration = 0
         full_response_text = ""
         heal_attempts = 0
+        # ── ANTI-LOOP: track repeated tool calls ──
+        _tool_call_history = {}  # {hash: count}
+        _consecutive_loops = 0
+        _loop_model_escalation = 0  # 0=original, 1=sonnet, 2=opus
+        _original_model = self.model
 
         while iteration < self.MAX_ITERATIONS and not self._stop_requested:
             iteration += 1
@@ -4158,7 +4209,7 @@ class MultiAgentLoop(AgentLoop):
                 pass
             
             # Build messages for this phase
-            system_prompt = AGENT_SYSTEM_PROMPT
+            system_prompt = get_system_prompt(getattr(self, "orion_mode", "turbo_standard"))
             if agent_prompt_extra:
                 system_prompt += "\n\n" + agent_prompt_extra
             if hasattr(self, '_orchestrator_prompt') and self._orchestrator_prompt:
@@ -4395,6 +4446,60 @@ class MultiAgentLoop(AgentLoop):
                         "success": result.get("success", False),
                         "elapsed": elapsed
                     })
+                    # BUG-11 FIX: Anti-loop detection
+                    import hashlib as _hl
+                    _tc_key = tool_name + ":" + str(sorted(tool_args.items()) if isinstance(tool_args, dict) else str(tool_args))
+                    _tc_hash = _hl.md5(_tc_key.encode()).hexdigest()[:8]
+                    if not hasattr(self, "_loop_counter"):
+                        self._loop_counter = {}
+                    self._loop_counter[_tc_hash] = self._loop_counter.get(_tc_hash, 0) + 1
+                    _repeat_count = self._loop_counter[_tc_hash]
+                    if _repeat_count >= 3:
+                        _current_model = self.model
+                        _fallback = ["anthropic/claude-sonnet-4-5", "anthropic/claude-opus-4-5", "openai/gpt-4o"]
+                        _new_model = next((m for m in _fallback if m != _current_model), _fallback[0])
+                        logging.warning("[AntiLoop] " + tool_name + " repeated " + str(_repeat_count) + "x! Switching model " + _current_model + " -> " + _new_model)
+                        self.model = _new_model
+                        messages.append({"role": "system", "content": "ВНИМАНИЕ: Ты уже вызывал инструмент '" + tool_name + "' с теми же аргументами " + str(_repeat_count) + " раз. ОБЯЗАТЕЛЬНО попробуй ДРУГОЙ инструмент или ДРУГОЙ подход."})
+                    elif _repeat_count >= 2:
+                        logging.warning("[AntiLoop] " + tool_name + " repeated " + str(_repeat_count) + "x - warning injected")
+                        messages.append({"role": "system", "content": "ПРЕДУПРЕЖДЕНИЕ: Ты уже вызывал '" + tool_name + "' с похожими аргументами. Если результат тот же - попробуй другой подход."})
+
+                    # ── ANTI-LOOP for pipeline ──
+                    _ph_hash = hashlib.md5(f"{tool_name}:{tool_args_str[:200]}".encode()).hexdigest()
+                    _phase_tool_history[_ph_hash] = _phase_tool_history.get(_ph_hash, 0) + 1
+                    _ph_count = _phase_tool_history[_ph_hash]
+                    if _ph_count >= 2:
+                        _phase_consecutive_loops += 1
+                        logger.warning(f"[ANTI-LOOP-PIPELINE] Phase {phase_idx+1} agent {agent_key}: {tool_name} called {_ph_count}x. Loop: {_phase_consecutive_loops}")
+                        if _phase_consecutive_loops >= 3 and _phase_model_escalation == 0:
+                            _phase_model_escalation = 1
+                            self.model = "anthropic/claude-sonnet-4-5"
+                            logger.warning(f"[ANTI-LOOP-PIPELINE] Escalating to Sonnet")
+                            yield self._sse({"type": "info", "message": f"🔄 Переключаю на Sonnet для выхода из цикла в фазе {phase_idx+1}..."})
+                            messages.append({"role": "system", "content": (
+                                f"КРИТИЧЕСКОЕ: Ты вызвал {tool_name} {_ph_count} раз с теми же аргументами. "
+                                f"Это цикл. Немедленно используй ДРУГОЙ инструмент или вызови task_complete."
+                            )})
+                        elif _phase_consecutive_loops >= 5 and _phase_model_escalation == 1:
+                            _phase_model_escalation = 2
+                            self.model = "anthropic/claude-opus-4-5"
+                            logger.warning(f"[ANTI-LOOP-PIPELINE] Escalating to Opus")
+                            yield self._sse({"type": "info", "message": f"🔄 Переключаю на Claude Opus для выхода из цикла..."})
+                        elif _phase_consecutive_loops >= 7:
+                            _ask_result = self._execute_tool("ask_user", json.dumps({
+                                "question": f"Агент застрял в фазе '{phase.get('name', phase_idx+1)}' на действии '{tool_name}' ({_ph_count} повторений). Как продолжить?",
+                                "context": "Pipeline застрял в цикле"
+                            }, ensure_ascii=False))
+                            yield self._sse({"type": "info", "message": "⚠️ Pipeline застрял — запрашиваю помощь пользователя"})
+                            messages.append({"role": "tool", "tool_call_id": tool_id, "content": json.dumps(_ask_result, ensure_ascii=False)})
+                            _phase_consecutive_loops = 0
+                            _phase_tool_history.clear()
+                    else:
+                        _phase_consecutive_loops = max(0, _phase_consecutive_loops - 1)
+                        if _phase_model_escalation > 0:
+                            self.model = _phase_original_model
+                            _phase_model_escalation = 0
 
                     result_preview = self._preview_result(tool_name, result)
                     yield self._sse({
