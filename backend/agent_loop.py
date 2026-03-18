@@ -895,6 +895,23 @@ Lucide иконки (https://unpkg.com/lucide@latest).
 Для фото — генерируй через generate_image с детальным промптом.
 После деплоя — сделай скриншот и оцени дизайн через Vision.
 Если оценка < 8/10 — улучши и повтори.
+
+ВАЖНО — DNS после деплоя:
+После деплоя сайта ОБЯЗАТЕЛЬНО проверь DNS: выполни через ssh_execute команду 'dig +short ДОМЕН'.
+Если IP неправильный (не совпадает с сервером деплоя):
+1. Попробуй API хостинга (Beget API: https://api.beget.com/api/dns/changeRecords)
+2. Или зайди в панель хостинга через browser_navigate и измени A-запись
+3. Для Beget: browser_navigate на https://cp.beget.com/login, залогинься, найди DNS, смени A-запись
+НИКОГДА не говори пользователю 'измените DNS сами' — сделай это САМ.
+
+ВАЖНО — AI-фото на удалённом сервере:
+После generate_image файл сохраняется ЛОКАЛЬНО на ORION сервере.
+Чтобы передать картинку на удалённый сервер:
+1. Используй ssh_execute на удалённом сервере: wget или curl для скачивания
+2. Команда: ssh_execute с 'curl -o /путь/к/файлу.jpg "ORION_URL/api/files/FILE_ID/download"'
+3. Или: ssh_execute с 'wget -O /путь/к/файлу.jpg "ORION_URL/api/files/FILE_ID/download"'
+Где ORION_URL = https://orion.mksitdev.ru
+НЕ ИСПОЛЬЗУЙ file_write для бинарных файлов (картинок) — это сломает файл!
 """
 
 # Pro modes use minimal prompt
@@ -1521,6 +1538,12 @@ class AgentLoop:
                 except Exception:
                     pass
 
+                # BUG-13 FIX: Detect broken binary writes
+                if content in ('<binary content>', '[binary data]', '') or (len(content) < 100 and 'binary' in content.lower()):
+                    return {
+                        "success": False, 
+                        "error": "Cannot write binary files via file_write. Use ssh_execute with curl/wget to download the image directly to the server. Example: ssh_execute('curl -sL -o /path/to/image.jpg URL')"
+                    }
                 # УЛУЧ-4: Large file write — файлы >40KB пишем по SSH чанками
                 if len(content) > 40000 and self.ssh_credentials.get("host"):
                     logger.info(f"[large_file_write] File {path} is {len(content)} bytes, using SSH chunked write")
@@ -1698,6 +1721,19 @@ class AgentLoop:
 
                 try:
                     result = self._generate_image(prompt, style, filename)
+                    # BUG-13 FIX: Add deploy instructions for remote servers
+                    if result.get("success") and result.get("file_id"):
+                        fid = result["file_id"]
+                        orion_url = "https://orion.mksitdev.ru"
+                        result["deploy_hint"] = (
+                            f"Файл сохранён локально. Для деплоя на удалённый сервер используй "
+                            f"ssh_execute: curl -sL -o /путь/к/{filename} "
+                            f"\'{orion_url}/api/files/{fid}/download\'"
+                        )
+                        result["download_command"] = (
+                            f"curl -sL -o /path/to/{filename} "
+                            f"\'{orion_url}/api/files/{fid}/download\'"
+                        )
                     return result
                 except Exception as e:
                     return {"success": False, "error": f"Image generation error: {str(e)}"}
