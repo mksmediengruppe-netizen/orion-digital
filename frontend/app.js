@@ -201,7 +201,15 @@ const API = {
 
         const res = await fetch(API_BASE + path, opts);
         if (res.status === 401) {
-            Auth.logout();
+            // BUG-12v2: Try silent re-login before logout
+            const reloginOk = await Auth.silentRelogin();
+            if (reloginOk) {
+                // Retry the original request with new token
+                headers['Authorization'] = 'Bearer ' + state.token;
+                const retry = await fetch(API_BASE + path, { method, headers, body: opts.body });
+                if (retry.ok) return retry.json();
+            }
+            Auth.softLogout();
             throw new Error('Unauthorized');
         }
         if (!res.ok) {
@@ -283,6 +291,8 @@ const Auth = {
             const data = await API.login(username, password);
             state.token = data.access_token;
             localStorage.setItem('orion_token', data.access_token);
+            // BUG-12v2: Save creds for silent re-login after server restart
+            localStorage.setItem('orion_creds', JSON.stringify({ email: username, password }));
 
             const me = await API.get('/auth/me');
             state.user = me;
@@ -304,13 +314,58 @@ const Auth = {
             if (state.user.monthly_limit) state.monthlyLimit = state.user.monthly_limit;
             if (state.user.total_spent !== undefined) state.totalCost = state.user.total_spent;
         }
+        // BUG-12v2: Restore cached chats immediately (before API loads)
+        const cachedChats = localStorage.getItem('orion_chats_cache');
+        if (cachedChats && !state.chats.length) {
+            try {
+                state.chats = JSON.parse(cachedChats);
+                console.log('BUG-12v2: Restored', state.chats.length, 'chats from cache');
+            } catch(e) {}
+        }
         UI.init();
         ChatList.load();
         UI.updateUserInfo();
         SSHSettings.init();
     },
 
+    // BUG-12v2: Silent re-login when session expired (server restart)
+    async silentRelogin() {
+        const savedCreds = localStorage.getItem('orion_creds');
+        if (!savedCreds) return false;
+        try {
+            const { email, password } = JSON.parse(savedCreds);
+            const data = await API.login(email, password);
+            state.token = data.access_token;
+            localStorage.setItem('orion_token', data.access_token);
+            console.log('BUG-12v2: Silent re-login successful');
+            return true;
+        } catch (e) {
+            console.warn('BUG-12v2: Silent re-login failed:', e);
+            return false;
+        }
+    },
+
+    // BUG-12v2: Soft logout — save chats to localStorage, show login
+    softLogout() {
+        // Save chats before clearing
+        if (state.chats.length) {
+            localStorage.setItem('orion_chats_cache', JSON.stringify(state.chats));
+        }
+        state.token = null;
+        state.user = null;
+        // DON'T clear state.chats — keep them visible
+        localStorage.removeItem('orion_token');
+        // Don't remove orion_user — needed for re-login
+        this.showAuthScreen();
+        $('auth-login').value = '';
+        $('auth-password').value = '';
+    },
+
     logout() {
+        // Save chats cache before full logout
+        if (state.chats.length) {
+            localStorage.setItem('orion_chats_cache', JSON.stringify(state.chats));
+        }
         state.token = null;
         state.user = null;
         state.chats = [];
@@ -319,6 +374,7 @@ const Auth = {
         localStorage.removeItem('orion_token');
         localStorage.removeItem('orion_user');
         localStorage.removeItem('orion_theme');
+        // Keep orion_creds and orion_chats_cache
         Theme.set('light');
         this.showAuthScreen();
         $('auth-login').value = '';
