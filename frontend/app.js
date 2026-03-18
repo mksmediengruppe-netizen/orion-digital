@@ -831,8 +831,13 @@ const ChatList = {
             this.render();
         } catch (e) {
             console.warn('ChatList.load error:', e);
-            state.chats = [];
-            this.render();
+            // BUG-12 FIX: Don't clear existing chats on load error
+            // Only render empty if we never had chats
+            if (!state.chats.length) {
+                this.render();
+            } else {
+                Toast.show('Ошибка обновления списка чатов', 'error');
+            }
         }
     },
 
@@ -873,7 +878,12 @@ const ChatList = {
                 <button class="chat-action-btn" title="Переименовать" onclick="ChatList.startRename(event, '${chat.id}')">✏️</button>
                 <button class="chat-action-btn delete" title="Удалить" onclick="ChatList.deleteChat(event, '${chat.id}')">🗑️</button>
             </div>`;
-        item.addEventListener('click', () => Chat.open(chat.id));
+        item.addEventListener('click', (e) => {
+            // BUG-12 FIX: Prevent rapid double-clicks
+            if (Chat._openingChat) return;
+            Chat._openingChat = true;
+            Chat.open(chat.id).finally(() => { Chat._openingChat = false; });
+        });
         return item;
     },
 
@@ -1053,6 +1063,9 @@ const Chat = {
 
     async open(chatId) {
         if (state.isStreaming) Chat.stop();
+        // BUG-12 FIX: Save previous state in case of error
+        const prevChatId = state.currentChatId;
+        const prevMessages = [...state.messages];
         state.currentChatId = chatId;
         state.messages = [];
         ChatList.setActive(chatId);
@@ -1093,7 +1106,17 @@ const Chat = {
             this._checkRunningTask(chatId);
 
         } catch (e) {
-            Toast.show('Ошибка загрузки чата', 'error');
+            // BUG-12 FIX: Restore previous state on error instead of leaving empty
+            console.warn('Chat.open error:', e);
+            if (e.message === 'Unauthorized') {
+                // Token expired — don't restore, logout already happened
+                return;
+            }
+            state.currentChatId = prevChatId;
+            state.messages = prevMessages;
+            ChatList.setActive(prevChatId);
+            if (prevMessages.length) this.renderMessages();
+            Toast.show('Ошибка загрузки чата: ' + e.message, 'error');
         }
     },
 
