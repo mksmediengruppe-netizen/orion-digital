@@ -96,6 +96,11 @@ _lock = threading.Lock()
 _active_agents = {}
 _agents_lock = threading.Lock()
 
+# ══ TASK PERSISTENCE: running tasks buffer for SSE reconnect ══
+# Each entry: {chat_id: {"status": "running"|"done", "events": [...], "started_at": float, "user_id": str}}
+_running_tasks = {}
+_tasks_lock = threading.Lock()
+
 # Singletons for new modules
 _vector_memory = None
 _version_store = None
@@ -124,35 +129,35 @@ MODEL_CONFIGS = {
     "original": {
         "name": "Оригинал",
         "emoji": "🔴",
-        "coding": {"model": "deepseek/deepseek-v3.2", "name": "Grok Code Fast 1", "input_price": 0.20, "output_price": 1.50},
+        "coding": {"model": "openai/gpt-4.1-mini", "name": "Grok Code Fast 1", "input_price": 0.20, "output_price": 1.50},
         "planner": {"model": "anthropic/claude-sonnet-4.6", "name": "Claude Sonnet 4.6", "input_price": 3.00, "output_price": 15.00},
-        "tools": {"model": "deepseek/deepseek-v3.2", "name": "DeepSeek V3.2", "input_price": 0.26, "output_price": 0.38},
+        "tools": {"model": "openai/gpt-4.1-mini", "name": "GPT-4.1 Mini", "input_price": 0.26, "output_price": 0.38},
         "quality": 72.1,
         "monthly_cost": "$2,200"
     },
     "premium": {
         "name": "Премиум",
         "emoji": "🟢",
-        "coding": {"model": "deepseek/deepseek-v3.2", "name": "MiniMax M2.5", "input_price": 0.27, "output_price": 0.95},
+        "coding": {"model": "openai/gpt-4.1-mini", "name": "MiniMax M2.5", "input_price": 0.27, "output_price": 0.95},
         "planner": {"model": "anthropic/claude-sonnet-4.6", "name": "Claude Sonnet 4.6", "input_price": 3.00, "output_price": 15.00},
-        "tools": {"model": "deepseek/deepseek-v3.2", "name": "DeepSeek V3.2", "input_price": 0.26, "output_price": 0.38},
+        "tools": {"model": "openai/gpt-4.1-mini", "name": "GPT-4.1 Mini", "input_price": 0.26, "output_price": 0.38},
         "quality": 80.2,
         "monthly_cost": "$1,750"
     },
     "budget": {
         "name": "Бюджет",
         "emoji": "🔵",
-        "coding": {"model": "deepseek/deepseek-v3.2", "name": "DeepSeek V3.2", "input_price": 0.26, "output_price": 0.38},
-        "planner": {"model": "deepseek/deepseek-v3.2", "name": "DeepSeek R1", "input_price": 0.40, "output_price": 1.75},
-        "tools": {"model": "deepseek/deepseek-v3.2", "name": "DeepSeek V3.2", "input_price": 0.26, "output_price": 0.38},
+        "coding": {"model": "openai/gpt-4.1-mini", "name": "GPT-4.1 Mini", "input_price": 0.26, "output_price": 0.38},
+        "planner": {"model": "openai/gpt-4.1-mini", "name": "GPT-4.1 Mini", "input_price": 0.40, "output_price": 1.75},
+        "tools": {"model": "openai/gpt-4.1-mini", "name": "GPT-4.1 Mini", "input_price": 0.26, "output_price": 0.38},
         "quality": 75.8,
         "monthly_cost": "$750"
     }
 }
 
 CHAT_MODELS = {
-    "qwen3": {"model": "deepseek/deepseek-v3.2", "name": "Qwen3 235B", "lang": "RU ⭐⭐⭐⭐⭐", "input_price": 0.10, "output_price": 0.60},
-    "deepseek": {"model": "deepseek/deepseek-v3.2", "name": "DeepSeek V3.2", "lang": "RU ⭐⭐⭐⭐⭐", "input_price": 0.26, "output_price": 0.38},
+    "qwen3": {"model": "openai/gpt-4.1-mini", "name": "GPT-4.1 Mini", "lang": "RU ⭐⭐⭐⭐⭐", "input_price": 0.10, "output_price": 0.60},
+    "deepseek": {"model": "openai/gpt-4.1-nano", "name": "GPT-4.1 Mini", "lang": "RU ⭐⭐⭐⭐⭐", "input_price": 0.26, "output_price": 0.38},
     "gpt5nano": {"model": "openai/gpt-4.1-nano", "name": "GPT-5 Nano", "lang": "RU ⭐⭐⭐⭐", "input_price": 0.05, "output_price": 0.40},
 }
 
@@ -977,6 +982,29 @@ def _parse_ssh_from_message(message):
             "password": password
         }
 
+    # Pattern: natural language with IP, username, password anywhere in text
+    # e.g. "подключись к серверу 1.2.3.4 root пароль123"
+    # e.g. "сходи на сервер 10.0.0.1 логин root пароль mypass"
+    ip_match = re.search(r'(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})', message)
+    if ip_match:
+        host = ip_match.group(1)
+        rest = message[ip_match.end():].strip()
+        # Try: IP username password
+        m2 = re.match(r'^\s*(\S+)\s+(\S+)', rest)
+        if m2:
+            word1 = m2.group(1)
+            word2 = m2.group(2)
+            # If word1 looks like a username (root, admin, user, etc.)
+            if re.match(r'^[a-zA-Z][a-zA-Z0-9_.-]*$', word1) and len(word1) < 32:
+                return {"host": host, "username": word1, "password": word2}
+            else:
+                # word1 is password, assume root
+                return {"host": host, "username": "root", "password": word1}
+        elif rest:
+            # Just one word after IP — treat as password
+            word = rest.split()[0]
+            return {"host": host, "username": "root", "password": word}
+
     return None
 
 
@@ -1145,7 +1173,12 @@ def detect_intent_llm(user_message: str, history: list, api_key: str) -> dict:
     file_kw = ["word", "docx", ".pdf", " pdf", "pdf ", "pdf-", "сделай pdf", "создай pdf", "excel", "xlsx", "powerpoint", "pptx",
                 "скачать файл", "создай файл", "сгенерируй файл",
                 "сделай документ", "создай документ", "сделай таблицу", "создай таблицу",
-                "сделай отчёт", "создай отчёт", "сделай презентацию", "создай презентацию"]
+                "сделай отчёт", "создай отчёт", "сделай презентацию", "создай презентацию",
+                "картинк", "изображен", "баннер", "постер", "иллюстрац",
+                "нарисуй", "сделай лого", "создай лого", "сделай иконк", "создай иконк",
+                "сделай фото", "создай фото", "generate image", "create image",
+                "напиши парсер", "напиши скрипт", "напиши код", "напиши бот",
+                "напиши программ", "создай скрипт", "создай api", "напиши функци"]
     research_kw = [
         # Явные команды поиска
         "найди в интернете", "поищи", "web search", "проверь сайт", "открой сайт",
@@ -1230,6 +1263,17 @@ def send_message(chat_id):
     data = request.get_json() or {}
     user_message = data.get("message", "").strip()
     file_content = data.get("file_content", "")
+    # ── BUG-1 FIX: Extract and normalize orion_mode ──
+    _raw_mode = data.get("mode", "turbo-basic")
+    _MODE_NORMALIZE = {
+        "turbo-basic": "turbo_standard", "turbo_basic": "turbo_standard", "turbo_standard": "turbo_standard",
+        "turbo-premium": "turbo_premium", "turbo_premium": "turbo_premium",
+        "pro-basic": "pro_standard", "pro_basic": "pro_standard", "pro_standard": "pro_standard",
+        "pro-premium": "pro_premium", "pro_premium": "pro_premium",
+        "architect": "architect",
+    }
+    orion_mode = _MODE_NORMALIZE.get(_raw_mode, "turbo_standard")
+    logging.info(f"[send_message] orion_mode={orion_mode} (raw={_raw_mode})")
 
     if not user_message and not file_content:
         return jsonify({"error": "Message required"}), 400
@@ -1317,20 +1361,62 @@ def send_message(chat_id):
     agent_model = config["tools"]["model"]
     agent_model_name = config["tools"]["name"]
 
+    # ── ПАТЧ 5: Sonnet для серверных задач в Pro режимах ──
+    _server_kw = ["сервер", "деплой", "ftp", "ssh", "загрузи", "настрой",
+                  "админк", "nginx", "битрикс", "bitrix", "на сайт",
+                  "создай страниц", "добавь в меню", "перенеси"]
+    if variant == "premium" and any(w in user_message.lower() for w in _server_kw):
+        agent_model = "anthropic/claude-sonnet-4.6"
+        agent_model_name = "Claude Sonnet 4.6"
+        logging.info(f"[PATCH5] Server task detected, upgrading to Sonnet")
+
     # Detect if this is an agent task (needs SSH/files/browser) or simple chat
     # ══ LLM ORCHESTRATOR: определяем намерение через AI, а не ключевые слова ══
     # Build chat history for context (needed for orchestrator too)
+    # BUG-4 FIX: limit to last 10 messages for orchestrator to avoid context overflow
     history = []
-    for m in chat.get("messages", []):
+    for m in chat.get("messages", [])[-10:]:
         history.append({"role": m["role"], "content": m["content"][:200]})
 
     # Определяем намерение
+    # ══ PATCH 3: БЫСТРЫЙ ПУТЬ для простых сообщений ══
+    _msg_lower_quick = user_message.lower().strip()
+    _is_quick_msg = (
+        len(user_message) < 50 and
+        not any(w in _msg_lower_quick for w in [
+            "сделай", "создай", "напиши", "настрой", "задеплой",
+            "подключи", "перенеси", "протестируй", "проанализируй",
+            "сгенерируй", "нарисуй", "спроектируй", "разверни",
+            "установи", "обнови", "удали", "скачай", "загрузи",
+            "картинк", "изображен", "иллюстрац", "баннер", "постер",
+            "http://", "https://", "ssh", "docker", "nginx",
+            "выполни", "дай", "покажи", "продолжи", "запусти", "открой",
+            "найди", "проверь", "сервер", "код", "файл", "лендинг", "сайт",
+            "парсер", "бот", "скрипт", "api", "база", "домен",
+        ])
+    )
+    
     if ssh_from_msg:
         intent = {"mode": "deploy", "reason": "SSH креденциалы в сообщении", "confidence": 1.0}
+    elif _is_quick_msg:
+        intent = {"mode": "chat", "reason": "Quick path - simple message", "confidence": 1.0}
+        logging.info(f"[send_message] QUICK PATH: '{user_message[:40]}' → chat (skipping orchestrator)")
     else:
         intent = detect_intent_llm(user_message, history, OPENROUTER_API_KEY)
 
     mode = intent["mode"]  # chat | file | deploy | research | data
+    # ══ IMAGE ROUTE FIX: Force image requests to file mode (→ lite_agent → _check_force_tool) ══
+    _img_route_triggers = [
+        "сделай картинк", "создай картинк", "нарисуй", "сгенерируй изображен",
+        "сделай фото", "создай фото", "сделай изображен", "создай изображен",
+        "сделай иллюстрац", "создай иллюстрац", "нарисуй мне",
+        "сделай баннер", "создай баннер", "сделай постер", "создай постер",
+        "сделай лого", "создай лого", "сделай иконк", "создай иконк",
+        "make image", "create image", "generate image", "draw me",
+    ]
+    if any(t in user_message.lower().strip() for t in _img_route_triggers) and mode == "chat":
+        mode = "file"  # Route to lite_agent where _check_force_tool handles image gen
+        logging.info(f"[send_message] IMAGE ROUTE: Redirected '{user_message[:40]}' from chat → file (lite_agent)")
 
     # ══ MODEL ROUTER: автовыбор модели по сложности запроса ══
     has_ssh = bool(ssh_credentials.get("host") and ssh_credentials.get("password"))
@@ -1347,21 +1433,59 @@ def send_message(chat_id):
     has_url = bool(re.search(r'https?://\S+', user_message))
     if has_url and mode == "chat":
         is_browser_task = True
+    # ── BUG-1 FIX v2: SSH доступен во ВСЕХ режимах (TURBO/PRO/AGENT/ELITE) ──
+    # Если есть SSH credentials и запрос содержит SSH-ключевые слова → AgentLoop
+    _ssh_kw = ["ssh", "сервер", "server", "uname", "apt ", "apt-get", "pip install",
+               "npm install", "docker", "nginx", "systemd", "деплой", "deploy",
+               "разверни", "установи на", "выполни", "запусти", "команд",
+               "проверь пакет", "ls ", "cat ", "grep ", "cd ", "mkdir",
+               "rm ", "cp ", "mv ", "chmod", "chown", "systemctl",
+               "journalctl", "curl ", "wget ", "git ", "nano ", "vim "]
+    if has_ssh and not is_agent_task and any(kw in user_message.lower() for kw in _ssh_kw):
+        is_agent_task = True
+        mode = "deploy"
+        logging.info(f"[send_message] BUG-1 FIX v2: SSH keywords detected + has_ssh → forced agent mode")
     # URL + лендинг/сайт/создай → file mode → lite_agent (даже если is_browser_task)
     _landing_kw2 = ["лендинг", "landing", "сайт", "создай", "сделай", "сгенерируй", "напиши"]
     if has_url and any(kw in user_message.lower() for kw in _landing_kw2) and mode in ("chat", "research"):
         mode = "file"
         is_browser_task = False
         is_file_task = True
-    is_lite_agent = (mode in ("file", "research", "data")) and not has_ssh and not (is_agent_task and has_ssh)
+
+    # ══ CRITICAL FIX: ALL non-quick requests → AgentLoop with tools ══
+    # Previously: is_lite_agent only for file/research/data modes
+    # Now: ALL non-quick, non-SSH-deploy requests go through lite_agent
+    # Agent decides whether to use tools (create_artifact, generate_image, etc.) or just respond
+    # Flow:
+    #   _is_quick_msg ("привет", short greetings) → plain chat (else branch, no tools)
+    #   is_agent_task + has_ssh (deploy with SSH)   → full agent with SSH (elif branch)
+    #   everything else                             → lite_agent with tools (if branch)
+    if is_agent_task and has_ssh:
+        is_lite_agent = False  # Goes to full SSH agent branch
+    elif _is_quick_msg:
+        is_lite_agent = False  # Goes to plain chat branch (fast, no tools)
+    else:
+        is_lite_agent = True   # ALL other requests → AgentLoop with TOOLS_SCHEMA
+        logging.info(f"[send_message] CRITICAL FIX: mode={mode} → lite_agent=True (agent with tools)")
 
     # Build chat history for context
     history = [{"role": m["role"], "content": m["content"]} for m in chat["messages"][-10:]]
 
     def generate():
+        nonlocal routed_model_name, model_name, agent_model_name
         full_response = ""
         tokens_in = 0  # CRИТ-2 FIX: инициализация до всех веток
         tokens_out = 0  # КРИТ-2 FIX: инициализация до всех веток
+
+        # ══ TASK PERSISTENCE: register running task ══
+        with _tasks_lock:
+            _running_tasks[chat_id] = {
+                "status": "running",
+                "events": [],
+                "started_at": time.time(),
+                "user_id": request.user_id,
+                "message": user_message[:100],
+            }
 
         # Send metadata — show routed model info
         if (is_agent_task and has_ssh) or is_lite_agent:
@@ -1373,11 +1497,11 @@ def send_message(chat_id):
         # ── Orchestrator v2: определить агентов по плану ──
         logging.info(f'[send_message] Orchestrator available: {_ORCHESTRATOR_AVAILABLE}, mode={mode}')
         _orch_plan_send = None
-        if _ORCHESTRATOR_AVAILABLE:
+        if _ORCHESTRATOR_AVAILABLE and not _is_quick_msg:
             try:
                 def _orch_llm_send(messages, model=None):
                     import requests as _rq
-                    _llm_model = model or "deepseek/deepseek-v3.2"
+                    _llm_model = model or "openai/gpt-4.1-nano"
                     logging.info(f"[_orch_llm_send] Calling {_llm_model} with {len(messages)} messages")
                     resp = _rq.post(
                         OPENROUTER_BASE_URL,
@@ -1415,8 +1539,13 @@ def send_message(chat_id):
         
 
         if is_lite_agent:
-            # ═══ LITE AGENT MODE: File/Image generation without SSH ═══
-            _lite_mode_text = 'Открываю браузер...' if is_browser_task else 'Генерирую файл...'
+            # ═══ AGENT MODE (with tools): ALL non-quick, non-SSH requests ═══
+            if is_browser_task:
+                _lite_mode_text = 'Открываю браузер...'
+            elif mode in ('file', 'data'):
+                _lite_mode_text = 'Генерирую файл...'
+            else:
+                _lite_mode_text = 'Анализирую запрос...'
             yield f"data: {json.dumps({'type': 'agent_mode', 'text': _lite_mode_text})}\n\n"
 
             agent = AgentLoop(
@@ -1427,6 +1556,7 @@ def send_message(chat_id):
                 user_id=request.user_id  # BUG-5 FIX
             )
             agent._chat_id = chat_id  # BUG-5 FIX
+            agent._verify_enabled = data.get("verify", False)  # ПАТЧ 7
 
             with _agents_lock:
                 _active_agents[chat_id] = agent
@@ -1438,8 +1568,8 @@ def send_message(chat_id):
                         event_data = json.loads(event.replace("data: ", "").strip())
                         if event_data.get("type") == "content":
                             full_response += event_data.get("text", "")
-                    except:
-                        pass
+                    except Exception as _sse_err:
+                        logging.warning(f"SSE parse error: {_sse_err}")
 
                 tokens_in = agent.total_tokens_in
                 tokens_out = agent.total_tokens_out
@@ -1502,9 +1632,16 @@ def send_message(chat_id):
                         _sm_extra_prompt = "РЕЖИМ ДИЗАЙНЕРА: Создавай красивые веб-страницы с Google Fonts, градиентами, анимациями. Сохраняй HTML в файл через file_write."
                     elif _sm_primary == "sonnet":
                         _sm_model_override = "anthropic/claude-sonnet-4.6"
-                except Exception:
-                    pass
+                except Exception as _route_err:
+                    logging.warning(f"Model routing error: {_route_err}")
                 # === КОНЕЦ МАРШРУТИЗАЦИИ ===
+                # ── BUG-1 FIX: Premium mode → Sonnet for agent too ──
+                if orion_mode in ("turbo_premium", "pro_premium") and not _sm_model_override:
+                    _sm_model_override = "anthropic/claude-sonnet-4.6"
+                    model_name = "Claude Sonnet 4.6"
+                    agent_model_name = "Claude Sonnet 4.6"
+                    routed_model_name = "Claude Sonnet 4.6"
+                    logging.info(f"[send_message] BUG-1 FIX: Agent premium mode {orion_mode} → Sonnet")
                 agent = AgentLoop(
                     model=agent_model,
                     api_key=OPENROUTER_API_KEY,
@@ -1521,6 +1658,7 @@ def send_message(chat_id):
                 _active_agents[chat_id] = agent
 
             try:
+                # ══ PATCH 4: Multi-agent SSE error handling ══
                 if use_parallel:
                     agent_keys = [a.get('key', a.get('role', '')) for a in selected_agents]
                     event_gen = orchestrator.run_parallel(
@@ -1528,19 +1666,26 @@ def send_message(chat_id):
                         agent_keys=agent_keys, mode=mode
                     )
                 elif enhanced:
-                    event_gen = agent.run_multi_agent_stream(user_message, history, file_content)
+                    try:
+                        event_gen = agent.run_multi_agent_stream(user_message, history, file_content)
+                    except Exception as _multi_init_err:
+                        logging.error(f"Multi-agent init error: {_multi_init_err}, falling back to single agent")
+                        event_gen = agent.run_stream(user_message, history, file_content)
                 else:
                     event_gen = agent.run_stream(user_message, history, file_content)
 
                 for event in event_gen:
-                    yield event
+                    try:
+                        yield event
+                    except GeneratorExit:
+                        break
                     # Capture text content
                     try:
                         event_data = json.loads(event.replace("data: ", "").strip())
                         if event_data.get("type") == "content":
                             full_response += event_data.get("text", "")
-                    except:
-                        pass
+                    except Exception as _sse_err:
+                        logging.warning(f"SSE parse error: {_sse_err}")
 
                  # Get token counts from agent
                 if hasattr(agent, 'total_tokens_in'):
@@ -1552,8 +1697,8 @@ def send_message(chat_id):
                     if pm and full_response:
                         summary = full_response[:300] if len(full_response) > 300 else full_response
                         pm.complete_session(chat_id, summary=summary)
-                except Exception:
-                    pass
+                except Exception as _pm_err:
+                    logging.warning(f"ProjectManager session error: {_pm_err}")
 
             finally:
                 with _agents_lock:
@@ -1598,10 +1743,17 @@ def send_message(chat_id):
 Если пользователь хочет чтобы ты выполнил задачу на сервере — попроси его настроить SSH в настройках (⚙️).
 Отвечай кратко и по делу."""
 
+            # ── BUG-1 FIX: Premium mode → Sonnet override ──
+            if orion_mode in ("turbo_premium", "pro_premium"):
+                active_model = "anthropic/claude-sonnet-4.6"
+                active_model_name = "Claude Sonnet 4.6"
+                model_name = "Claude Sonnet 4.6"
+                routed_model_name = "Claude Sonnet 4.6"
+                logging.info(f"[send_message] BUG-1 FIX: Premium mode {orion_mode} → Sonnet override")
+                yield f"data: {json.dumps({'type': 'meta', 'variant': variant, 'model': 'Claude Sonnet 4.6', 'enhanced': enhanced, 'self_check_level': self_check_level, 'agent_mode': False, 'tier': 'sonnet', 'complexity': routed_complexity})}\n\n"
             # ── BUG-5 FIX v4: читаем долгосрочную память и добавляем в system_prompt ──
             try:
-                import logging as _lg
-                _mem_log = _lg.getLogger("memory.engine")
+                _mem_log = logging.getLogger("memory.engine")
 
                 # Функция вызова LLM для extract_from_chat (нужна memory_v9)
                 def _mem_call_llm(msgs):
@@ -1642,8 +1794,7 @@ def send_message(chat_id):
                     else:
                         _mem_log.info(f"[MEMORY] CHAT MODE READ: no facts yet for user={request.user_id!r}")
             except Exception as _mem_chat_err:
-                import logging as _lg
-                _lg.getLogger("memory.engine").warning(f"[MEMORY] CHAT MODE memory read failed: {_mem_chat_err}", exc_info=True)
+                logging.getLogger("memory.engine").warning(f"[MEMORY] CHAT MODE memory read failed: {_mem_chat_err}", exc_info=True)
 
             messages = [{"role": "system", "content": system_prompt}]
             for msg in history:
@@ -1834,8 +1985,8 @@ def send_message(chat_id):
                 tool_name=mode,
                 success="\u274c" not in full_response[:100]
             )
-        except Exception:
-            pass  # Non-critical
+        except Exception as _nc_err:
+            logging.warning(f"Non-critical error: {_nc_err}")
 
         # Save assistant message
         db2 = db_read()
@@ -1911,13 +2062,12 @@ def send_message(chat_id):
                 chat_id=chat_id,
                 user_id=request.user_id
             )
-        except Exception:
-            pass  # Non-critical
+        except Exception as _nc_err:
+            logging.warning(f"Non-critical error: {_nc_err}")
 
         # ── BUG-5 FIX v3: memory_v9 after_chat — сохраняем факты для ВСЕХ режимов ──
         try:
-            import logging as _lg
-            _mem_logger = _lg.getLogger("memory.engine")
+            _mem_logger = logging.getLogger("memory.engine")
 
             # Сохраняем через agent.memory если агент был создан
             _agent_memory_saved = False
@@ -1967,8 +2117,7 @@ def send_message(chat_id):
                 except Exception as _direct_err:
                     _mem_logger.warning(f"[MEMORY] direct memory_v9 after_chat failed: {_direct_err}", exc_info=True)
         except Exception as _ac_err:
-            import logging as _lg
-            _lg.getLogger("memory.engine").error(f"[MEMORY] after_chat EXCEPTION: {_ac_err}", exc_info=True)
+            logging.getLogger("memory.engine").error(f"[MEMORY] after_chat EXCEPTION: {_ac_err}", exc_info=True)
 
         db_write(db2)
 
@@ -1977,8 +2126,25 @@ def send_message(chat_id):
         yield f"data: {json.dumps({'type': 'cost', 'cost': total_cost, 'tokens_in': tokens_in, 'tokens_out': tokens_out})}\n\n"
         yield f"data: {json.dumps({'type': 'done', 'tokens_in': tokens_in, 'tokens_out': tokens_out, 'cost': total_cost, 'model': routed_model_name, 'tier': routed_tier, 'complexity': routed_complexity})}\n\n"
 
+        # ══ TASK PERSISTENCE: mark task as done ══
+        with _tasks_lock:
+            task = _running_tasks.get(chat_id)
+            if task:
+                task["status"] = "done"
+                task["finished_at"] = time.time()
+
+    def _buffered_generate():
+        """Wrapper that buffers all SSE events for reconnect support."""
+        for event in generate():
+            # Buffer event for reconnect
+            with _tasks_lock:
+                task = _running_tasks.get(chat_id)
+                if task:
+                    task["events"].append(event)
+            yield event
+
     return Response(
-        stream_with_context(generate()),
+        stream_with_context(_buffered_generate()),
         mimetype="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
@@ -2001,6 +2167,75 @@ def stop_agent(chat_id):
     return jsonify({"ok": False, "message": "No active agent for this chat"})
 
 
+# ══ TASK STATUS: check if a task is running for this chat ══
+@app.route("/api/chats/<chat_id>/status", methods=["GET"])
+@require_auth
+def get_chat_task_status(chat_id):
+    """Return the current task status for a chat (running/done/none)."""
+    with _tasks_lock:
+        task = _running_tasks.get(chat_id)
+        if not task:
+            return jsonify({"status": "none", "events_count": 0})
+        return jsonify({
+            "status": task["status"],
+            "events_count": len(task["events"]),
+            "started_at": task.get("started_at", 0),
+            "message": task.get("message", ""),
+        })
+
+
+# ══ TASK RECONNECT: replay buffered SSE events + continue streaming ══
+@app.route("/api/chats/<chat_id>/reconnect", methods=["GET"])
+@require_auth
+def reconnect_task_stream(chat_id):
+    """Reconnect to a running task: replay buffered events, then wait for new ones."""
+    with _tasks_lock:
+        task = _running_tasks.get(chat_id)
+        if not task:
+            return jsonify({"error": "No running task for this chat"}), 404
+
+    def replay_and_follow():
+        # Phase 1: replay all buffered events
+        sent = 0
+        with _tasks_lock:
+            task = _running_tasks.get(chat_id)
+            if task:
+                for event in task["events"]:
+                    yield event
+                    sent += 1
+        
+        # Phase 2: if task is still running, poll for new events
+        if task and task["status"] == "running":
+            import time as _time
+            max_wait = 300  # 5 min max
+            start = _time.time()
+            while _time.time() - start < max_wait:
+                _time.sleep(0.3)
+                with _tasks_lock:
+                    task = _running_tasks.get(chat_id)
+                    if not task:
+                        break
+                    current_len = len(task["events"])
+                    if current_len > sent:
+                        for event in task["events"][sent:current_len]:
+                            yield event
+                        sent = current_len
+                    if task["status"] == "done":
+                        # Send any remaining events
+                        for event in task["events"][sent:]:
+                            yield event
+                        break
+
+    return Response(
+        stream_with_context(replay_and_follow()),
+        mimetype="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no"
+        }
+    )
+
 
 # ── /api/chat — прямой роут (фронтенд v2.0 шлёт сюда) ────────
 @app.route("/api/chat", methods=["POST"])
@@ -2012,9 +2247,18 @@ def direct_chat():
     data = request.get_json() or {}
     user_message = data.get("message", "").strip()
     file_content = data.get("file_content", "")
+    # ── BUG-1 FIX: Extract and normalize orion_mode ──
+    _raw_mode = data.get("mode", "turbo-basic")
+    _MODE_NORMALIZE = {
+        "turbo-basic": "turbo_standard", "turbo_basic": "turbo_standard", "turbo_standard": "turbo_standard",
+        "turbo-premium": "turbo_premium", "turbo_premium": "turbo_premium",
+        "pro-basic": "pro_standard", "pro_basic": "pro_standard", "pro_standard": "pro_standard",
+        "pro-premium": "pro_premium", "pro_premium": "pro_premium",
+        "architect": "architect",
+    }
+    orion_mode = _MODE_NORMALIZE.get(_raw_mode, "turbo_standard")
+    logging.info(f"[send_message] orion_mode={orion_mode} (raw={_raw_mode})")
     chat_id = data.get("chat_id")
-    orion_mode = data.get("mode", "turbo_standard")
-    multi_agent = data.get("multi_agent", False) or request.path.endswith("multi-agent")
 
     if not user_message and not file_content:
         return jsonify({"error": "Message required"}), 400
@@ -2068,14 +2312,32 @@ def direct_chat():
         db2["chats"][chat_id]["updated_at"] = time.time()
         _save_db(db2)
 
-    # Получаем историю
-    history = db2["chats"][chat_id]["messages"][-20:]
+    # Получаем историю (BUG-4 FIX: ограничиваем до 10 сообщений чтобы не переполнять контекст)
+    history = db2["chats"][chat_id]["messages"][-10:]
     user_settings = request.user.get("settings", {})
+
+    # ── SSH credentials: from request, settings, and message text ──
+    _ssh_from_request = data.get("ssh", {})
+    ssh_credentials = {
+        "host": _ssh_from_request.get("ssh_host") or user_settings.get("ssh_host", ""),
+        "username": _ssh_from_request.get("ssh_user") or user_settings.get("ssh_user", "root"),
+        "password": _ssh_from_request.get("ssh_password") or user_settings.get("ssh_password", ""),
+        "port": int(_ssh_from_request.get("ssh_port") or user_settings.get("ssh_port", 22)),
+    }
+    # Parse SSH from message text (e.g. "root@1.2.3.4 password123 do something")
+    ssh_from_msg = _parse_ssh_from_message(user_message)
+    if ssh_from_msg:
+        if ssh_from_msg.get("host"):
+            ssh_credentials["host"] = ssh_from_msg["host"]
+        if ssh_from_msg.get("username"):
+            ssh_credentials["username"] = ssh_from_msg["username"]
+        if ssh_from_msg.get("password"):
+            ssh_credentials["password"] = ssh_from_msg["password"]
 
     # Выбираем модель по режиму
     from model_router import get_model_for_agent
     _agent_cfg = get_model_for_agent("orchestrator", orion_mode)
-    model = _agent_cfg.get("model_id", "deepseek/deepseek-v3.2")
+    model = _agent_cfg.get("model_id", "openai/gpt-4.1-mini")
     api_key = OPENROUTER_API_KEY
 
     def generate():
@@ -2100,7 +2362,7 @@ def direct_chat():
                     # Функция для вызова LLM из оркестратора
                     def _orch_call_llm(messages, model=None):
                         import requests as _req
-                        _model = model or "deepseek/deepseek-v3.2"
+                        _model = model or "openai/gpt-4.1-nano"
                         resp = _req.post(
                             OPENROUTER_BASE_URL,
                             headers={"Authorization": f"Bearer {OPENROUTER_API_KEY}",
@@ -2111,9 +2373,9 @@ def direct_chat():
                         data = resp.json()
                         return data.get("choices", [{}])[0].get("message", {}).get("content", "")
                     
-                    # Определить SSH
-                    _has_ssh = bool(user_settings.get("ssh_host", ""))
-                    _ssh_info = f"host={user_settings.get('ssh_host','')}" if _has_ssh else ""
+                    # Определить SSH (from settings, request, or parsed from message)
+                    _has_ssh = bool(ssh_credentials.get("host") and ssh_credentials.get("password"))
+                    _ssh_info = f"host={ssh_credentials.get('host','')}" if _has_ssh else ""
                     
                     # Создать оркестратор и получить план
                     _orch = Orchestrator(_orch_call_llm, orion_mode)
@@ -2177,33 +2439,40 @@ def direct_chat():
             with _agents_lock:
                 _active_agents[chat_id] = loop
 
-            for raw_event in loop.run_stream(user_message, chat_history=history, file_content=file_content):
-                # run_stream() возвращает либо строку SSE ("data: {...}\n\n")
-                # либо dict — нормализуем оба варианта
-                if isinstance(raw_event, str):
-                    # Уже готовая SSE строка — парсим для накопления текста
-                    yield raw_event
-                    # Извлекаем content для сохранения
-                    if raw_event.startswith("data: "):
-                        try:
-                            ev = _json.loads(raw_event[6:].strip())
-                            ev_type = ev.get("type", "")
-                            if ev_type == "content":
-                                assistant_content += ev.get("text", ev.get("content", ""))
-                            elif ev_type in ("text", "text_complete"):
-                                assistant_content += ev.get("content", ev.get("text", ""))
-                        except Exception:
-                            pass
-                else:
-                    # dict — нормализуем тип и отправляем
-                    ev_type = raw_event.get("type", "")
-                    if ev_type == "text_delta":
-                        raw_event = {"type": "content", "text": raw_event.get("text", raw_event.get("content", ""))}
-                    elif ev_type == "text_complete":
-                        raw_event = {"type": "content", "text": raw_event.get("content", "")}
-                    yield "data: " + _json.dumps(raw_event) + SSE
-                    if ev_type in ("content", "text", "text_complete", "text_delta"):
-                        assistant_content += raw_event.get("text", raw_event.get("content", ""))
+            for raw_event in loop.run_stream(user_message, chat_history=history, file_content=file_content, ssh_credentials=ssh_credentials):
+                # BUG-4 FIX: wrap each event in try/except to prevent SSE disconnects
+                try:
+                    # run_stream() возвращает либо строку SSE ("data: {...}\n\n")
+                    # либо dict — нормализуем оба варианта
+                    if isinstance(raw_event, str):
+                        # Уже готовая SSE строка — парсим для накопления текста
+                        yield raw_event
+                        # Извлекаем content для сохранения
+                        if raw_event.startswith("data: "):
+                            try:
+                                ev = _json.loads(raw_event[6:].strip())
+                                ev_type = ev.get("type", "")
+                                if ev_type == "content":
+                                    assistant_content += ev.get("text", ev.get("content", ""))
+                                elif ev_type in ("text", "text_complete"):
+                                    assistant_content += ev.get("content", ev.get("text", ""))
+                            except Exception as _ev_err:
+                                logging.warning(f"Event parse error: {_ev_err}")
+                    else:
+                        # dict — нормализуем тип и отправляем
+                        ev_type = raw_event.get("type", "")
+                        if ev_type == "text_delta":
+                            raw_event = {"type": "content", "text": raw_event.get("text", raw_event.get("content", ""))}
+                        elif ev_type == "text_complete":
+                            raw_event = {"type": "content", "text": raw_event.get("content", "")}
+                        yield "data: " + _json.dumps(raw_event) + SSE
+                        if ev_type in ("content", "text", "text_complete", "text_delta"):
+                            assistant_content += raw_event.get("text", raw_event.get("content", ""))
+                except GeneratorExit:
+                    break
+                except Exception as _ev_err:
+                    logging.error(f"SSE event error: {_ev_err}")
+                    continue
 
         except GeneratorExit:
             pass  # Клиент отключился — не делаем yield
@@ -2691,8 +2960,8 @@ def search_memory():
         vector_results = vmem.search(query, limit=limit, user_id=request.user_id)
         for vr in vector_results:
             vr["source"] = "vector"
-    except Exception:
-        pass
+    except Exception as _vec_err:
+        logging.warning(f"Vector search error: {_vec_err}")
 
     return jsonify({
         "results": legacy_results[:limit],
@@ -2970,12 +3239,12 @@ def health():
     ver_stats = {}
     try:
         mem_stats = _get_memory().get_stats()
-    except Exception:
-        pass
+    except Exception as _mem_err:
+        logging.warning(f"Memory stats error: {_mem_err}")
     try:
         ver_stats = _get_versions().get_stats()
-    except Exception:
-        pass
+    except Exception as _ver_err:
+        logging.warning(f"Version stats error: {_ver_err}")
 
     return jsonify({
         "status": "ok",
@@ -3273,8 +3542,8 @@ def submit_feedback():
         try:
             from security import audit_log
             audit_log(user_id, "feedback", chat_id, {"type": feedback_type})
-        except Exception:
-            pass
+        except Exception as _audit_err:
+            logging.warning(f"Audit log error: {_audit_err}")
 
         return jsonify({"success": True, "feedback_id": entry["id"]})
     except Exception as e:
@@ -3708,6 +3977,27 @@ def gdpr_anonymize_data():
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+
+# ── ФИЧА 10: SSE подписка на обновления чата ──
+@app.route("/api/chats/<chat_id>/subscribe", methods=["GET"])
+def subscribe_chat(chat_id):
+    """SSE подписка на обновления чата (для совместной работы)."""
+    import time as _time
+    def stream():
+        last_count = 0
+        while True:
+            db = db_read()
+            chat = db["chats"].get(chat_id, {})
+            msgs = chat.get("messages", [])
+            if len(msgs) > last_count:
+                new_msgs = msgs[last_count:]
+                for m in new_msgs:
+                    yield f"data: {json.dumps({'type': 'new_message', 'message': m}, ensure_ascii=False)}\n\n"
+                last_count = len(msgs)
+            _time.sleep(2)
+    return Response(stream(), mimetype="text/event-stream")
+
+
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 3510))
     app.run(host="0.0.0.0", port=port, debug=False)
@@ -3790,3 +4080,158 @@ def get_agent_zones():
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 
+
+# ══════════════════════════════════════════════════════════════════
+# ПАТЧ ЗАДАЧА-1: Auth Response — пользователь отправляет данные авторизации
+# ══════════════════════════════════════════════════════════════════
+_auth_pending = {}  # chat_id -> {auth_data, url, timestamp}
+
+@app.route("/api/auth-response", methods=["POST"])
+def auth_response():
+    """
+    Пользователь отправляет данные авторизации для browser_ask_auth.
+    Данные хранятся временно и используются агентом для browser_fill + browser_submit.
+    """
+    import time as _time
+    data = request.get_json()
+    chat_id = data.get("chat_id")
+    auth_data = data.get("auth_data", {})
+    url = data.get("url", "")
+    
+    if not chat_id:
+        return jsonify({"error": "chat_id required"}), 400
+    
+    _auth_pending[chat_id] = {
+        "auth_data": auth_data,
+        "url": url,
+        "timestamp": _time.time()
+    }
+    
+    # Очистка старых записей (>5 мин)
+    expired = [k for k, v in _auth_pending.items() if _time.time() - v["timestamp"] > 300]
+    for k in expired:
+        del _auth_pending[k]
+    
+    return jsonify({"success": True, "message": "Данные получены"})
+
+
+@app.route("/api/auth-pending/<chat_id>", methods=["GET"])
+def get_auth_pending(chat_id):
+    """Агент получает данные авторизации и удаляет их."""
+    pending = _auth_pending.pop(chat_id, None)
+    if pending:
+        return jsonify({"success": True, "auth_data": pending["auth_data"], "url": pending["url"]})
+    return jsonify({"success": False, "message": "Нет ожидающих данных"}), 404
+
+
+# ══════════════════════════════════════════════════════════════════
+# ПАТЧ W2-4: Автосмета — /api/estimate
+# ══════════════════════════════════════════════════════════════════
+
+ESTIMATE_RATES = {
+    "landing": {"hours": 2, "rate_rub": 3000, "description": "Лендинг / одностраничник"},
+    "corporate": {"hours": 6, "rate_rub": 3000, "description": "Корпоративный сайт (5-8 страниц)"},
+    "ecommerce": {"hours": 12, "rate_rub": 3000, "description": "Интернет-магазин"},
+    "integration": {"hours": 4, "rate_rub": 3500, "description": "Интеграция (CRM, API, бот)"},
+    "deploy": {"hours": 2, "rate_rub": 2500, "description": "Деплой / настройка сервера"},
+    "seo": {"hours": 3, "rate_rub": 2500, "description": "SEO-оптимизация"},
+    "design": {"hours": 3, "rate_rub": 3000, "description": "Дизайн / UI"},
+    "bot": {"hours": 5, "rate_rub": 3000, "description": "Telegram/WhatsApp бот"},
+    "custom": {"hours": 8, "rate_rub": 3000, "description": "Индивидуальная разработка"},
+}
+
+@app.route("/api/estimate", methods=["POST"])
+def estimate_task():
+    """
+    Автосмета задачи.
+    Принимает: {"task": "Создай лендинг для стоматологии"}
+    Возвращает: {"estimate": {...}, "breakdown": [...], "total_hours": N, "total_rub": N}
+    """
+    data = request.get_json()
+    task = data.get("task", "")
+    if not task:
+        return jsonify({"error": "task required"}), 400
+
+    task_lower = task.lower()
+
+    # Определяем тип задачи по ключевым словам
+    detected_types = []
+
+    type_keywords = {
+        "landing": ["лендинг", "landing", "одностраничн", "посадочн"],
+        "corporate": ["корпоративн", "сайт компании", "многостраничн", "портфолио"],
+        "ecommerce": ["магазин", "каталог", "корзин", "товар", "ecommerce", "shop"],
+        "integration": ["интеграц", "crm", "битрикс", "bitrix", "amocrm", "webhook", "api подключ"],
+        "deploy": ["деплой", "deploy", "сервер", "nginx", "ssl", "домен", "перенес", "миграц"],
+        "seo": ["seo", "мета-тег", "sitemap", "robots", "оптимизац", "ключевые слова"],
+        "design": ["дизайн", "макет", "ui", "ux", "figma", "баннер"],
+        "bot": ["бот", "bot", "telegram", "whatsapp", "чат-бот"],
+    }
+
+    for type_key, keywords in type_keywords.items():
+        for kw in keywords:
+            if kw in task_lower:
+                if type_key not in detected_types:
+                    detected_types.append(type_key)
+                break
+
+    if not detected_types:
+        detected_types = ["custom"]
+
+    # Считаем смету
+    breakdown = []
+    total_hours = 0
+    total_rub = 0
+
+    for t in detected_types:
+        rate = ESTIMATE_RATES[t]
+        item_cost = rate["hours"] * rate["rate_rub"]
+        breakdown.append({
+            "type": t,
+            "description": rate["description"],
+            "hours": rate["hours"],
+            "rate_per_hour": rate["rate_rub"],
+            "cost": item_cost
+        })
+        total_hours += rate["hours"]
+        total_rub += item_cost
+
+    # LLM уточнение (если доступен)
+    llm_comment = ""
+    try:
+        if OPENROUTER_API_KEY:
+            resp = http_requests.post(
+                OPENROUTER_BASE_URL,
+                headers={
+                    "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+                    "Content-Type": "application/json"
+                },
+                json={
+                    "model": "openai/gpt-4.1-mini",
+                    "messages": [
+                        {"role": "system", "content": (
+                            "Ты — менеджер проектов. Оцени задачу клиента и дай краткий комментарий к смете. "
+                            "Укажи возможные риски и дополнительные работы. 2-3 предложения. Русский язык."
+                        )},
+                        {"role": "user", "content": f"Задача: {task}\nПредварительная смета: {total_hours}ч, {total_rub}₽\nСостав: {', '.join(t['description'] for t in breakdown)}"}
+                    ],
+                    "max_tokens": 200,
+                    "temperature": 0.3
+                },
+                timeout=15
+            )
+            if resp.status_code == 200:
+                llm_comment = resp.json().get("choices", [{}])[0].get("message", {}).get("content", "")
+    except Exception:
+        pass
+
+    return jsonify({
+        "success": True,
+        "task": task,
+        "detected_types": detected_types,
+        "breakdown": breakdown,
+        "total_hours": total_hours,
+        "total_rub": total_rub,
+        "llm_comment": llm_comment,
+        "disclaimer": "Предварительная оценка. Точная стоимость зависит от деталей ТЗ."
+    })

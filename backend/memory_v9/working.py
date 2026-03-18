@@ -152,15 +152,42 @@ class ContextCompactor:
             middle = non_system[MemoryConfig.COMPACT_KEEP_FIRST:-MemoryConfig.COMPACT_KEEP_LAST]
             if not middle:
                 return messages
-            middle_text = "\n".join(
-                f"{m['role'].upper()}: {str(m.get('content',''))[:300]}"
-                for m in middle
-            )
+
+            # ПАТЧ W2-1: Более умная суммаризация — сохраняем конкретику
+            middle_parts = []
+            for m in middle:
+                role = m['role'].upper()
+                content = str(m.get('content', ''))
+                # Для tool результатов — извлекаем ключевое
+                if role == 'TOOL':
+                    try:
+                        _td = json.loads(content) if content.startswith('{') else {}
+                        if _td.get('success'):
+                            _stdout = _td.get('stdout', '')[:150]
+                            _path = _td.get('path', '')
+                            middle_parts.append(f"TOOL OK: {_path} {_stdout}".strip()[:200])
+                        else:
+                            _err = _td.get('error', content[:150])
+                            middle_parts.append(f"TOOL ERR: {_err}"[:200])
+                    except Exception:
+                        middle_parts.append(f"{role}: {content[:200]}")
+                else:
+                    middle_parts.append(f"{role}: {content[:300]}")
+
+            middle_text = "\n".join(middle_parts)
             summary = self._call_llm([
-                {"role": "system", "content": "Сожми историю диалога в 3-5 предложений. Сохрани ключевые факты, решения, результаты."},
+                {"role": "system", "content": (
+                    "Сожми историю в 3-5 предложений. ОБЯЗАТЕЛЬНО сохрани:\n"
+                    "1. Какие файлы были созданы/изменены (точные пути)\n"
+                    "2. Какие команды сработали/не сработали\n"
+                    "3. Какие URL были открыты и их статус\n"
+                    "4. Ошибки и как их обошли\n"
+                    "Формат: краткие факты без воды."
+                )},
                 {"role": "user", "content": middle_text[:8000]}
             ])
             summary_msg = {"role": "assistant", "content": f"[СЖАТАЯ ИСТОРИЯ]\n{summary}"}
+            logger.info(f"[COMPACT] Сжали {len(middle)} сообщений в 1 summary ({len(summary)} chars)")
             return system + keep_first + [summary_msg] + keep_last
         except Exception as e:
             logger.warning(f"Compaction failed: {e}")

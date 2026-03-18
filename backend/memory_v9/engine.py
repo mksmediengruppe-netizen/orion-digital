@@ -527,6 +527,65 @@ class SuperMemoryEngine:
         except:
             return None
 
+
+    def store_fact(self, key: str, value: str, category: str = "fact", metadata: dict = None):
+        """Сохранить факт в долгосрочную память."""
+        try:
+            # В semantic memory (векторный поиск)
+            from .semantic import get_semantic
+            sem = get_semantic()
+            if sem:
+                sem.store(
+                    content=f"{key}: {value}",
+                    memory_type=category,
+                    metadata={
+                        "category": category,
+                        "key": key,
+                        **(metadata or {})
+                    },
+                    user_id=self._user_id or "default"
+                )
+            logger.info(f"[MEMORY] store_fact OK: {key[:50]}")
+        except Exception as e:
+            logger.warning(f"store_fact failed: {e}")
+
+    def recall(self, query: str, category: str = None, top_k: int = 10):
+        """Вспомнить факты из памяти по запросу."""
+        try:
+            from .semantic import get_semantic
+            sem = get_semantic()
+            if sem:
+                results = sem.search(
+                    query=query,
+                    limit=top_k,
+                    user_id=self._user_id or "default",
+                    memory_type=category
+                )
+                if results:
+                    return [r.get("content", "") for r in results if r.get("content")]
+            return []
+        except Exception as e:
+            logger.warning(f"recall failed: {e}")
+            return []
+
+    def recall_all(self, category: str, limit: int = 100):
+        """Загрузить ВСЕ записи категории без семантического поиска."""
+        try:
+            from .semantic import get_semantic
+            sem = get_semantic()
+            if sem:
+                results = sem.get_all_by_type(
+                    memory_type=category,
+                    user_id=self._user_id or "default",
+                    limit=limit
+                )
+                if results:
+                    return [r.get("content", "") for r in results if r.get("content")]
+            return []
+        except Exception as e:
+            logger.warning(f"recall_all failed: {e}")
+            return []
+
     def get_dynamic_tools_schema(self) -> List[Dict]:
         try:
             return ToolGenerator.get_tools_schema(self._user_id)

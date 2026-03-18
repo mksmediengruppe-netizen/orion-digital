@@ -5,11 +5,11 @@ Specialized Agents v7.0 — ORION Digital
 
 Модели по MASTER_PROMPT:
   designer   → gemini   (google/gemini-2.5-pro)
-  developer  → deepseek (deepseek/deepseek-v3.2)
-  devops     → deepseek (deepseek/deepseek-v3.2)
-  tester     → deepseek (deepseek/deepseek-v3.2)
+  developer  → deepseek (openai/gpt-4.1-mini)
+  devops     → deepseek (openai/gpt-4.1-mini)
+  tester     → deepseek (openai/gpt-4.1-mini)
   analyst    → deepseek / sonnet в pro_premium
-  integrator → deepseek (deepseek/deepseek-v3.2)
+  integrator → deepseek (openai/gpt-4.1-mini)
 
 preferred_model берётся из model_router по роли и режиму.
 """
@@ -68,7 +68,7 @@ SPECIALIZED_AGENTS = {
         "emoji": "💻",
         "role": "developer",
         # DeepSeek — код, SSH, DevOps (MASTER_PROMPT)
-        "preferred_model": "deepseek/deepseek-v3.2",
+        "preferred_model": "openai/gpt-4.1-mini",
         "model_key": "deepseek",
         "priority_tools": [
             "ssh_execute", "file_write", "file_read",
@@ -104,7 +104,7 @@ SPECIALIZED_AGENTS = {
         "emoji": "🔧",
         "role": "devops",
         # DeepSeek — серверные операции (MASTER_PROMPT)
-        "preferred_model": "deepseek/deepseek-v3.2",
+        "preferred_model": "openai/gpt-4.1-mini",
         "model_key": "deepseek",
         "priority_tools": [
             "ssh_execute", "file_write", "file_read",
@@ -142,7 +142,7 @@ SPECIALIZED_AGENTS = {
         "emoji": "🧪",
         "role": "tester",
         # DeepSeek — быстрые проверки (MASTER_PROMPT)
-        "preferred_model": "deepseek/deepseek-v3.2",
+        "preferred_model": "openai/gpt-4.1-mini",
         "model_key": "deepseek",
         "priority_tools": [
             "browser_navigate", "browser_get_text", "browser_check_site",
@@ -180,7 +180,7 @@ SPECIALIZED_AGENTS = {
         "emoji": "📊",
         "role": "analyst",
         # DeepSeek standard / Sonnet в pro_premium (MASTER_PROMPT)
-        "preferred_model": "deepseek/deepseek-v3.2",
+        "preferred_model": "openai/gpt-4.1-mini",
         "model_key": "deepseek",
         "priority_tools": [
             "web_search", "web_fetch", "code_interpreter",
@@ -219,7 +219,7 @@ SPECIALIZED_AGENTS = {
         "emoji": "🔌",
         "role": "integrator",
         # DeepSeek — интеграции и API (MASTER_PROMPT)
-        "preferred_model": "deepseek/deepseek-v3.2",
+        "preferred_model": "openai/gpt-4.1-mini",
         "model_key": "deepseek",
         "priority_tools": [
             "ssh_execute", "file_write", "file_read",
@@ -269,7 +269,7 @@ def get_agent_model(agent_key: str, mode: str = DEFAULT_MODE) -> str:
         return cfg.get("id", SPECIALIZED_AGENTS[agent_key]["preferred_model"])
     except Exception:
         return SPECIALIZED_AGENTS.get(agent_key, {}).get(
-            "preferred_model", "deepseek/deepseek-v3.2"
+            "preferred_model", "openai/gpt-4.1-mini"
         )
 
 
@@ -352,6 +352,49 @@ AGENT_SELECTION_RULES = {
         "patterns": [
             r"(подключи|интегрируй|настрой).*(api|webhook|бот|crm|платёж)",
             r"(отправ|получ).*(webhook|api|запрос)",
+        ]
+    },
+    # ПАТЧ W2-3: Copywriter + SEO агент
+    "copywriter": {
+        "name": "Копирайтер",
+        "emoji": "✍️",
+        "role": "copywriter",
+        "preferred_model": "anthropic/claude-sonnet-4.6",
+        "model_key": "sonnet",
+        "priority_tools": [
+            "file_write", "file_read", "browser_get_text",
+            "web_search", "generate_file", "ssh_execute"
+        ],
+        "prompt_suffix": """Ты — SEO-копирайтер и контент-стратег.
+
+ЭКСПЕРТИЗА:
+- SEO-оптимизация: мета-теги, title, description, Open Graph
+- Контент-стратегия: тексты для лендингов, карточек товаров, блогов
+- Технический SEO: sitemap.xml, robots.txt, structured data (JSON-LD)
+- Alt-тексты для изображений
+- Анализ конкурентов и ключевых слов
+
+ИНСТРУМЕНТЫ:
+1. browser_get_text — прочитать текущий контент сайта
+2. file_write — создать/обновить файлы на сервере
+3. ssh_execute — загрузить файлы, проверить структуру сайта
+4. web_search — анализ конкурентов, подбор ключевых слов
+5. generate_file — создать документ с текстами
+
+ПРАВИЛА:
+- Каждый текст оптимизирован под 2-3 ключевые фразы
+- Title: 50-60 символов, ключевое слово в начале
+- Description: 150-160 символов, призыв к действию
+- Alt: описательный, с ключевым словом, 5-15 слов
+- СОЗДАВАЙ файлы через file_write, НЕ ОПИСЫВАЙ что нужно сделать""",
+        "keywords": [
+            "seo", "мета-тег", "meta", "title", "description", "og:",
+            "sitemap", "robots.txt", "копирайт", "текст для сайта",
+            "alt текст", "ключевые слова", "контент", "open graph"
+        ],
+        "patterns": [
+            r"(напиши|создай|добавь).*(мета|seo|текст|sitemap|robots)",
+            r"(оптимизируй|улучши).*(текст|контент|seo)",
         ]
     }
 }
@@ -439,12 +482,12 @@ def get_agent_pipeline(task_type: str) -> List[str]:
     """Рекомендованный pipeline агентов для типа задачи."""
     pipelines = {
         "deploy":       ["devops", "developer", "tester"],
-        "website":      ["designer", "developer", "devops", "tester"],
+        "website":      ["designer", "copywriter", "developer", "devops", "tester"],
         "api":          ["developer", "integrator", "tester"],
         "analysis":     ["analyst"],
         "design":       ["designer"],
         "integration":  ["integrator", "developer", "tester"],
-        "full_project": ["analyst", "designer", "developer", "devops", "tester", "integrator"],
+        "full_project": ["analyst", "designer", "copywriter", "developer", "devops", "tester", "integrator"],
         "default":      ["developer"],
     }
     return pipelines.get(task_type, pipelines["default"])

@@ -24,6 +24,8 @@ AGENTS_CAPABILITIES = """
 4. INTEGRATOR (DeepSeek) — Битрикс24, Telegram, платежи, n8n, вебхуки, CRM
 5. TESTER (DeepSeek) — тестирование сайтов, форм, SSL, мобильной версии
 6. ANALYST (DeepSeek/Sonnet) — архитектура, анализ, отчёты, code review
+7. ARCHITECT (Claude Opus 4) — сложная архитектура, глубокий анализ, аудит кода, проектирование систем. Вызывается ТОЛЬКО для задач максимальной сложности.
+8. COPYWRITER (Sonnet) — SEO-тексты, мета-теги, title/description, Open Graph, alt для картинок, sitemap.xml, robots.txt. Вызывается ПОСЛЕ дизайнера при создании сайтов.
 
 Все агенты имеют доступ к: SSH, браузер, файлы, поиск, код.
 """
@@ -84,14 +86,153 @@ AGENT_PROMPTS = {
 
 Архитектура, анализ данных, отчёты, code review, ТЗ, документация.
 Результаты через generate_file (docx/pdf)."""
+,
+    "architect": """Ты — Claude Opus, главный архитектор ORION Digital.
+
+Тебя вызывают для САМЫХ СЛОЖНЫХ задач. Ты думаешь глубже всех.
+
+Твои задачи:
+- Проектирование архитектуры сложных систем
+- Глубокий аудит кода (безопасность, производительность, масштабируемость)
+- Написание технических заданий
+- Анализ сложных бизнес-процессов
+- Проектирование баз данных
+- Решение нестандартных технических проблем
+
+Правила:
+1. Думай на 10 шагов вперёд. Предвидь проблемы.
+2. Давай КОНКРЕТНЫЕ решения с кодом, не абстрактные советы.
+3. Если видишь что задача решается проще — скажи.
+4. Если видишь риски — предупреди.
+5. Результат оформляй как документ через generate_file.
+
+Ты дорогой ($15/$75 за 1M токенов) — поэтому каждый вызов должен давать максимум ценности.""",
+
+    "copywriter": """Ты — SEO-копирайтер и контент-стратег ORION Digital.
+
+ЗАДАЧИ:
+1. Написать/улучшить тексты для сайта (заголовки, описания, CTA)
+2. Создать мета-теги: <title>, <meta description>, Open Graph (og:title, og:description, og:image)
+3. Написать alt-тексты для всех изображений
+4. Создать sitemap.xml и robots.txt
+5. Оптимизировать тексты под ключевые слова
+
+ПРАВИЛА:
+- Каждая страница: уникальный title (50-60 символов) и description (150-160 символов)
+- Open Graph: og:title, og:description, og:image, og:url, og:type для каждой страницы
+- Alt-тексты: описательные, с ключевыми словами, 5-15 слов
+- sitemap.xml: все страницы с приоритетами и датами
+- robots.txt: разрешить индексацию, указать sitemap
+- Тексты: естественные, без переспама, для людей а не для роботов
+- Язык: русский (если не указан другой)
+
+ФОРМАТ РЕЗУЛЬТАТА:
+Создай файлы через file_write:
+1. meta-tags.html — готовый блок мета-тегов для вставки в <head>
+2. sitemap.xml — карта сайта
+3. robots.txt
+4. texts.md — оптимизированные тексты для страниц
+
+ДЕЙСТВУЙ, НЕ ОПИСЫВАЙ. Создавай файлы сразу."""
 }
 
 MODEL_MAP = {
     "gemini": "google/gemini-2.5-pro",
-    "deepseek": "deepseek/deepseek-v3.2",
-    "sonnet": "anthropic/claude-sonnet-4.6"
+    "deepseek": "openai/gpt-4.1-mini",
+    "sonnet": "anthropic/claude-sonnet-4.6",
+    "opus": "anthropic/claude-opus-4"
 }
 
+# ── PROJECT TEMPLATES (Фича 8) ────────────────────────────────
+# Шаблоны проектов для быстрого старта. Используются в:
+# 1. Frontend UI (Templates.open() в app.js)
+# 2. Orchestrator — распознаёт шаблонные запросы и сразу назначает правильного агента
+PROJECT_TEMPLATES = [
+    {
+        "id": "ecommerce",
+        "name": "Интернет-магазин",
+        "icon": "🏪",
+        "prompt": "Создай интернет-магазин с каталогом товаров, корзиной, оформлением заказа и интеграцией платёжной системы",
+        "primary_agent": "designer",
+        "primary_model": "gemini",
+        "mode": "multi_sequential",
+        "phases": [
+            {"name": "Дизайн", "agents": ["designer"], "model": "gemini", "description": "HTML/CSS магазина"},
+            {"name": "Бэкенд", "agents": ["developer"], "model": "deepseek", "description": "API, корзина, заказы"},
+            {"name": "Деплой", "agents": ["devops"], "model": "deepseek", "description": "Деплой на сервер"},
+            {"name": "SEO", "agents": ["copywriter"], "model": "sonnet", "description": "Мета-теги, тексты, sitemap"},
+            {"name": "Тест", "agents": ["tester"], "model": "deepseek", "description": "Проверка работы"}
+        ]
+    },
+    {
+        "id": "corporate",
+        "name": "Корпоративный сайт",
+        "icon": "🏢",
+        "prompt": "Создай корпоративный сайт компании: главная, о компании, услуги, портфолио, контакты, блог",
+        "primary_agent": "designer",
+        "primary_model": "gemini",
+        "mode": "multi_sequential",
+        "phases": [
+            {"name": "Дизайн", "agents": ["designer"], "model": "gemini", "description": "HTML/CSS сайта"},
+            {"name": "SEO", "agents": ["copywriter"], "model": "sonnet", "description": "Мета-теги, тексты, sitemap"}
+        ]
+    },
+    {
+        "id": "landing_crm",
+        "name": "Лендинг + CRM",
+        "icon": "📱",
+        "prompt": "Создай лендинг с формой заявки и интеграцией Битрикс24 для приёма лидов",
+        "primary_agent": "designer",
+        "primary_model": "gemini",
+        "mode": "multi_sequential",
+        "phases": [
+            {"name": "Лендинг", "agents": ["designer"], "model": "gemini", "description": "HTML лендинг с формой"},
+            {"name": "Интеграция", "agents": ["integrator"], "model": "deepseek", "description": "Битрикс24 вебхук"}
+        ]
+    },
+    {
+        "id": "telegram_bot",
+        "name": "Telegram бот",
+        "icon": "🤖",
+        "prompt": "Создай Telegram бота для приёма заявок с уведомлениями менеджеру",
+        "primary_agent": "developer",
+        "primary_model": "deepseek",
+        "mode": "single",
+        "phases": [
+            {"name": "Разработка", "agents": ["developer"], "model": "deepseek", "description": "Python Telegram bot"}
+        ]
+    },
+    {
+        "id": "analytics_dashboard",
+        "name": "Дашборд аналитики",
+        "icon": "📊",
+        "prompt": "Создай дашборд для визуализации данных из CSV/Excel с графиками и фильтрами",
+        "primary_agent": "designer",
+        "primary_model": "gemini",
+        "mode": "multi_sequential",
+        "phases": [
+            {"name": "Дизайн", "agents": ["designer"], "model": "gemini", "description": "UI дашборда с Chart.js"},
+            {"name": "Данные", "agents": ["developer"], "model": "deepseek", "description": "Парсинг CSV/Excel"}
+        ]
+    },
+    {
+        "id": "n8n_automation",
+        "name": "n8n Автоматизация",
+        "icon": "⚡",
+        "prompt": "Настрой автоматизацию: форма на сайте → лид в Б24 → задача менеджеру → уведомление в Telegram",
+        "primary_agent": "integrator",
+        "primary_model": "deepseek",
+        "mode": "multi_sequential",
+        "phases": [
+            {"name": "Форма", "agents": ["designer"], "model": "gemini", "description": "HTML форма заявки"},
+            {"name": "Автоматизация", "agents": ["integrator"], "model": "deepseek", "description": "n8n workflow"}
+        ]
+    }
+]
+
+
+# Improvement 4: Plan cache for repeated request types
+_plan_cache = {}
 
 class Orchestrator:
     def __init__(self, call_llm_func, orion_mode="turbo_standard"):
@@ -106,17 +247,92 @@ class Orchestrator:
             return {"mode":"chat","phases":[{"name":"Ответ","agents":["developer"],"model":"deepseek"}],
                     "primary_model":"deepseek","primary_agent":"developer","understanding":"Чат","ask_user":None}
 
+        # Фича 8: распознаём шаблонные запросы и возвращаем готовый план
+        template_plan = self._match_template(msg, message)
+        if template_plan:
+            return template_plan
+
         if self._is_obvious_design(msg):
             return {"mode":"single","phases":[{"name":"Дизайн","agents":["designer"],"model":"gemini",
                     "description":"Создать HTML/CSS","expected_output":"html_file"}],
                     "primary_model":"gemini","primary_agent":"designer","understanding":"Создание веб-страницы","ask_user":None}
+
+        if self._is_image_request(msg):
+            return {"mode":"single","phases":[{"name":"Генерация","agents":["designer"],
+                    "model":"gemini","description":"Создать изображение"}],
+                    "primary_model":"gemini","primary_agent":"designer",
+                    "understanding":"Генерация изображения","ask_user":None}
 
         if self._is_obvious_code(msg):
             return {"mode":"single","phases":[{"name":"Разработка","agents":["developer"],"model":"deepseek",
                     "description":"Написать код","expected_output":"code_file"}],
                     "primary_model":"deepseek","primary_agent":"developer","understanding":"Написание кода","ask_user":None}
 
+        # Opus для сверхсложных задач
+        if self._needs_opus(msg):
+            return {
+                "mode": "single",
+                "phases": [{"name": "Архитектура", "agents": ["analyst"], "model": "opus",
+                           "description": "Глубокий анализ и проектирование"}],
+                "primary_model": "opus",
+                "primary_agent": "analyst",
+                "understanding": "Сложная задача — подключаю Opus",
+                "ask_user": None
+            }
+
         return self._llm_plan(message, chat_history, has_ssh, ssh_info)
+
+
+    def _match_template(self, msg, original_message):
+        """Фича 8: распознаём шаблонные запросы и возвращаем готовый план"""
+        # Ключевые слова для каждого шаблона
+        template_keywords = {
+            "ecommerce": ["интернет-магазин", "интернет магазин", "онлайн магазин", "магазин с корзиной", "интернет магазин"],
+            "corporate": ["корпоративный сайт", "сайт компании", "бизнес сайт"],
+            "landing_crm": ["лендинг с формой", "лендинг и crm", "лендинг битрикс"],
+            "telegram_bot": ["telegram бот", "телеграм бот", "bot telegram", "бот для telegram"],
+            "analytics_dashboard": ["дашборд аналитики", "дашборд данных", "dashboard аналитика"],
+            "n8n_automation": ["n8n автоматизация", "автоматизация n8n", "n8n workflow"]
+        }
+        for tmpl in PROJECT_TEMPLATES:
+            tid = tmpl["id"]
+            keywords = template_keywords.get(tid, [])
+            if any(kw in msg for kw in keywords):
+                logger.info(f"[Orchestrator] Template match: {tid}")
+                return {
+                    "mode": tmpl["mode"],
+                    "phases": tmpl["phases"],
+                    "primary_model": tmpl["primary_model"],
+                    "primary_agent": tmpl["primary_agent"],
+                    "understanding": f"Шаблон: {tmpl['name']}",
+                    "ask_user": None,
+                    "template_id": tid
+                }
+        return None
+
+    def _needs_sonnet(self, msg):
+        """Задача требует надёжного tool calling (серверы, деплой, FTP)?"""
+        server_words = [
+            "сервер", "деплой", "deploy", "ftp", "ssh", "загрузи на",
+            "настрой", "админк", "nginx", "ssl", "certbot", "домен",
+            "dns", "перенеси", "миграц", "хостинг", "битрикс", "bitrix",
+            "на сайт", "на сервер", "создай страниц", "добавь в меню"
+        ]
+        return any(w in msg.lower() for w in server_words)
+
+    def _needs_opus(self, msg):
+        """Задача достаточно сложная для Opus?"""
+        opus_triggers = [
+            "спроектируй архитектуру", "архитектура системы",
+            "проанализируй весь код", "полный аудит",
+            "спроектируй базу данных", "микросервис",
+            "масштабируемая система", "high load",
+            "напиши техническое задание", "сложная интеграция",
+            "проанализируй и предложи решение",
+            "реструктуризация", "рефакторинг всего",
+            "стратегия развития", "бизнес-анализ"
+        ]
+        return any(t in msg for t in opus_triggers)
 
     def _is_simple_chat(self, msg):
         patterns = [r"^привет",r"^здравствуй",r"^хай",r"^hello",r"^как дела",r"^что ты умеешь",
@@ -134,13 +350,28 @@ class Orchestrator:
         complex_ = any(w in msg for w in ["битрикс","интеграц","деплой","сервер","api","магазин","корзин","оплат","n8n"])
         return design and action and not complex_
 
+    def _is_image_request(self, msg):
+        return any(w in msg for w in ["картинк","изображен","нарисуй","фото ",
+                   "баннер","иллюстрац","иконк","лого","постер"])
+
     def _is_obvious_code(self, msg):
         code = any(re.search(w,msg) for w in ["скрипт","функци","парсер","бот.*telegram","cli","утилит"])
         action = any(re.search(w,msg) for w in ["напиши","создай","сделай"])
         complex_ = any(w in msg for w in ["деплой","сервер","интеграц","битрикс"])
         return code and action and not complex_
 
+    def _get_cache_key(self, msg):
+        words = sorted(set(msg.lower().split()))
+        key_words = [w for w in words if len(w) > 3 and w not in ['этот','этого','этих','нужно','можно','пожалуйста','сделай','создай','напиши']]
+        return hash(tuple(key_words[:5]))
+
     def _llm_plan(self, message, chat_history=None, has_ssh=False, ssh_info=""):
+        _cache_key = self._get_cache_key(message)
+        if _cache_key in _plan_cache:
+            cached = _plan_cache[_cache_key]
+            if time.time() - cached['time'] < 3600:
+                logger.info(f"[Orchestrator] Cache hit for plan (key={_cache_key})")
+                return cached['plan']
         ctx_parts = []
         if self.project_context:
             ctx_parts.append(f"История проекта:\n{self.project_context}")
@@ -154,17 +385,20 @@ class Orchestrator:
         messages = [{"role":"system","content":system},{"role":"user","content":f"Задача: {message}"}]
 
         try:
-            response = self.call_llm(messages, model="deepseek/deepseek-v3.2")
-            logging.info(f"[Orchestrator] LLM raw response: {response[:3000] if response else 'EMPTY'}")
+            response = self.call_llm(messages, model="openai/gpt-4.1-mini")
+            logger.info(f"[Orchestrator] LLM raw response: {response[:3000] if response else 'EMPTY'}")
             plan = self._parse_json(response)
-            logging.info(f"[Orchestrator] Parsed plan: {plan}")
+            logger.info(f"[Orchestrator] Parsed plan: {plan}")
             if plan:
                 self.project_context += f"\n[{time.strftime('%H:%M')}] {message[:100]}\n"
-                return plan
+                # Cache the plan
+            if plan.get('mode') != 'chat':
+                _plan_cache[self._get_cache_key(message)] = {'plan': plan, 'time': time.time()}
+            return plan
         except Exception as e:
             import traceback
-            logging.warning(f"LLM planning failed: {e}")
-            logging.warning(f"Orchestrator traceback: {traceback.format_exc()}")
+            logger.warning(f"LLM planning failed: {e}")
+            logger.warning(f"Orchestrator traceback: {traceback.format_exc()}")
 
         return {"mode":"single","phases":[{"name":"Выполнение","agents":["developer"],"model":"deepseek"}],
                 "primary_model":"deepseek","primary_agent":"developer","understanding":"Fallback","ask_user":None}
@@ -225,9 +459,19 @@ def get_model_id(key):
 def get_agent_prompt(key):
     return AGENT_PROMPTS.get(key, AGENT_PROMPTS["developer"])
 
-def get_model_for_agent(agent_key, orion_mode="turbo_standard"):
+def get_model_for_agent(agent_key, orion_mode="turbo_standard", task_hint=""):
     if agent_key=="designer": return MODEL_MAP["gemini"]
+    if agent_key=="copywriter": return MODEL_MAP["sonnet"]  # ПАТЧ W2-3
     if agent_key=="analyst" and "pro" in orion_mode and "premium" in orion_mode: return MODEL_MAP["sonnet"]
+    if agent_key=="architect" or (agent_key=="analyst" and orion_mode=="architect"): return MODEL_MAP["opus"]
+    if orion_mode=="architect" and agent_key in ("code_reviewer","intent_clarifier","orchestrator"): return MODEL_MAP["opus"]
+    # ── ПАТЧ 5: Sonnet для серверных задач (Pro режимы) ──
+    if "pro" in orion_mode and task_hint:
+        _server_words = ["сервер", "деплой", "ftp", "ssh", "загрузи", "настрой",
+                         "админк", "nginx", "битрикс", "bitrix", "на сайт",
+                         "создай страниц", "добавь в меню", "перенеси"]
+        if any(w in task_hint.lower() for w in _server_words):
+            return MODEL_MAP["sonnet"]
     return MODEL_MAP["deepseek"]
 
 def format_plan_sse(plan):

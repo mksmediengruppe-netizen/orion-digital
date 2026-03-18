@@ -114,9 +114,13 @@ class SemanticMemory:
             if self._client:
                 from qdrant_client.models import Filter, FieldCondition, MatchValue
                 vector = self._embed(query)
-                filt = None
+                # Build filter with user_id AND memory_type
+                conditions = []
                 if user_id:
-                    filt = Filter(must=[FieldCondition(key="user_id", match=MatchValue(value=user_id))])
+                    conditions.append(FieldCondition(key="user_id", match=MatchValue(value=user_id)))
+                if memory_type:
+                    conditions.append(FieldCondition(key="type", match=MatchValue(value=memory_type)))
+                filt = Filter(must=conditions) if conditions else None
                 results = self._client.search(
                     collection_name=self.COLLECTION,
                     query_vector=vector,
@@ -137,6 +141,8 @@ class SemanticMemory:
                 for item in self._tfidf_store:
                     if user_id and item.get("user_id") != user_id:
                         continue
+                    if memory_type and item.get("type") != memory_type:
+                        continue
                     content_words = set(item.get("content", "").lower().split())
                     score = len(query_words & content_words) / max(len(query_words), 1)
                     if score > 0:
@@ -145,6 +151,37 @@ class SemanticMemory:
                 return scored[:limit]
         except Exception as e:
             logger.error(f"SemanticMemory search: {e}")
+            return []
+
+    def get_all_by_type(self, memory_type: str, user_id: str = None,
+                        limit: int = 100) -> List[Dict]:
+        """Загрузить ВСЕ записи определённого типа без семантического поиска."""
+        try:
+            if self._client:
+                from qdrant_client.models import Filter, FieldCondition, MatchValue
+                conditions = [FieldCondition(key="type", match=MatchValue(value=memory_type))]
+                if user_id:
+                    conditions.append(FieldCondition(key="user_id", match=MatchValue(value=user_id)))
+                filt = Filter(must=conditions)
+                results, _next = self._client.scroll(
+                    collection_name=self.COLLECTION,
+                    scroll_filter=filt,
+                    limit=limit,
+                    with_payload=True
+                )
+                return [dict(r.payload) for r in results if r.payload.get("content")]
+            else:
+                # In-memory fallback
+                out = []
+                for item in self._tfidf_store:
+                    if item.get("type") != memory_type:
+                        continue
+                    if user_id and item.get("user_id") != user_id:
+                        continue
+                    out.append(item)
+                return out[:limit]
+        except Exception as e:
+            logger.error(f"SemanticMemory get_all_by_type: {e}")
             return []
 
     def rerank(self, results: List[Dict], query: str, call_llm) -> List[Dict]:

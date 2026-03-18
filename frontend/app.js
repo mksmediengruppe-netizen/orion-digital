@@ -1,3 +1,14 @@
+
+/* ── PROJECT TEMPLATES ────────────────────────────────── */
+const PROJECT_TEMPLATES = [
+    { icon: '🏪', name: 'Интернет-магазин', prompt: 'Создай интернет-магазин с каталогом товаров, корзиной, оформлением заказа и интеграцией платёжной системы' },
+    { icon: '🏢', name: 'Корпоративный сайт', prompt: 'Создай корпоративный сайт компании: главная, о компании, услуги, портфолио, контакты, блог' },
+    { icon: '📱', name: 'Лендинг + CRM', prompt: 'Создай лендинг с формой заявки и интеграцией Битрикс24 для приёма лидов' },
+    { icon: '🤖', name: 'Telegram бот', prompt: 'Создай Telegram бота для приёма заявок с уведомлениями менеджеру' },
+    { icon: '📊', name: 'Дашборд аналитики', prompt: 'Создай дашборд для визуализации данных из CSV/Excel с графиками и фильтрами' },
+    { icon: '⚡', name: 'n8n Автоматизация', prompt: 'Настрой автоматизацию: форма на сайте → лид в Б24 → задача менеджеру → уведомление в Telegram' },
+];
+
 /* ============================================================
    ORION Digital v1.4 — app.js
    Чистый JS: Auth, Chat, SSE Streaming, Activity Panel,
@@ -14,7 +25,8 @@ const MODES = {
     'turbo-basic':   { label: 'Turbo Обычный',  tag: 'TURBO', desc: 'Быстрые ответы, DeepSeek V3. Идеально для задач разработки.' },
     'turbo-premium': { label: 'Turbo Премиум',  tag: 'PRO',   desc: 'Turbo + Claude Sonnet. Лучшее качество для сложных задач.' },
     'pro-basic':     { label: 'Pro Обычный',    tag: 'AGENT', desc: 'Агентный режим с инструментами. SSH, браузер, файлы.' },
-    'pro-premium':   { label: 'Pro Премиум',    tag: 'ELITE', desc: 'Мультиагент: Designer + Developer + DevOps одновременно.' }
+    'pro-premium':   { label: 'Pro Премиум',    tag: 'ELITE', desc: 'Мультиагент: Designer + Developer + DevOps одновременно.' },
+    'architect':     { label: 'Architect',        tag: 'OPUS',  desc: 'Claude Opus 4. Архитектура, глубокий анализ, аудит кода.' }
 };
 
 /* ── MODE_INFO (УЛУЧ-3) ──────────────────────────────────── */
@@ -27,6 +39,7 @@ const MODE_INFO = {
     'pro_basic':      { text: 'Sonnet планирует · DeepSeek исполняет · Качество', icon: '🧠' },
     'pro-premium':    { text: 'Claude Sonnet 4.6 · Максимум качества', icon: '🚀' },
     'pro_premium':    { text: 'Claude Sonnet 4.6 · Максимум качества', icon: '🚀' },
+    'architect':      { text: 'Claude Opus 4 · Архитектор · Для сложных задач', icon: '🏛' },
 };
 
 const WELCOME_CHIPS = [
@@ -35,7 +48,9 @@ const WELCOME_CHIPS = [
     'Напиши Python скрипт для парсинга',
     'Настрой nginx с SSL сертификатом',
     'Сделай REST API на FastAPI',
-    'Проанализируй логи и найди ошибки'
+    'Проанализируй логи и найди ошибки',
+    'Покажи, как использовать новые функции Chart.js и артефактов.',
+    'Продемонстрируй работу Claude Opus в режиме архитектора.'
 ];
 
 const MODEL_TAGS = [
@@ -284,9 +299,15 @@ const Auth = {
 
     onLogin() {
         this.hideAuthScreen();
+        // FIX: Sync budget from user data on login
+        if (state.user) {
+            if (state.user.monthly_limit) state.monthlyLimit = state.user.monthly_limit;
+            if (state.user.total_spent !== undefined) state.totalCost = state.user.total_spent;
+        }
         UI.init();
         ChatList.load();
         UI.updateUserInfo();
+        SSHSettings.init();
     },
 
     logout() {
@@ -335,6 +356,13 @@ const Theme = {
 /* ── UI INIT ──────────────────────────────────────────────── */
 const UI = {
     init() {
+        // ПАТЧ W1-1: Восстановить режим из localStorage
+        try {
+            const savedMode = localStorage.getItem('orion_mode');
+            if (savedMode && ['turbo_basic', 'turbo_premium', 'pro_basic', 'pro_premium'].includes(savedMode)) {
+                state.mode = savedMode;
+            }
+        } catch(e) {}
         this.renderModes();
         this.renderWelcome();
         this.bindEvents();
@@ -375,6 +403,8 @@ const UI = {
             infoBar.classList.add('mode-info-bar');
         }
         this.showModeInfo(state.mode);
+        // ПАТЧ W1-1: Подсветить восстановленный режим
+        $$('.mode-btn').forEach(b => b.classList.toggle('active', b.dataset.mode === state.mode));
     },
 
     showModeInfo(key) {
@@ -395,10 +425,21 @@ const UI = {
 
     setMode(key) {
         state.mode = key;
+        try { localStorage.setItem('orion_mode', key); } catch(e) {}
         $$('.mode-btn').forEach(b => b.classList.toggle('active', b.dataset.mode === key));
         this.updateModeDesc();
         this.updateFooterInfo();
         this.showModeInfo(key);  // УЛУЧ-3: обновить инфо-бар при выборе
+        // Improvement 3: Update model label on mode switch
+        const MODEL_LABELS = {
+            'turbo-basic': 'DeepSeek V3',
+            'turbo-premium': 'Claude Sonnet',
+            'pro-basic': 'DeepSeek V3 + Sonnet',
+            'pro-premium': 'Claude Sonnet',
+            'architect': 'Claude Opus 4'
+        };
+        const modelLabel = document.querySelector('.header-model, .model-label, [data-model]');
+        if (modelLabel) modelLabel.textContent = MODEL_LABELS[key] || 'DeepSeek V3';
     },
 
     updateModeDesc() {
@@ -413,22 +454,36 @@ const UI = {
         const ws = el('div', 'welcome-screen');
         ws.innerHTML = `
             <div class="welcome-logo">
-                <div class="welcome-logo-icon">OR</div>
-                <div class="welcome-title">ORION Digital</div>
-                <div class="welcome-subtitle">AI-агент с полным доступом к серверу, браузеру и коду. Просто опишите задачу.</div>
+                <div class="welcome-logo-title">
+                    <span class="logo-text-big">ORION</span>
+                    <span class="logo-sub-big">Digital</span>
+                </div>
             </div>
+            <p class="welcome-subtitle">Мультиагентная AI-система нового поколения</p>
             <div class="welcome-chips">
-                ${WELCOME_CHIPS.map(c => `<button class="welcome-chip" onclick="Chat.sendFromChip('${c.replace(/'/g, "\\'")}')">${c}</button>`).join('')}
+                ${WELCOME_CHIPS.map(c => `<button class="welcome-chip" data-prompt="${c.replace(/"/g, '&quot;')}">${c}</button>`).join('')}
             </div>
             <div class="welcome-models">
                 ${MODEL_TAGS.map(m => `<div class="model-tag"><span class="model-tag-dot" style="background:${m.color}"></span>${m.name}</div>`).join('')}
+            </div>
+            <div style="margin-top:16px;text-align:center">
+                <button class="welcome-templates-btn">📋 Посмотреть шаблоны проектов</button>
             </div>`;
         msgs.appendChild(ws);
+        // Bind chip click handlers after DOM insertion
+        ws.querySelectorAll('.welcome-chip[data-prompt]').forEach(btn => {
+            btn.addEventListener('click', () => Chat.sendFromChip(btn.dataset.prompt));
+        });
+        const tplBtn = ws.querySelector('.welcome-templates-btn');
+        if (tplBtn && typeof Templates !== 'undefined') tplBtn.addEventListener('click', () => Templates.open());
     },
 
     updateUserInfo() {
         const u = state.user;
         if (!u) return;
+        // FIX: Sync monthlyLimit and totalCost from user data
+        if (u.monthly_limit) state.monthlyLimit = u.monthly_limit;
+        if (u.total_spent !== undefined) state.totalCost = u.total_spent;
         const nameEl = document.querySelector('.user-name');
         const roleEl = document.querySelector('.user-role');
         const avatarEl = document.querySelector('.user-avatar');
@@ -437,7 +492,15 @@ const UI = {
         if (avatarEl) avatarEl.textContent = (u.full_name || u.username || 'U')[0].toUpperCase();
 
         const adminBtn = $('btn-admin');
-        if (adminBtn) adminBtn.style.display = u.role === 'admin' ? '' : 'none';
+        if (adminBtn) {
+            if (u.role === 'admin') {
+                adminBtn.classList.remove('hidden');
+                adminBtn.style.display = '';
+            } else {
+                adminBtn.classList.add('hidden');
+                adminBtn.style.display = 'none';
+            }
+        }
 
         this.updateCostBar();
     },
@@ -504,10 +567,24 @@ const UI = {
         if (count > 0) {
             if (!qi) {
                 qi = el('div', 'queue-indicator');
+                qi.style.cssText = 'padding: 6px 12px; background: var(--bg-hover, #1e1e2e); border-radius: 8px; margin-bottom: 6px; font-size: 12px;';
                 const inputArea = document.querySelector('.chat-input-area');
                 if (inputArea) inputArea.insertBefore(qi, inputArea.firstChild);
             }
-            qi.innerHTML = `⏳ В очереди: ${count} сообщение${count > 1 ? 'я' : ''}`;
+            // ПАТЧ W1-4: Расширенная очередь с кнопкой очистки
+            let html = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+                <span>⏳ В очереди: ${count}</span>
+                <button onclick="state.messageQueue=[];UI.showQueueIndicator(0)" style="background:none;border:none;color:#f87171;cursor:pointer;font-size:11px;">Очистить</button>
+            </div>`;
+            state.messageQueue.forEach((item, i) => {
+                const preview = (item.text || '').substring(0, 60) + ((item.text || '').length > 60 ? '...' : '');
+                const priority = item.priority ? ' ⚡' : '';
+                html += `<div style="display:flex;align-items:center;gap:6px;padding:2px 0;font-size:11px;color:var(--text-secondary);">
+                    <span>${i+1}. ${priority}${preview}</span>
+                    <button onclick="state.messageQueue.splice(${i},1);UI.showQueueIndicator(state.messageQueue.length)" style="background:none;border:none;color:#f87171;cursor:pointer;font-size:10px;">✕</button>
+                </div>`;
+            });
+            qi.innerHTML = html;
         } else if (qi) {
             qi.remove();
         }
@@ -556,7 +633,18 @@ const UI = {
                     Chat.send();
                 }
             });
-            textarea.addEventListener('input', () => this.autoResize(textarea));
+            textarea.addEventListener('input', () => {
+                this.autoResize(textarea);
+                // ══ DRAFT PERSISTENCE: save draft to sessionStorage ══
+                if (state.currentChatId) {
+                    const val = textarea.value;
+                    if (val) {
+                        sessionStorage.setItem('draft_' + state.currentChatId, val);
+                    } else {
+                        sessionStorage.removeItem('draft_' + state.currentChatId);
+                    }
+                }
+            });
         }
 
         // Send button
@@ -612,6 +700,46 @@ const UI = {
             chatArea.addEventListener('drop', e => { e.preventDefault(); Attachments.handleFiles(e.dataTransfer.files); Attachments.hideDropOverlay(); });
         }
 
+        // ══ PATCH 5: Rename button handler ══
+        const editTitleBtn = $('btn-edit-title');
+        if (editTitleBtn) {
+            editTitleBtn.addEventListener('click', () => {
+                const titleEl = $('chat-title');
+                if (!titleEl || !state.currentChatId) return;
+                titleEl.contentEditable = 'true';
+                titleEl.focus();
+                // Select all text
+                const range = document.createRange();
+                range.selectNodeContents(titleEl);
+                const sel = window.getSelection();
+                sel.removeAllRanges();
+                sel.addRange(range);
+                // Style to show it's editable
+                titleEl.style.outline = '2px solid #d4af37';
+                titleEl.style.borderRadius = '4px';
+                titleEl.style.padding = '2px 6px';
+                const finishEdit = () => {
+                    titleEl.contentEditable = 'false';
+                    titleEl.style.outline = '';
+                    titleEl.style.borderRadius = '';
+                    titleEl.style.padding = '';
+                    const newTitle = titleEl.textContent.trim();
+                    if (newTitle) Chat.renameCurrentChat(newTitle);
+                    titleEl.removeEventListener('blur', finishEdit);
+                    titleEl.removeEventListener('keydown', handleKey);
+                };
+                const handleKey = (e) => {
+                    if (e.key === 'Enter') { e.preventDefault(); titleEl.blur(); }
+                    if (e.key === 'Escape') {
+                        const chat = state.chats.find(c => c.id === state.currentChatId);
+                        titleEl.textContent = chat ? chat.title : 'Новый чат';
+                        titleEl.blur();
+                    }
+                };
+                titleEl.addEventListener('blur', finishEdit);
+                titleEl.addEventListener('keydown', handleKey);
+            });
+        }
         // Activity panel toggle
         const activityToggle = $('btn-activity-toggle');
         if (activityToggle) activityToggle.addEventListener('click', () => ActivityPanel.toggle());
@@ -646,8 +774,12 @@ const UI = {
         const takeoverBtn = $('btn-takeover-send');
         if (takeoverBtn) takeoverBtn.addEventListener('click', () => ActivityPanel.sendTakeover());
 
-        // Welcome chips (data-prompt buttons in HTML)
-        document.querySelectorAll('[data-prompt]').forEach(btn => {
+        // Templates button
+        const templatesBtn = $('btn-templates');
+        if (templatesBtn) templatesBtn.addEventListener('click', () => Templates.open());
+
+        // Welcome chips (data-prompt buttons in HTML) — only static chips in index.html
+        document.querySelectorAll('#welcome-chips .welcome-chip[data-prompt]').forEach(btn => {
             btn.addEventListener('click', () => Chat.sendFromChip(btn.dataset.prompt));
         });
 
@@ -657,6 +789,7 @@ const UI = {
                 Lightbox.close();
                 AdminPanel.close();
                 Sidebar.close();
+                Templates.close();
             }
         });
     },
@@ -932,6 +1065,18 @@ const Chat = {
         state.currentChatCost = chat?.total_cost || 0;
         UI.updateFooterInfo();
 
+        // Restore draft from sessionStorage
+        const textarea = $('message-input');
+        if (textarea) {
+            const draft = sessionStorage.getItem('draft_' + chatId);
+            if (draft) {
+                textarea.value = draft;
+                UI.autoResize(textarea);
+            } else {
+                textarea.value = '';
+            }
+        }
+
         try {
             const data = await API.get('/chats/' + chatId);
             // Backend returns {chat: {messages: [...], ...}}
@@ -943,6 +1088,10 @@ const Chat = {
                 UI.updateFooterInfo();
             }
             this.renderMessages();
+
+            // ══ TASK PERSISTENCE: check if a task is running for this chat ══
+            this._checkRunningTask(chatId);
+
         } catch (e) {
             Toast.show('Ошибка загрузки чата', 'error');
         }
@@ -986,8 +1135,19 @@ const Chat = {
         if (!text && !state.attachments.length) return;
 
         if (state.isStreaming) {
-            state.messageQueue.push({ text, attachments: [...state.attachments] });
+            // Priority detection: "сейчас", "срочно", "now", "urgent" → push to front
+            const _urgentKw = ['сейчас', 'срочно', 'now', 'urgent', 'немедленно'];
+            const _isUrgent = _urgentKw.some(kw => text.toLowerCase().includes(kw));
+            const queueItem = { text, attachments: [...state.attachments], priority: _isUrgent };
+            if (_isUrgent) {
+                state.messageQueue.unshift(queueItem);
+                Toast.show('⚡ Срочная задача добавлена в начало очереди', 'info');
+            } else {
+                state.messageQueue.push(queueItem);
+            }
             UI.showQueueIndicator(state.messageQueue.length);
+            // Clear draft on queue
+            sessionStorage.removeItem('draft_' + state.currentChatId);
             textarea.value = '';
             UI.autoResize(textarea);
             state.attachments = [];
@@ -1000,6 +1160,8 @@ const Chat = {
         const attachments = [...state.attachments];
         state.attachments = [];
         Attachments.renderPreviews();
+        // Clear draft on send
+        if (state.currentChatId) sessionStorage.removeItem('draft_' + state.currentChatId);
 
         await this._doSend(text, attachments);
     },
@@ -1051,7 +1213,8 @@ const Chat = {
             const body = {
                 message: text,
                 mode: state.mode,
-                attachments: attachments.map(a => a.id || a.url).filter(Boolean)
+                attachments: attachments.map(a => a.id || a.url).filter(Boolean),
+                verify: document.getElementById('verification-toggle')?.checked || false
             };
             // Multi-SSH: отправляем SSH данные активного сервера
             if (typeof MultiSSH !== 'undefined') {
@@ -1131,6 +1294,33 @@ const Chat = {
     },
 
     _handleSSE(evt, aiMsgEl, aiContent, startTime) {
+        // ПАТЧ 8: Обработка событий верификации
+        if (evt.type === 'verification') {
+            const status = evt.status;
+            let verifyText = '';
+            if (status === 'checking') {
+                verifyText = `Проверяю результат через ${evt.model || 'второй ИИ'}...`;
+            } else if (status === 'verified') {
+                verifyText = `Проверено — ошибок нет`;
+            } else if (status === 'issues_found') {
+                verifyText = `Найдено проблем: ${evt.issues}. ${evt.details || ''}`;
+            } else if (status === 'ok') {
+                verifyText = `${evt.message || 'Проверка пройдена'}`;
+            } else if (status === 'warning') {
+                verifyText = `${evt.message || 'Возможная проблема'}`;
+            }
+            if (verifyText) {
+                const actPanel = document.querySelector('.activity-panel, .actions-log');
+                if (actPanel) {
+                    const div = document.createElement('div');
+                    div.className = 'activity-item verification';
+                    div.textContent = verifyText;
+                    div.style.cssText = 'padding: 4px 8px; font-size: 12px; color: #7c5cfc; border-left: 2px solid #7c5cfc;';
+                    actPanel.appendChild(div);
+                }
+            }
+            return aiContent;
+        }
         switch (evt.type) {
             case 'content':  // backend sends {type: 'content', text: '...'}
             case 'text':
@@ -1182,18 +1372,45 @@ const Chat = {
                 break;
 
             // ── BUG-4 FIX: thinking ──────────────────────────────────
+            case 'model_info':
+            case 'agent_mode':
+                {
+                    const modelEl = document.querySelector('.header-model, .model-label, [data-model]');
+                    if (modelEl && evt.model) {
+                        const labels = {
+                            'deepseek/deepseek-v3.2': 'DeepSeek V3',
+                            'google/gemini-2.5-pro': 'Gemini Pro',
+                            'anthropic/claude-sonnet-4.6': 'Claude Sonnet',
+                            'anthropic/claude-opus-4': 'Claude Opus'
+                        };
+                        modelEl.textContent = labels[evt.model] || evt.model;
+                    }
+                }
+                break;
             case 'thinking':
                 ActivityPanel.show();
                 ActivityPanel.setStatus('running');
                 ActivityPanel.addLine('thinking', '🤔', evt.content || evt.text || '');
-                // ПАТЧ B3: показываем индикатор "Думаю..." в чате
-                if (!state._thinkingShown) {
+                // EXTENDED THINKING: показываем блок размышлений в чате
+                {
                     const _thinkBubble = aiMsgEl ? aiMsgEl.querySelector('.msg-bubble') : null;
-                    if (_thinkBubble && !_thinkBubble.querySelector('.thinking-indicator')) {
-                        const _indicator = document.createElement('div');
-                        _indicator.className = 'thinking-indicator';
-                        _indicator.innerHTML = '<span class="thinking-dot"></span><span class="thinking-dot"></span><span class="thinking-dot"></span>&nbsp;Анализирую задачу...';
-                        _thinkBubble.appendChild(_indicator);
+                    if (_thinkBubble) {
+                        // Убираем индикатор загрузки если есть
+                        const _oldIndicator = _thinkBubble.querySelector('.thinking-indicator');
+                        if (_oldIndicator) _oldIndicator.remove();
+                        // Создаём или обновляем thinking-block
+                        let _thinkBlock = _thinkBubble.querySelector('.thinking-block');
+                        if (!_thinkBlock) {
+                            _thinkBlock = document.createElement('div');
+                            _thinkBlock.className = 'thinking-block';
+                            _thinkBlock.innerHTML = '<div class="thinking-header">🧠 Анализирую задачу...</div><div class="thinking-content"></div>';
+                            _thinkBubble.appendChild(_thinkBlock);
+                        }
+                        const _thinkContent = _thinkBlock.querySelector('.thinking-content');
+                        if (_thinkContent) {
+                            const thinkText = evt.content || evt.text || '';
+                            _thinkContent.innerHTML = (typeof marked !== 'undefined' ? marked.parse(thinkText) : thinkText.replace(/\n/g, '<br>'));
+                        }
                         state._thinkingShown = true;
                     }
                 }
@@ -1210,6 +1427,16 @@ const Chat = {
                     const _bubble = aiMsgEl ? aiMsgEl.querySelector('.msg-bubble') : null;
                     if (_bubble) {
                         state._lastToolChip = addToolChip(_bubble, evt.tool || evt.name || 'tool', evt.args || '');
+                    }
+                }
+                // ПАТЧ W2-2: Автоматически продвигать task progress
+                if (state.taskProgress && state.taskProgress.steps && state.taskProgress.steps.length) {
+                    const pendingIdx = state.taskProgress.steps.findIndex(s => s.status === 'pending');
+                    if (pendingIdx >= 0) {
+                        state.taskProgress.steps.forEach(s => { if (s.status === 'running') s.status = 'done'; });
+                        state.taskProgress.steps[pendingIdx].status = 'running';
+                        state.taskProgress.current = state.taskProgress.steps.filter(s => s.status === 'done').length;
+                        ActivityPanel.renderTaskProgress();
                     }
                 }
                 break;
@@ -1282,14 +1509,85 @@ const Chat = {
             case 'self_heal':
                 ActivityPanel.addLine('thinking', '🔁', `Самоисправление #${evt.attempt || 1}: ${evt.fix_description || 'применяю фикс...'}`);
                 break;
+
+            case 'chart':
+            case 'generate_chart': {
+                const chartId = 'chart-' + Date.now();
+                const wrap = document.createElement('div');
+                wrap.className = 'chart-artifact';
+                wrap.innerHTML = `
+                    <div class="artifact-header">
+                        <span>📊 ${evt.title || 'График'}</span>
+                        <button class="art-btn" onclick="this.closest('.chart-artifact').querySelector('canvas').toBlob(b=>{const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='chart.png';a.click()})">📥 Скачать</button>
+                    </div>
+                    <div class="chart-container"><canvas id="${chartId}" height="300"></canvas></div>
+                `;
+                const body = aiMsgEl ? aiMsgEl.querySelector('.msg-body') : null;
+                if (body) body.appendChild(wrap);
+                setTimeout(() => {
+                    const ctx = document.getElementById(chartId);
+                    if (ctx && typeof Chart !== 'undefined') {
+                        new Chart(ctx, evt.config || {
+                            type: evt.chart_type || 'bar',
+                            data: evt.data || {},
+                            options: { responsive: true, maintainAspectRatio: false, 
+                                       plugins: { legend: { position: 'bottom' } } }
+                        });
+                    }
+                }, 100);
+                break;
+            }
             case 'artifact':
                 Messages.addArtifact(aiMsgEl, evt);
                 break;
+
+            case 'artifact_update': {
+                const artId = evt.artifact_id || Date.now();
+                ArtifactManager.create(artId, evt.html_content, evt.artifact_type, evt.filename);
+                break;
+            }
             case 'followups':
                 Messages.addFollowups(aiMsgEl, evt.suggestions || []);
                 break;
+            case 'task_steps':
+                // ПАТЧ W1-2 + W2-2: Показать план в Activity Panel
+                ActivityPanel.show();
+                if (evt.steps && evt.steps.length) {
+                    state.taskProgress = {
+                        current: 0,
+                        total: evt.steps.length,
+                        steps: evt.steps.map((s, i) => ({
+                            name: s.name || s,
+                            status: 'pending',
+                            index: i
+                        }))
+                    };
+                    ActivityPanel.renderTaskProgress();
+                }
+                break;
+            case 'step_update':
+                // ПАТЧ W2-2: Обновление конкретного шага
+                if (state.taskProgress && state.taskProgress.steps && evt.step_index != null) {
+                    state.taskProgress.steps[evt.step_index].status = evt.status || 'done';
+                    state.taskProgress.current = state.taskProgress.steps.filter(s => s.status === 'done').length;
+                    ActivityPanel.renderTaskProgress();
+                }
+                break;
             case 'task_complete':
                 Messages.addTaskSummary(aiMsgEl, evt);
+                // Push notification
+                if ('Notification' in window && Notification.permission === 'granted') {
+                    new Notification('ORION Digital', {
+                        body: '✅ Задача завершена: ' + (evt.summary || 'готово'),
+                        icon: '/favicon.ico'
+                    });
+                }
+                // ПАТЧ W2-2: Все шаги done
+                if (state.taskProgress && state.taskProgress.steps) {
+                    state.taskProgress.steps.forEach(s => { if (s.status !== 'error') s.status = 'done'; });
+                    state.taskProgress.current = state.taskProgress.total;
+                    ActivityPanel.renderTaskProgress();
+                }
                 ActivityPanel.setStatus('done');
                 break;
             case 'human_handoff':
@@ -1309,6 +1607,24 @@ const Chat = {
                 // Агент спрашивает пользователя
                 AskUser.show(evt.question);
                 break;
+
+            case 'auth_required':
+                // ПАТЧ ЗАДАЧА-1: browser_ask_auth — безопасная авторизация
+                AuthForm.show(evt);
+                break;
+
+            case 'thinking_start':
+                ActivityPanel.addLine('thinking', '🧠', 'Анализирую задачу...');
+                break;
+            case 'thinking_end': {
+                const blocks = document.querySelectorAll('.thinking-block');
+                if (blocks.length) {
+                    const last = blocks[blocks.length - 1];
+                    last.classList.add('thinking-collapsed');
+                    last.querySelector('.thinking-header').onclick = () => last.classList.toggle('thinking-collapsed');
+                }
+                break;
+            }
             case 'error':
                 ActivityPanel.addLine('error', '❌', evt.message || evt.error || 'Ошибка');
                 break;
@@ -1344,7 +1660,10 @@ const Chat = {
         const map = {
             ssh_execute: '🔧', file_write: '📝', file_read: '📖',
             browser_navigate: '🌐', browser_get_text: '🌐', browser_check_site: '🌐',
-            browser_check_api: '🌐', web_search: '🔍', web_fetch: '🔍',
+            browser_check_api: '🌐', browser_click: '👆', browser_fill: '✍️',
+            browser_submit: '📨', browser_select: '📋', browser_ask_auth: '🔐',
+            ftp_upload: '📤', ftp_download: '📥', ftp_list: '📂',
+            web_search: '🔍', web_fetch: '🔍',
             code_interpreter: '💻', generate_file: '📄', generate_image: '🖼️',
             generate_chart: '📊', generate_report: '📋', create_artifact: '🎨',
             store_memory: '🧠', recall_memory: '🧠', analyze_image: '🔍',
@@ -1364,6 +1683,105 @@ const Chat = {
         UI.showQueueIndicator(0);
         ActivityPanel.setStatus('done');
         Toast.show('Остановлено', 'warning');
+    },
+
+    removeFromQueue(index) {
+        if (index >= 0 && index < state.messageQueue.length) {
+            const removed = state.messageQueue.splice(index, 1)[0];
+            UI.showQueueIndicator(state.messageQueue.length);
+            Toast.show('Задача удалена: ' + (removed.text || '').slice(0, 30), 'info');
+        }
+    },
+
+    // ══ TASK PERSISTENCE: check if backend has a running task for this chat ══
+    async _checkRunningTask(chatId) {
+        try {
+            const status = await API.get('/chats/' + chatId + '/status');
+            if (status.status === 'running') {
+                console.log('[TaskPersist] Running task found for chat', chatId, '- reconnecting...');
+                Toast.show('⚡ Переподключение к задаче...', 'info');
+                this._reconnectSSE(chatId);
+            }
+        } catch (e) {
+            // No running task or endpoint not available — that's fine
+            console.log('[TaskPersist] No running task for', chatId);
+        }
+    },
+
+    // ══ TASK PERSISTENCE: reconnect to running task SSE stream ══
+    async _reconnectSSE(chatId) {
+        UI.setStreaming(true);
+        ActivityPanel.show();
+        ActivityPanel.setStatus('running');
+        ActivityPanel.addLine('info', '🔄', 'Переподключение к задаче...');
+
+        const startTime = Date.now();
+        let aiMsgEl = null;
+        let aiContent = '';
+
+        // Create AI message placeholder for reconnected stream
+        const aiMsg = { id: Utils.generateId(), role: 'assistant', content: '', created_at: new Date().toISOString() };
+        aiMsgEl = Messages.renderStreaming(aiMsg);
+        $('messages-container').appendChild(aiMsgEl);
+        this.scrollToBottom();
+
+        try {
+            const controller = new AbortController();
+            state.streamController = controller;
+            state.isStreaming = true;
+
+            const res = await fetch(API_BASE + '/chats/' + chatId + '/reconnect', {
+                method: 'GET',
+                headers: { 'Authorization': 'Bearer ' + state.token },
+                signal: controller.signal
+            });
+
+            if (!res.ok) throw new Error('Reconnect error ' + res.status);
+
+            const reader = res.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split('\n');
+                buffer = lines.pop();
+                for (const line of lines) {
+                    if (line.startsWith('data: ')) {
+                        const raw = line.slice(6).trim();
+                        if (raw === '[DONE]') break;
+                        try {
+                            const evt = JSON.parse(raw);
+                            aiContent = this._handleSSE(evt, aiMsgEl, aiContent, startTime);
+                        } catch (e) {
+                            aiContent += raw;
+                            Messages.updateStreamContent(aiMsgEl, aiContent);
+                        }
+                        this.scrollToBottom(false);
+                    }
+                }
+            }
+        } catch (err) {
+            if (err.name !== 'AbortError') {
+                ActivityPanel.addLine('error', '❌', 'Ошибка переподключения: ' + err.message);
+            }
+        } finally {
+            const duration = Date.now() - startTime;
+            Messages.finalizeStreaming(aiMsgEl, aiContent, duration);
+            state.isStreaming = false;
+            state.streamController = null;
+            UI.setStreaming(false);
+            ActivityPanel.setStatus('done');
+
+            // Process queue after reconnected task finishes
+            if (state.messageQueue.length > 0) {
+                const next = state.messageQueue.shift();
+                UI.showQueueIndicator(state.messageQueue.length);
+                setTimeout(() => this._doSend(next.text, next.attachments), 300);
+            }
+        }
     },
 
     regenerate() {
@@ -1656,6 +2074,109 @@ const Messages = {
     }
 };
 
+
+
+/* ── VOICE INPUT ──────────────────────────────────────── */
+const VoiceInput = {
+    recognition: null,
+    isListening: false,
+
+    init() {
+        if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) return;
+        const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+        this.recognition = new SR();
+        this.recognition.lang = 'ru-RU';
+        this.recognition.interimResults = true;
+        this.recognition.continuous = true;
+
+        this.recognition.onresult = (event) => {
+            let final = '', interim = '';
+            for (let i = event.resultIndex; i < event.results.length; i++) {
+                if (event.results[i].isFinal) {
+                    final += event.results[i][0].transcript;
+                } else {
+                    interim += event.results[i][0].transcript;
+                }
+            }
+            const textarea = document.querySelector('#message-input');
+            if (textarea) {
+                if (final) textarea.value += final + ' ';
+                const indicator = document.getElementById('voice-interim');
+                if (indicator) indicator.textContent = interim;
+            }
+        };
+
+        this.recognition.onend = () => {
+            if (this.isListening) this.recognition.start();
+        };
+    },
+
+    toggle() {
+        if (!this.recognition) {
+            alert('Голосовой ввод не поддерживается в этом браузере');
+            return;
+        }
+        if (this.isListening) this.stop(); else this.start();
+    },
+
+    start() {
+        this.isListening = true;
+        this.recognition.start();
+        const btn = document.getElementById('btn-voice');
+        if (btn) { btn.classList.add('voice-active'); btn.title = 'Остановить запись'; }
+    },
+
+    stop() {
+        this.isListening = false;
+        this.recognition.stop();
+        const btn = document.getElementById('btn-voice');
+        if (btn) { btn.classList.remove('voice-active'); btn.title = 'Голосовой ввод'; }
+        const indicator = document.getElementById('voice-interim');
+        if (indicator) indicator.textContent = '';
+    }
+};
+
+/* ── ARTIFACT MANAGER (iterative editing) ──────────────── */
+const ArtifactManager = {
+    artifacts: {},
+    history: {},
+
+    create(id, html, type, filename) {
+        const el = document.querySelector(`[data-artifact-id="${id}"]`);
+        if (el) {
+            this.update(id, html);
+            return;
+        }
+        this.artifacts[id] = { html, type, filename };
+    },
+
+    update(id, newHtml) {
+        const art = this.artifacts[id];
+        if (!art) return;
+        if (!this.history[id]) this.history[id] = [];
+        this.history[id].push(art.html);
+        art.html = newHtml;
+        const iframe = document.querySelector(`[data-artifact-id="${id}"] iframe`);
+        if (iframe) iframe.srcdoc = newHtml;
+        const code = document.querySelector(`[data-artifact-id="${id}"] .artifact-code code`);
+        if (code) code.textContent = newHtml;
+        const card = document.querySelector(`[data-artifact-id="${id}"]`);
+        if (card) {
+            card.classList.add('artifact-updated');
+            setTimeout(() => card.classList.remove('artifact-updated'), 1000);
+        }
+    },
+
+    undo(id) {
+        if (this.history[id] && this.history[id].length > 0) {
+            const prev = this.history[id].pop();
+            this.artifacts[id].html = prev;
+            const iframe = document.querySelector(`[data-artifact-id="${id}"] iframe`);
+            if (iframe) iframe.srcdoc = prev;
+        }
+    }
+};
+
 /* ── ARTIFACTS ────────────────────────────────────────────── */
 const Artifacts = {
     render(evt) {
@@ -1810,6 +2331,7 @@ const Artifacts = {
         const size = evt.size ? Utils.formatSize(evt.size) : '';
         const url = evt.url || evt.download_url || '#';
         const icon = Utils.getFileIcon(filename);
+        const isPDF = filename.toLowerCase().endsWith('.pdf');
 
         card.innerHTML = `
             <div class="artifact-header">
@@ -1823,10 +2345,96 @@ const Artifacts = {
                     ${size ? `<div class="artifact-doc-size">${size}</div>` : ''}
                 </div>
                 <a class="btn btn-primary btn-sm" href="${url}" download="${filename}">⬇️ Скачать</a>
-            </div>`;
+            </div>
+            ${isPDF && url && url !== '#' ? '<div class="pdf-preview" id="pdf-preview-' + Utils.generateId() + '"><div class="pdf-header">📄 Предпросмотр PDF</div><div class="pdf-pages"></div></div>' : ''}`;
+
+        // PDF.js preview rendering
+        if (isPDF && url && url !== '#') {
+            const previewEl = card.querySelector('.pdf-pages');
+            if (previewEl && typeof pdfjsLib !== 'undefined') {
+                pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+                pdfjsLib.getDocument(url).promise.then(pdfDoc => {
+                    const totalPages = Math.min(pdfDoc.numPages, 3);
+                    for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
+                        pdfDoc.getPage(pageNum).then(page => {
+                            const viewport = page.getViewport({ scale: 1.2 });
+                            const pageDiv = document.createElement('div');
+                            pageDiv.className = 'pdf-page-preview';
+                            const canvas = document.createElement('canvas');
+                            canvas.width = viewport.width;
+                            canvas.height = viewport.height;
+                            const numLabel = document.createElement('span');
+                            numLabel.className = 'pdf-page-num';
+                            numLabel.textContent = 'Стр. ' + pageNum;
+                            pageDiv.appendChild(canvas);
+                            pageDiv.appendChild(numLabel);
+                            previewEl.appendChild(pageDiv);
+                            page.render({ canvasContext: canvas.getContext('2d'), viewport });
+                        });
+                    }
+                    if (pdfDoc.numPages > 3) {
+                        const more = document.createElement('div');
+                        more.className = 'pdf-more';
+                        more.textContent = `+ ещё ${pdfDoc.numPages - 3} стр. — скачайте для просмотра`;
+                        previewEl.appendChild(more);
+                    }
+                }).catch(err => {
+                    previewEl.innerHTML = '<div class="pdf-more">Предпросмотр недоступен</div>';
+                });
+            }
+        }
         return card;
     }
 };
+
+/* ── PROJECT TEMPLATES UI ────────────────────────────────── */
+const Templates = {
+    open() {
+        let modal = document.getElementById('templates-modal');
+        if (!modal) {
+            modal = document.createElement('div');
+            modal.id = 'templates-modal';
+            modal.className = 'modal-overlay';
+            modal.innerHTML = `
+                <div class="modal modal-sm" style="max-width:560px">
+                    <div class="modal-header">
+                        <h2 class="modal-title">📋 Шаблоны проектов</h2>
+                        <button class="btn-modal-close" id="btn-templates-close">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                        </button>
+                    </div>
+                    <div class="modal-body">
+                        <p style="color:var(--text-secondary);font-size:13px;margin-bottom:16px">Выберите шаблон для быстрого старта проекта</p>
+                        <div class="templates-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+                            ${PROJECT_TEMPLATES.map(t => `
+                                <button class="template-card" data-prompt="${t.prompt.replace(/"/g, '&quot;')}" style="display:flex;align-items:center;gap:10px;padding:12px 14px;border:1px solid var(--border);border-radius:10px;background:var(--bg-secondary);cursor:pointer;text-align:left;transition:all 0.15s">
+                                    <span style="font-size:22px">${t.icon}</span>
+                                    <span style="font-size:13px;font-weight:500;color:var(--text-primary)">${t.name}</span>
+                                </button>`).join('')}
+                        </div>
+                    </div>
+                </div>`;
+            document.body.appendChild(modal);
+            modal.querySelector('#btn-templates-close').addEventListener('click', () => this.close());
+            modal.addEventListener('click', e => { if (e.target === modal) this.close(); });
+            modal.querySelectorAll('.template-card').forEach(btn => {
+                btn.addEventListener('mouseenter', () => { btn.style.borderColor = 'var(--accent)'; btn.style.background = 'var(--bg-hover)'; });
+                btn.addEventListener('mouseleave', () => { btn.style.borderColor = 'var(--border)'; btn.style.background = 'var(--bg-secondary)'; });
+                btn.addEventListener('click', () => {
+                    const prompt = btn.getAttribute('data-prompt');
+                    this.close();
+                    if (prompt) Chat.sendFromChip(prompt);
+                });
+            });
+        }
+        modal.classList.remove('hidden');
+    },
+    close() {
+        const modal = document.getElementById('templates-modal');
+        if (modal) modal.classList.add('hidden');
+    }
+};
+window.Templates = Templates;
 
 /* ── ACTIVITY PANEL ───────────────────────────────────────── */
 const ActivityPanel = {
@@ -1911,6 +2519,42 @@ const ActivityPanel = {
 
         state.activityLines.push({ type, emoji, text, time: new Date() });
         log.scrollTop = log.scrollHeight;
+    },
+
+    renderTaskProgress() {
+        // ПАТЧ W2-2: Рендер Task Progress как у Manus
+        const panel = $('activity-log');
+        if (!panel) return;
+
+        let container = document.querySelector('.task-progress-container');
+        if (!container) {
+            container = document.createElement('div');
+            container.className = 'task-progress-container';
+            container.style.cssText = 'padding: 8px 12px; border-bottom: 1px solid var(--border, #333); margin-bottom: 8px;';
+            panel.insertBefore(container, panel.firstChild);
+        }
+
+        const tp = state.taskProgress;
+        if (!tp || !tp.steps) return;
+
+        let html = `<div style="font-size:12px;font-weight:600;margin-bottom:6px;color:var(--text-primary,#eee);">
+            Task progress <span style="color:var(--text-secondary,#888)">${tp.current} / ${tp.total}</span>
+        </div>`;
+
+        tp.steps.forEach((step, i) => {
+            let icon = '○';
+            let color = 'var(--text-tertiary, #555)';
+            if (step.status === 'done') { icon = '✅'; color = 'var(--text-primary, #eee)'; }
+            else if (step.status === 'running') { icon = '⏳'; color = '#7c5cfc'; }
+            else if (step.status === 'error') { icon = '❌'; color = '#f87171'; }
+
+            html += `<div style="display:flex;align-items:flex-start;gap:6px;padding:3px 0;font-size:11px;color:${color};">
+                <span style="flex-shrink:0;width:18px;text-align:center;">${icon}</span>
+                <span>${step.name}</span>
+            </div>`;
+        });
+
+        container.innerHTML = html;
     },
 
     addCodeBlock(filename, content) {
@@ -2169,6 +2813,61 @@ const Toast = {
     }
 };
 
+
+// ── SSH Settings Management ──
+const SSHSettings = {
+    servers: [],
+    init() {
+        this.servers = JSON.parse(localStorage.getItem('orion_ssh_servers') || '[]');
+        const addBtn = document.getElementById('btn-add-ssh');
+        const saveBtn = document.getElementById('btn-save-ssh');
+        const cancelBtn = document.getElementById('btn-cancel-ssh');
+        if (addBtn) addBtn.addEventListener('click', () => {
+            document.getElementById('ssh-add-form').classList.remove('hidden');
+        });
+        if (cancelBtn) cancelBtn.addEventListener('click', () => {
+            document.getElementById('ssh-add-form').classList.add('hidden');
+        });
+        if (saveBtn) saveBtn.addEventListener('click', () => this.saveServer());
+        this.render();
+    },
+    saveServer() {
+        const host = document.getElementById('ssh-host').value.trim();
+        const user = document.getElementById('ssh-user').value.trim();
+        const port = parseInt(document.getElementById('ssh-port').value) || 22;
+        const password = document.getElementById('ssh-password').value;
+        if (!host || !user) { alert('Укажите хост и логин'); return; }
+        this.servers.push({ host, user, port, password, id: Date.now().toString() });
+        localStorage.setItem('orion_ssh_servers', JSON.stringify(this.servers));
+        document.getElementById('ssh-add-form').classList.add('hidden');
+        document.getElementById('ssh-host').value = '';
+        document.getElementById('ssh-user').value = '';
+        document.getElementById('ssh-port').value = '22';
+        document.getElementById('ssh-password').value = '';
+        this.render();
+    },
+    removeServer(id) {
+        this.servers = this.servers.filter(s => s.id !== id);
+        localStorage.setItem('orion_ssh_servers', JSON.stringify(this.servers));
+        this.render();
+    },
+    render() {
+        const container = document.getElementById('ssh-servers-container');
+        if (!container) return;
+        if (this.servers.length === 0) {
+            container.innerHTML = '<div style="color:var(--text-secondary);font-size:13px;">Нет сохранённых серверов</div>';
+            return;
+        }
+        container.innerHTML = this.servers.map(s => `
+            <div style="display:flex;align-items:center;justify-content:space-between;padding:6px 10px;background:var(--bg-primary);border-radius:6px;margin-bottom:4px;font-size:13px;">
+                <span>${s.user}@${s.host}:${s.port}</span>
+                <button onclick="SSHSettings.removeServer('${s.id}')" style="background:none;border:none;color:var(--danger);cursor:pointer;font-size:16px;" title="Удалить">×</button>
+            </div>
+        `).join('');
+    },
+    getServers() { return this.servers; }
+};
+
 /* ── ADMIN PANEL ──────────────────────────────────────────── */
 const AdminPanel = {
     currentTab: 'users',
@@ -2201,13 +2900,20 @@ const AdminPanel = {
     },
 
     async loadUsers() {
-        const container = $('admin-tab-users');
+        const container = $('tab-users');
         if (!container) return;
         container.innerHTML = '<div class="empty-state"><div class="spinner"></div></div>';
 
         try {
             const data = await API.get('/admin/users');
-            state.adminData.users = data.users || data || [];
+            let rawUsers = data.users || data || [];
+            // BUG-6 FIX: Normalize API fields to frontend expectations
+            state.adminData.users = rawUsers.map(u => ({
+                ...u,
+                full_name: u.full_name || u.name || u.email || '',
+                username: u.username || u.email || '',
+                is_blocked: u.is_blocked !== undefined ? u.is_blocked : !u.is_active
+            }));
             this.renderUsers(state.adminData.users);
         } catch (e) {
             container.innerHTML = `<div class="empty-state"><div class="empty-state-desc">Ошибка: ${Utils.escapeHtml(e.message)}</div></div>`;
@@ -2215,7 +2921,7 @@ const AdminPanel = {
     },
 
     renderUsers(users) {
-        const container = $('admin-tab-users');
+        const container = $('tab-users');
         if (!container) return;
 
         const html = `
@@ -2266,7 +2972,7 @@ const AdminPanel = {
     },
 
     async loadAllChats() {
-        const container = $('admin-tab-chats');
+        const container = $('tab-chats');
         if (!container) return;
         container.innerHTML = '<div class="empty-state"><div class="spinner"></div></div>';
 
@@ -2280,7 +2986,7 @@ const AdminPanel = {
     },
 
     renderAllChats(chats) {
-        const container = $('admin-tab-chats');
+        const container = $('tab-chats');
         if (!container) return;
 
         const html = `
@@ -2301,13 +3007,13 @@ const AdminPanel = {
                     </thead>
                     <tbody id="admin-chats-tbody">
                         ${chats.map(c => `
-                            <tr data-user="${Utils.escapeHtml((c.username || '').toLowerCase())}">
-                                <td style="font-size:12px;font-weight:500">${Utils.escapeHtml(c.username || '—')}</td>
+                            <tr data-user="${Utils.escapeHtml((c.user_name || c.user_email || c.username || '').toLowerCase())}">
+                                <td style="font-size:12px;font-weight:500">${Utils.escapeHtml(c.user_name || c.user_email || c.username || '—')}</td>
                                 <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${Utils.escapeHtml(c.title || 'Без названия')}</td>
                                 <td style="font-size:12px;color:var(--text-secondary)">${Utils.formatDate(c.created_at)}</td>
                                 <td style="text-align:center">${c.message_count || 0}</td>
                                 <td style="color:var(--success);font-weight:500">${Utils.formatCost(c.total_cost)}</td>
-                                <td style="font-size:11px;color:var(--text-tertiary)">${Utils.escapeHtml(c.mode || '—')}</td>
+                                <td style="font-size:11px;color:var(--text-tertiary)">${Utils.escapeHtml(c.variant || c.model || c.mode || '—')}</td>
                             </tr>`).join('')}
                     </tbody>
                 </table>
@@ -2324,7 +3030,7 @@ const AdminPanel = {
     },
 
     async loadAnalytics() {
-        const container = $('admin-tab-analytics');
+        const container = $('tab-analytics');
         if (!container) return;
         container.innerHTML = '<div class="empty-state"><div class="spinner"></div></div>';
 
@@ -2357,7 +3063,7 @@ const AdminPanel = {
     },
 
     renderAnalytics(data) {
-        const container = $('admin-tab-analytics');
+        const container = $('tab-analytics');
         if (!container) return;
 
         container.innerHTML = `
@@ -2487,9 +3193,9 @@ const AdminPanel = {
         const idEl = $('edit-user-id');
         if (idEl) idEl.value = userId;
         const loginEl = $('user-form-login');
-        if (loginEl) loginEl.value = user.username;
+        if (loginEl) loginEl.value = user.username || user.email || '';
         const nameEl = $('user-form-name');
-        if (nameEl) nameEl.value = user.full_name || '';
+        if (nameEl) nameEl.value = user.full_name || user.name || '';
         const roleEl = $('user-form-role');
         if (roleEl) roleEl.value = user.role;
         const limitEl = $('user-form-limit');
@@ -2503,8 +3209,11 @@ const AdminPanel = {
         e.preventDefault();
         // BUG-10 FIX: correct HTML IDs for user form
         const userId = ($('edit-user-id') || {}).value || '';
+        const loginVal = ($('user-form-login') || {}).value?.trim() || '';
         const data = {
-            username: ($('user-form-login') || {}).value?.trim() || '',
+            email: loginVal,
+            username: loginVal,
+            name: ($('user-form-name') || {}).value?.trim() || '',
             full_name: ($('user-form-name') || {}).value?.trim() || '',
             role: ($('user-form-role') || {}).value || 'user',
             monthly_limit: parseFloat(($('user-form-limit') || {}).value) || 2
@@ -2521,7 +3230,7 @@ const AdminPanel = {
                 await API.post('/admin/users', data);
                 Toast.show('Пользователь создан', 'success');
             }
-            $('user-modal').classList.add('hidden');
+            ($('user-modal') || $('create-user-modal')).classList.add('hidden');
             await this.loadUsers();
         } catch (err) {
             Toast.show('Ошибка: ' + err.message, 'error');
@@ -2541,6 +3250,19 @@ const AdminPanel = {
 
 /* ── INIT ─────────────────────────────────────────────────── */
 document.addEventListener('DOMContentLoaded', () => {
+  // CHIP EVENT DELEGATION FIX
+  document.addEventListener('click', function(e) {
+    const chip = e.target.closest('.welcome-chip[data-prompt]');
+    if (chip) {
+      e.preventDefault();
+      e.stopPropagation();
+      const prompt = chip.dataset.prompt;
+      if (prompt && typeof Chat !== 'undefined' && Chat.sendFromChip) {
+        Chat.sendFromChip(prompt);
+      }
+    }
+  });
+
     Theme.init();
 
     // Bind auth form BEFORE Auth.init so login works on first load
@@ -2813,6 +3535,124 @@ const AskUser = {
 
 
 // ═══════════════════════════════════════════════════════════════
+// ═════════════════════════════════════════════════════════════
+// ПАТЧ ЗАДАЧА-1: AuthForm — безопасная форма авторизации
+// Когда агент встречает форму логина, он показывает скриншот и поля
+// ввода прямо в чате ORION. Пароли не хранятся в чате.
+// ═════════════════════════════════════════════════════════════
+
+const AuthForm = {
+    show(evt) {
+        const container = document.querySelector('.chat-messages, #chat-messages, .messages-list, #messages-container, .messages-container');
+        if (!container) return;
+
+        const fields = evt.fields || [];
+        const screenshotHtml = evt.screenshot
+            ? `<div class="auth-screenshot"><img src="data:image/png;base64,${evt.screenshot}" alt="Страница авторизации" style="max-width:100%;border-radius:8px;border:1px solid var(--border-color);margin-bottom:12px;"></div>`
+            : '';
+
+        let fieldsHtml = '';
+        fields.forEach(f => {
+            const inputType = f.type === 'password' ? 'password' : 'text';
+            const label = f.type === 'password' ? 'Пароль' : 'Логин';
+            fieldsHtml += `
+                <div class="auth-field">
+                    <label class="auth-label">${label} (${f.name})</label>
+                    <input type="${inputType}" class="auth-input form-input" 
+                           data-field-name="${f.name}" data-selector="${f.selector || ''}"
+                           placeholder="Введите ${label.toLowerCase()}...">
+                </div>
+            `;
+        });
+
+        // Если поля не обнаружены — показываем дефолтные
+        if (fields.length === 0) {
+            fieldsHtml = `
+                <div class="auth-field">
+                    <label class="auth-label">Логин</label>
+                    <input type="text" class="auth-input form-input" data-field-name="login" placeholder="Введите логин...">
+                </div>
+                <div class="auth-field">
+                    <label class="auth-label">Пароль</label>
+                    <input type="password" class="auth-input form-input" data-field-name="password" placeholder="Введите пароль...">
+                </div>
+            `;
+        }
+
+        const card = document.createElement('div');
+        card.className = 'auth-required-card';
+        card.innerHTML = `
+            <div class="auth-header">
+                <span class="auth-icon">🔐</span>
+                <span>Требуется авторизация</span>
+            </div>
+            <div class="auth-url">${evt.url || 'Страница входа'}</div>
+            ${screenshotHtml}
+            <div class="auth-hint">Введите данные для входа. Пароли не сохраняются в чате.</div>
+            <div class="auth-fields">
+                ${fieldsHtml}
+            </div>
+            <div class="auth-actions">
+                <button class="btn-secondary auth-skip">Пропустить</button>
+                <button class="btn-primary auth-submit">🔓 Войти</button>
+            </div>
+        `;
+
+        container.appendChild(card);
+        container.scrollTop = container.scrollHeight;
+
+        // Фокус на первом поле
+        const firstInput = card.querySelector('.auth-input');
+        if (firstInput) firstInput.focus();
+
+        // Обработчик отправки
+        card.querySelector('.auth-submit').addEventListener('click', () => {
+            const inputs = card.querySelectorAll('.auth-input');
+            const authData = {};
+            inputs.forEach(inp => {
+                authData[inp.dataset.fieldName] = {
+                    value: inp.value,
+                    selector: inp.dataset.selector || ''
+                };
+            });
+            // Отправляем данные агенту через API
+            this._sendAuth(authData, evt.url);
+            // Убираем карточку и показываем статус
+            card.innerHTML = '<div class="auth-sent">🔐 Данные отправлены агенту. Выполняю вход...</div>';
+            setTimeout(() => card.remove(), 5000);
+        });
+
+        // Пропуск
+        card.querySelector('.auth-skip').addEventListener('click', () => {
+            Chat.send('[auth_skipped]');
+            card.remove();
+        });
+
+        // Enter для отправки
+        card.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                card.querySelector('.auth-submit').click();
+            }
+        });
+    },
+
+    async _sendAuth(authData, url) {
+        try {
+            const chatId = state.currentChatId;
+            await API.post('/auth-response', {
+                chat_id: chatId,
+                auth_data: authData,
+                url: url
+            });
+        } catch (err) {
+            console.error('Auth response error:', err);
+            // Fallback: отправить как обычное сообщение (без паролей в тексте)
+            Chat.send('[auth_provided] Данные отправлены');
+        }
+    }
+};
+
 // ЧАСТЬ 4: Multi-SSH — поддержка нескольких серверов
 // Вставить в HTML настроек (settings modal)
 // ═══════════════════════════════════════════════════════════════
@@ -2945,7 +3785,14 @@ window.Chat = Chat;
 window.ChatList = ChatList;
 window.TaskPlan = TaskPlan;
 window.AskUser = AskUser;
+window.AuthForm = AuthForm;
 window.MultiSSH = MultiSSH;
 window.AdminPanel = AdminPanel;
 window.Lightbox = Lightbox;
 window.ActivityPanel = ActivityPanel;
+
+
+// Request notification permission
+if ('Notification' in window && Notification.permission === 'default') {
+    Notification.requestPermission();
+}

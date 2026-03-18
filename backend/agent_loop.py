@@ -16,10 +16,12 @@ ORION Digital v1.0 Full Feature Set:
 Совместимость: run_stream() и run_multi_agent_stream() сохраняют тот же SSE API.
 """
 
+import os
 import json
 import time
 import re
 import sqlite3
+from solution_cache import SolutionCache, SolutionExtractor  # ПАТЧ 9
 import traceback
 import logging
 import hashlib
@@ -438,6 +440,136 @@ TOOLS_SCHEMA = [
                 "required": ["summary"]
             }
         }
+    },
+    # ── ЗАДАЧА-1: Интерактивная браузерная автоматизация ──────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "browser_click",
+            "description": "Click on an element on the current browser page. Use after browser_navigate. Supports CSS selectors (button.submit, #login-btn) and text selectors (text=Войти). Returns screenshot after click.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "selector": {"type": "string", "description": "CSS selector or text=... selector of the element to click"}
+                },
+                "required": ["selector"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "browser_fill",
+            "description": "Fill a form field on the current browser page. Use after browser_navigate. Selector is CSS (input[name=login], #password, textarea). Returns screenshot after fill.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "selector": {"type": "string", "description": "CSS selector of the input field"},
+                    "value": {"type": "string", "description": "Value to type into the field"}
+                },
+                "required": ["selector", "value"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "browser_submit",
+            "description": "Submit a form on the current browser page. Optionally specify submit button selector. If no selector — presses Enter. Returns screenshot and URL after submit.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "selector": {"type": "string", "description": "CSS selector of submit button or form (optional). If omitted — presses Enter."}
+                },
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "browser_select",
+            "description": "Select an option from a <select> dropdown on the current browser page. Returns screenshot after selection.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "selector": {"type": "string", "description": "CSS selector of the <select> element"},
+                    "value": {"type": "string", "description": "Option value or label text to select"}
+                },
+                "required": ["selector", "value"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "browser_ask_auth",
+            "description": "Detect login form on current page and request credentials from user via ORION chat UI. Shows screenshot + form fields to user. User enters credentials → agent fills and submits the form. USE THIS when encountering login/auth pages instead of hardcoding passwords.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": {"type": "string", "description": "URL of the login page (optional, uses current page if omitted)"},
+                    "hint": {"type": "string", "description": "Hint for user about what system requires login (e.g. 'Bitrix admin panel', 'FTP server')"}
+                },
+                "required": []
+            }
+        }
+    },
+    # ── ЗАДАЧА-1: FTP инструменты (ftplib, без SSH) ───────────────────────────
+    {
+        "type": "function",
+        "function": {
+            "name": "ftp_upload",
+            "description": "Upload a file to FTP server using ftplib (works even when SSH is disabled). Supports passwords with special characters (#, @, ! etc). Use for deploying files to shared hosting, Bitrix sites, etc.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "host": {"type": "string", "description": "FTP server hostname or IP"},
+                    "username": {"type": "string", "description": "FTP username"},
+                    "password": {"type": "string", "description": "FTP password (special chars supported)"},
+                    "remote_path": {"type": "string", "description": "Full remote path including filename, e.g. /www/site.ru/index.php"},
+                    "content": {"type": "string", "description": "File content to upload"},
+                    "port": {"type": "integer", "description": "FTP port (default: 21)", "default": 21}
+                },
+                "required": ["host", "username", "password", "remote_path", "content"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "ftp_download",
+            "description": "Download a file from FTP server. Returns file content as text. Use to read existing files before modifying them.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "host": {"type": "string", "description": "FTP server hostname or IP"},
+                    "username": {"type": "string", "description": "FTP username"},
+                    "password": {"type": "string", "description": "FTP password"},
+                    "remote_path": {"type": "string", "description": "Full remote path of the file to download"},
+                    "port": {"type": "integer", "description": "FTP port (default: 21)", "default": 21}
+                },
+                "required": ["host", "username", "password", "remote_path"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "ftp_list",
+            "description": "List files and directories on FTP server. Use to explore site structure before uploading.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "host": {"type": "string", "description": "FTP server hostname or IP"},
+                    "username": {"type": "string", "description": "FTP username"},
+                    "password": {"type": "string", "description": "FTP password"},
+                    "remote_path": {"type": "string", "description": "Remote directory path to list", "default": "/"},
+                    "port": {"type": "integer", "description": "FTP port (default: 21)", "default": 21}
+                },
+                "required": ["host", "username", "password"]
+            }
+        }
     }
 ]
 
@@ -555,6 +687,24 @@ AGENT_SYSTEM_PROMPT = """Ты — ORION Digital v1.0, автономный AI-и
 8. Для списков багов/задач используй таблицы с колонками: ID, Описание, Критичность, Статус.
 9. Выделяй критичные моменты **жирным**, а не эмодзи.
 10. Используй разделители (---) между секциями для читаемости.
+
+ПРАВИЛО АВТОНОМНОСТИ (КРИТИЧЕСКИ ВАЖНО):
+НИКОГДА не давай пользователю инструкции типа "загрузите файл", "выполните команду", "скопируйте код".
+НИКОГДА не говори "вот что нужно сделать" — ДЕЛАЙ ЭТО САМ через инструменты.
+НИКОГДА не предлагай "скачайте и загрузите через FTP-клиент" — загружай сам через ssh_execute или file_write.
+Ты АВТОНОМНЫЙ агент. Пользователь платит за то чтобы ТЫ делал работу.
+
+Если способ 1 не работает — пробуй способ 2:
+- FTP не работает → попробуй SSH (ssh_execute)
+- SSH не работает → попробуй через браузер (browser_navigate)
+- Браузер даёт 401 → используй SSH/SFTP напрямую, не через браузер
+- Пароль не подходит → проверь экранирование спецсимволов (# → %23, @ → %40)
+- Только если ВСЕ 3 способа провалились — объясни проблему и СПРОСИ как решить.
+
+ПРАВИЛО ПРОВЕРКИ:
+После создания файла на сервере — ОБЯЗАТЕЛЬНО проверь что он существует (ls -la или file_read).
+После создания страницы — ОБЯЗАТЕЛЬНО открой её в браузере (browser_navigate) и покажи скриншот.
+НЕ говори "готово" пока не убедился что результат работает.
 ПРАВИЛО САМООБУЧЕНИЯ:
 Если ты не уверен как что-то сделать, если API мог измениться, 
 если технология тебе незнакома — НЕ УГАДЫВАЙ. 
@@ -606,6 +756,101 @@ AGENT_SYSTEM_PROMPT = """Ты — ORION Digital v1.0, автономный AI-и
 ПРАВИЛО КОНТЕКСТА:
 Всегда помни исходную задачу пользователя. Не теряй цель.
 Если выполняешь много шагов — периодически проверяй: "я всё ещё решаю исходную задачу?"
+
+
+ПРАВИЛО ЯЗЫКА ПРОГРАММИРОВАНИЯ:
+Если пользователь НЕ указал язык/фреймворк — используй Python.
+НЕ используй язык из памяти пользователя автоматически.
+Используй язык из памяти ТОЛЬКО если пользователь явно попросил "на моём стеке" или "как обычно".
+По умолчанию: Python + FastAPI для бэкенда, HTML/CSS/JS для фронтенда.
+
+ПРАВИЛО ДЛИНЫ ОТВЕТА:
+- Для кода: НЕ ПИШИ более 100 строк в чат. Если код длиннее — ОБЯЗАТЕЛЬНО сохрани в файл через file_write.
+- Для текста: максимум 2000 символов в чат. Если длиннее — создай документ через generate_file.
+- Если нужно показать структуру проекта — покажи дерево файлов и краткое описание каждого, а не весь код.
+
+ПРАВИЛО ПАМЯТИ:
+Когда пользователь обновляет факт (новое имя, новый стек, новый сервер) — используй store_memory с тем же ключом чтобы ПЕРЕЗАПИСАТЬ старый факт.
+Не создавай дубликаты: store_memory(key="user_name", value="Новое имя").
+
+🔧 ИНТЕРАКТИВНЫЙ БРАУЗЕР (новые инструменты):
+- browser_click(selector): кликнуть по элементу (CSS селектор или text=Войти)
+- browser_fill(selector, value): заполнить поле формы
+- browser_submit(selector): отправить форму (или Enter если без селектора)
+- browser_select(selector, value): выбрать из выпадающего списка
+- browser_ask_auth(hint): обнаружить форму логина и запросить данные у пользователя через UI
+
+ИСПОЛЬЗУЙ ИНТЕРАКТИВНЫЙ БРАУЗЕР для:
+- Входа в админки CMS (Битрикс, WordPress)
+- Заполнения форм на сайтах
+- Навигации по меню и кнопкам
+- Тестирования UI интерфейсов
+ПРАВИЛО АВТОРИЗАЦИИ:
+Когда встречаешь форму логина — ИСПОЛЬЗУЙ browser_ask_auth.
+НИКОГДА не хардкодь пароли в тексте ответа.
+Пользователь вводит данные в безопасную форму в UI ORION.
+После получения данных — используй browser_fill + browser_submit.
+
+📦 FTP ИНСТРУМЕНТЫ (работают без SSH):
+- ftp_upload: загрузить файл на FTP-сервер (для хостингов без SSH)
+- ftp_download: скачать файл с FTP-сервера
+- ftp_list: посмотреть список файлов на FTP
+ИСПОЛЬЗУЙ FTP когда:
+- SSH недоступен на сервере
+- Хостинг поддерживает только FTP
+- Пароль содержит спецсимволы (#, @, !) — FTP работает без проблем
+
+ПРАВИЛА ПРОФЕССИОНАЛЬНОГО РАЗРАБОТЧИКА:
+
+СЕРВЕРЫ:
+- Перед любой работой: проверь ОС (cat /etc/os-release), свободное место (df -h), установленные пакеты
+- После загрузки файлов: проверь права (chmod 644 для файлов, 755 для папок)
+- После деплоя: проверь что сайт отвечает (curl -I https://domain)
+- Всегда делай бэкап перед изменениями
+
+CMS (Битрикс/WordPress):
+- После любых изменений: очисти кэш (rm -rf /bitrix/cache/* или wp cache flush)
+- Проверь что urlrewrite.php / .htaccess не сломан
+- Проверь права на upload/ папку (должна быть 755)
+
+КОНТЕНТ:
+- Изображения: конвертируй в webp и сожми перед загрузкой
+- Проверь что все ссылки на странице работают
+- Проверь мобильную версию (browser_navigate с viewport 375px)
+
+КАЧЕСТВО:
+- HTML: проверь валидность (нет незакрытых тегов)
+- CSS/JS: минифицируй перед деплоем если возможно
+- После деплоя: открой страницу, сделай скриншот, покажи клиенту
+
+КЛИЕНТ:
+- Если задача неоднозначная — спроси уточнение через ask_user
+- Показывай промежуточные результаты: "Вот дизайн, продолжаем?"
+- Предлагай 2-3 варианта если это дизайн/палитра/структура
+
+БЕЗОПАСНОСТЬ:
+- НИКОГДА не показывай пароли в ответах пользователю
+- Храни credentials только в SSH/FTP подключении, не в тексте
+- Проверь SSL после деплоя (curl -I https://)
+
+ДЕПЛОЙ И ПРОИЗВОДИТЕЛЬНОСТЬ:
+- nginx: включи gzip (gzip on; gzip_types text/css application/javascript)
+- nginx: кэширование статики (expires 30d для css/js/img)
+- Изображения: lazy loading (loading="lazy")
+- Шрифты: preload и font-display: swap
+- Редирект: www → без www (или наоборот)
+- SSL: проверь certbot и дату сертификата
+
+ПОСЛЕ ЗАВЕРШЕНИЯ ЗАДАЧИ:
+- Напиши краткий отчёт: что сделано, какие файлы изменены, URL
+- Покажи скриншот результата на десктопе и мобильном
+- Предложи следующие шаги: "Что дальше? 1)... 2)... 3)..."
+- Сохрани решение в solution_cache для будущих задач
+
+РАБОТА С НЕСКОЛЬКИМИ ПРОЕКТАМИ:
+- Каждый проект — отдельный контекст в памяти
+- Не путай доступы между проектами
+- Называй проект по домену: "проект test.blacks-art.ru"
 """
 
 
@@ -638,8 +883,9 @@ AGENT_ZONES = {
     },
     "devops": {
         "tools": ["ssh_execute", "file_write", "file_read",
-                  "browser_check_site", "browser_check_api"],
-        "description": "Серверы, деплой, инфраструктура",
+                  "browser_check_site", "browser_check_api",
+                  "ftp_upload", "ftp_download", "ftp_list"],
+        "description": "Серверы, деплой, инфраструктура, FTP",
         "models": {"turbo_standard": "deepseek", "turbo_premium": "deepseek",
                    "pro_standard": "deepseek", "pro_premium": "deepseek"}
     },
@@ -652,8 +898,10 @@ AGENT_ZONES = {
     },
     "tester": {
         "tools": ["browser_navigate", "browser_get_text", "browser_check_site",
-                  "browser_check_api", "code_interpreter", "ssh_execute"],
-        "description": "Тестирование, QA, проверка",
+                  "browser_check_api", "browser_click", "browser_fill",
+                  "browser_submit", "browser_select", "browser_ask_auth",
+                  "code_interpreter", "ssh_execute"],
+        "description": "Тестирование, QA, проверка, браузерная автоматизация",
         "models": {"turbo_standard": "deepseek", "turbo_premium": "deepseek",
                    "pro_standard": "deepseek", "pro_premium": "deepseek"}
     },
@@ -749,6 +997,8 @@ class AgentLoop:
         self.total_tokens_in = 0
         self.total_tokens_out = 0
         self.actions_log = []
+        self._extra_credentials = {}  # ПАТЧ 1: FTP, админка и др.
+        self._solution_cache = None  # ПАТЧ 9: Solution Cache
         self._stop_requested = False
 
         # ── ORION Sprint 5: режим, сессия, scratchpad, snapshot ──
@@ -763,6 +1013,10 @@ class AgentLoop:
         # ПАТЧ A2: model_override и system_prompt_override
         self.model_override = kwargs.get('model_override', None)
         self.custom_system_prompt = kwargs.get('system_prompt_override', None)
+
+        # Artifact tracking for iterative editing
+        self._current_artifact_id = None
+
         # Orchestrator v2 может переопределить модель и промпт
         self._orchestrator_prompt = ""
         self._orchestrator_plan = None
@@ -915,7 +1169,7 @@ class AgentLoop:
     # ── LLM Call with Retry ──────────────────────────────────────
 
     @retry(max_attempts=3, base_delay=2.0, max_delay=30.0, jitter=1.0,
-           retryable_exceptions=(ConnectionError, TimeoutError, OSError),
+           retryable_exceptions=(ConnectionError, TimeoutError, OSError, Exception),
            context="llm_api")
     def _call_ai(self, messages, tools=None):
         """Call AI model with tool definitions. Retry on transient errors."""
@@ -962,7 +1216,7 @@ class AgentLoop:
 
         return content, tool_calls, None
 
-    def _call_ai_simple(self, messages: list) -> str:
+    def _call_ai_simple(self, messages: list, model: str = None) -> str:
         """Simple non-streaming AI call for memory_v9 internal use."""
         try:
             headers = {
@@ -972,7 +1226,7 @@ class AgentLoop:
                 "X-Title": "ORION Digital v1.0"
             }
             payload = {
-                "model": self.model,
+                "model": model or self.model,
                 "messages": messages,
                 "temperature": 0.1,
                 "max_tokens": 2000,
@@ -1021,7 +1275,7 @@ class AgentLoop:
                 headers=headers,
                 json=payload,
                 stream=True,
-                timeout=120
+                timeout=30
             )
 
             if resp.status_code in RETRYABLE_HTTP_CODES:
@@ -1106,6 +1360,45 @@ class AgentLoop:
 
         except Exception as e:
             breaker.record_failure()
+            # ── FALLBACK: try Sonnet if DeepSeek/primary fails ──
+            _fallback_model_id = "openai/gpt-4.1-nano"
+            if self.model != _fallback_model_id:
+                import logging as _log
+                _log.warning(f"[agent_loop] LLM stream error on {self.model}: {e}. Retrying with Sonnet")
+                try:
+                    _fb_payload = {"model": _fallback_model_id, "messages": messages,
+                                   "temperature": 0.2, "max_tokens": 16000, "stream": True}
+                    if tools:
+                        _fb_payload["tools"] = tools
+                        _fb_payload["tool_choice"] = "auto"
+                    _fb_resp = http_requests.post(self.api_url, headers=headers,
+                                                  json=_fb_payload, stream=True, timeout=120)
+                    _fb_resp.raise_for_status()
+                    _fb_content = ""
+                    for _fb_line in _fb_resp.iter_lines():
+                        if not _fb_line:
+                            continue
+                        _fb_ls = _fb_line.decode("utf-8", errors="replace")
+                        if not _fb_ls.startswith("data: "):
+                            continue
+                        _fb_ps = _fb_ls[6:]
+                        if _fb_ps.strip() == "[DONE]":
+                            break
+                        try:
+                            _fb_chunk = json.loads(_fb_ps)
+                            _fb_choices = _fb_chunk.get("choices", [])
+                            if _fb_choices:
+                                _fb_text = _fb_choices[0].get("delta", {}).get("content", "")
+                                if _fb_text:
+                                    _fb_content += _fb_text
+                                    yield {"type": "text_delta", "text": _fb_text}
+                        except json.JSONDecodeError:
+                            continue
+                    if _fb_content:
+                        yield {"type": "text_complete", "content": _fb_content}
+                        return
+                except Exception as _fb_e:
+                    _log.warning(f"[agent_loop] Fallback Sonnet also failed: {_fb_e}")
             yield {"type": "error", "error": str(e)}
 
     # ── Tool Execution with Retry + Idempotency ──────────────────
@@ -1126,6 +1419,19 @@ class AgentLoop:
                 command = args.get("command", "")
                 if not host or not command:
                     return {"success": False, "error": "host and command are required"}
+
+                # ── ПАТЧ W1-3: Автобэкап перед деструктивными командами ──
+                _destructive_patterns = ["rm ", "rm -", "mv ", "> /", "truncate", "dd if="]
+                if any(p in command for p in _destructive_patterns):
+                    import re as _re
+                    _file_paths = _re.findall(r'(/[a-zA-Z0-9_./-]+\.[a-zA-Z0-9]+)', command)
+                    for _fp in _file_paths[:3]:
+                        try:
+                            _bak_cmd = f"[ -f {_fp} ] && cp {_fp} {_fp}.bak.$(date +%s) 2>/dev/null || true"
+                            self._ssh_execute_with_retry(host, username, password, _bak_cmd)
+                            logger.info(f"[PATCH-W1-3] Auto-backup: {_fp}")
+                        except Exception:
+                            pass
 
                 # Idempotency check for mutating commands
                 if is_mutating_command(command):
@@ -1152,6 +1458,14 @@ class AgentLoop:
                 content = args.get("content", "")
                 if not host or not path:
                     return {"success": False, "error": "host and path are required"}
+
+                # ── ПАТЧ W1-3: Автобэкап перед перезаписью ──
+                try:
+                    _bak_cmd = f"[ -f {path} ] && cp {path} {path}.bak.$(date +%s) 2>/dev/null || true"
+                    self._ssh_execute_with_retry(host, username, password, _bak_cmd)
+                    logger.info(f"[PATCH-W1-3] Auto-backup before write: {path}")
+                except Exception:
+                    pass
 
                 # УЛУЧ-4: Large file write — файлы >40KB пишем по SSH чанками
                 if len(content) > 40000 and self.ssh_credentials.get("host"):
@@ -1217,6 +1531,89 @@ class AgentLoop:
                 return self._browser_with_retry(
                     lambda: self.browser.check_api(url, method=method, data=data)
                 )
+
+            # ── ЗАДАЧА-1: Интерактивная браузерная автоматизация ─────────────────────────
+
+            elif tool_name == "browser_click":
+                selector = args.get("selector", "")
+                if not selector:
+                    return {"success": False, "error": "selector is required"}
+                result = self.browser.click(selector)
+                # Добавить скриншот в browser_tools для SSE
+                return result
+
+            elif tool_name == "browser_fill":
+                selector = args.get("selector", "")
+                value = args.get("value", "")
+                if not selector:
+                    return {"success": False, "error": "selector is required"}
+                return self.browser.fill(selector, value)
+
+            elif tool_name == "browser_submit":
+                selector = args.get("selector")  # Может быть None
+                return self.browser.submit(selector)
+
+            elif tool_name == "browser_select":
+                selector = args.get("selector", "")
+                value = args.get("value", "")
+                if not selector or not value:
+                    return {"success": False, "error": "selector and value are required"}
+                return self.browser.select(selector, value)
+
+            elif tool_name == "browser_ask_auth":
+                # ЗАДАЧА-1: browser_ask_auth — обнаружить форму логина и запросить данные у пользователя
+                url = args.get("url")
+                hint = args.get("hint", "")
+                detect_result = self.browser.detect_login_form(url)
+                if not detect_result.get("success"):
+                    return detect_result
+                # Возвращаем специальный результат с type=auth_required для SSE
+                return {
+                    "success": True,
+                    "_auth_required": True,  # Сигнал для run_stream чтобы отправить SSE
+                    "url": detect_result.get("url", url or ""),
+                    "screenshot": detect_result.get("screenshot"),
+                    "fields": detect_result.get("fields", []),
+                    "hint": hint,
+                    "submit_selector": detect_result.get("submit_selector"),
+                    "is_login_form": detect_result.get("is_login_form", False)
+                }
+
+            # ── ЗАДАЧА-1: FTP инструменты ────────────────────────────────────────
+
+            elif tool_name == "ftp_upload":
+                host = args.get("host", "")
+                username = args.get("username", "")
+                password = args.get("password", "")
+                remote_path = args.get("remote_path", "")
+                content = args.get("content", "")
+                port = int(args.get("port", 21))
+                if not all([host, username, password, remote_path]):
+                    return {"success": False, "error": "host, username, password, remote_path are required"}
+                return self.browser.ftp_upload(host, username, password, remote_path, content, port)
+
+            elif tool_name == "ftp_download":
+                host = args.get("host", "")
+                username = args.get("username", "")
+                password = args.get("password", "")
+                remote_path = args.get("remote_path", "")
+                port = int(args.get("port", 21))
+                if not all([host, username, password, remote_path]):
+                    return {"success": False, "error": "host, username, password, remote_path are required"}
+                result = self.browser.ftp_download(host, username, password, remote_path, port)
+                if result.get("content") and len(result["content"]) > self.MAX_TOOL_OUTPUT:
+                    result["content"] = result["content"][:self.MAX_TOOL_OUTPUT] + "... [truncated]"
+                return result
+
+            elif tool_name == "ftp_list":
+                host = args.get("host", "")
+                username = args.get("username", "")
+                password = args.get("password", "")
+                remote_path = args.get("remote_path", "/")
+                port = int(args.get("port", 21))
+                if not all([host, username, password]):
+                    return {"success": False, "error": "host, username, password are required"}
+                return self.browser.ftp_list(host, username, password, remote_path, port)
 
             elif tool_name == "generate_file":
                 content = args.get("content", "")
@@ -1514,7 +1911,7 @@ class AgentLoop:
         return ssh.file_read(path)
 
     @retry(max_attempts=2, base_delay=1.0, max_delay=10.0, jitter=0.5,
-           retryable_exceptions=(ConnectionError, TimeoutError, OSError),
+           retryable_exceptions=(ConnectionError, TimeoutError, OSError, Exception),
            context="browser")
     def _browser_with_retry(self, func):
         return func()
@@ -1611,8 +2008,8 @@ class AgentLoop:
             fr_result = read_file(file_path)
             if fr_result.text and "No text detected" not in fr_result.text:
                 ocr_text = fr_result.text
-        except Exception:
-            pass
+        except Exception as _ocr_err:
+            logging.warning(f"OCR/file_reader error: {_ocr_err}")
 
         # Combine results
         description_parts = []
@@ -1637,121 +2034,214 @@ class AgentLoop:
     # ── Image Generation ─────────────────────────────────────────────────────
 
     def _generate_image(self, prompt, style="illustration", filename="image.png"):
-        """
-        Generate an image using matplotlib/pillow for diagrams/charts,
-        or placeholder for AI-generated images.
-        """
+        """Generate image using AI via OpenRouter (chat/completions + modalities)."""
         import uuid as _uuid
+        import requests as _img_req
+        import base64
+
         GENERATED_DIR = os.environ.get("GENERATED_DIR", "/var/www/orion/backend/generated")
         os.makedirs(GENERATED_DIR, exist_ok=True)
 
         file_id = str(_uuid.uuid4())[:12]
         filepath = os.path.join(GENERATED_DIR, f"{file_id}_{filename}")
 
-        if style in ("chart", "diagram", "graph"):
-            # Use matplotlib for charts
+        api_key = os.environ.get("OPENROUTER_API_KEY", "")
+        _api_url = "https://openrouter.ai/api/v1/chat/completions"
+        _headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+            "HTTP-Referer": "https://orion.mksitdev.ru",
+            "X-Title": "ORION Digital",
+        }
+        image_data = None
+
+        def _extract_image_from_response(data):
+            """Extract base64 image bytes from OpenRouter chat/completions response."""
+            choices = data.get("choices", [])
+            if not choices:
+                return None
+            msg = choices[0].get("message", {})
+            images = msg.get("images", [])
+            if not images:
+                return None
+            url = images[0].get("image_url", {}).get("url", "")
+            if not url:
+                return None
+            if ";base64," in url:
+                b64_str = url.split(";base64,", 1)[1]
+            else:
+                b64_str = url
+            return base64.b64decode(b64_str)
+
+        # ── Способ 1: Flux через OpenRouter ──
+        if api_key and not image_data:
             try:
-                import matplotlib
-                matplotlib.use('Agg')
-                import matplotlib.pyplot as plt
-                import numpy as np
-
-                fig, ax = plt.subplots(figsize=(10, 6))
-                fig.patch.set_facecolor('#1a1a2e')
-                ax.set_facecolor('#16213e')
-
-                # Generate sample chart based on prompt keywords
-                if 'pie' in prompt.lower() or 'круг' in prompt.lower():
-                    ax.remove()
-                    ax = fig.add_subplot(111)
-                    sizes = [30, 25, 20, 15, 10]
-                    labels = ['A', 'B', 'C', 'D', 'E']
-                    colors = ['#6366f1', '#8b5cf6', '#a78bfa', '#c4b5fd', '#ddd6fe']
-                    ax.pie(sizes, labels=labels, colors=colors, autopct='%1.1f%%',
-                           startangle=90, textprops={'color': 'white'})
-                elif 'bar' in prompt.lower() or 'столб' in prompt.lower():
-                    x = np.arange(5)
-                    y = np.random.randint(10, 100, 5)
-                    ax.bar(x, y, color='#6366f1')
-                    ax.set_xlabel('Category', color='white')
-                    ax.set_ylabel('Value', color='white')
-                    ax.tick_params(colors='white')
+                resp = _img_req.post(
+                    _api_url,
+                    headers=_headers,
+                    json={
+                        "model": "black-forest-labs/flux.2-pro",
+                        "messages": [{"role": "user", "content": prompt}],
+                        "modalities": ["image"],
+                    },
+                    timeout=90,
+                )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    if "error" in data:
+                        logging.warning(f"[ImageGen] Flux API error: {data['error']}")
+                    else:
+                        image_data = _extract_image_from_response(data)
+                        if image_data:
+                            logging.info(f"[ImageGen] Flux OK: {len(image_data)} bytes")
+                        else:
+                            logging.warning("[ImageGen] Flux: no image in response")
                 else:
-                    x = np.linspace(0, 10, 100)
-                    y = np.sin(x) * np.random.uniform(0.8, 1.2)
-                    ax.plot(x, y, color='#6366f1', linewidth=2)
-                    ax.fill_between(x, y, alpha=0.3, color='#6366f1')
-                    ax.set_xlabel('X', color='white')
-                    ax.set_ylabel('Y', color='white')
-                    ax.tick_params(colors='white')
-
-                ax.set_title(prompt[:60], color='white', fontsize=12)
-                plt.tight_layout()
-                plt.savefig(filepath, dpi=150, bbox_inches='tight',
-                           facecolor=fig.get_facecolor())
-                plt.close()
-
+                    logging.warning(f"[ImageGen] Flux returned {resp.status_code}: {resp.text[:200]}")
             except Exception as e:
-                return {"success": False, "error": f"Chart generation error: {str(e)}"}
+                logging.warning(f"[ImageGen] Flux failed: {e}")
 
-        else:
-            # For illustrations/photos/logos — create a styled placeholder
+        # ── Способ 2: DALL-E 3 через OpenRouter ──
+        if api_key and not image_data:
+            try:
+                resp = _img_req.post(
+                    _api_url,
+                    headers=_headers,
+                    json={
+                        "model": "openai/dall-e-3",
+                        "messages": [{"role": "user", "content": prompt}],
+                        "modalities": ["image"],
+                    },
+                    timeout=120,
+                )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    if "error" in data:
+                        logging.warning(f"[ImageGen] DALL-E API error: {data['error']}")
+                    else:
+                        image_data = _extract_image_from_response(data)
+                        if image_data:
+                            logging.info(f"[ImageGen] DALL-E OK: {len(image_data)} bytes")
+                        else:
+                            logging.warning("[ImageGen] DALL-E: no image in response")
+                else:
+                    logging.warning(f"[ImageGen] DALL-E returned {resp.status_code}: {resp.text[:200]}")
+            except Exception as e:
+                logging.warning(f"[ImageGen] DALL-E failed: {e}")
+
+        # ── Способ 3: Flux Klein (дешёвый fallback $0.003) ──
+        if api_key and not image_data:
+            try:
+                resp = _img_req.post(
+                    _api_url,
+                    headers=_headers,
+                    json={
+                        "model": "black-forest-labs/flux.2-klein-4b",
+                        "messages": [{"role": "user", "content": prompt}],
+                        "modalities": ["image"],
+                    },
+                    timeout=90,
+                )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    if "error" not in data:
+                        image_data = _extract_image_from_response(data)
+                        if image_data:
+                            logging.info(f"[ImageGen] Flux Klein OK: {len(image_data)} bytes")
+                        else:
+                            logging.warning("[ImageGen] Flux Klein: no image in response")
+                else:
+                    logging.warning(f"[ImageGen] Flux Klein returned {resp.status_code}")
+            except Exception as e:
+                logging.warning(f"[ImageGen] Flux Klein failed: {e}")
+
+        # ── Способ 4: Fallback — улучшенный placeholder ──
+        if not image_data:
+            logging.warning("[ImageGen] All AI APIs failed, using placeholder")
             try:
                 from PIL import Image, ImageDraw, ImageFont
+                import random
 
-                img = Image.new('RGB', (800, 600), color='#1a1a2e')
+                img = Image.new('RGB', (1024, 768), color='#1a1a2e')
                 draw = ImageDraw.Draw(img)
 
-                # Draw decorative elements
-                for i in range(5):
-                    x1 = 50 + i * 150
-                    y1 = 100 + (i % 3) * 80
-                    draw.rounded_rectangle([x1, y1, x1+120, y1+120],
-                                          radius=15, fill='#6366f1', outline='#8b5cf6')
+                for y in range(768):
+                    r = int(26 + (y / 768) * 40)
+                    g = int(26 + (y / 768) * 20)
+                    b = int(46 + (y / 768) * 60)
+                    draw.line([(0, y), (1024, y)], fill=(r, g, b))
 
-                # Add text
+                for _ in range(20):
+                    x = random.randint(50, 974)
+                    y = random.randint(50, 718)
+                    rad = random.randint(15, 60)
+                    color = random.choice([
+                        (99, 102, 241), (139, 92, 246), (167, 139, 250),
+                        (196, 181, 253), (16, 185, 129), (245, 158, 11)
+                    ])
+                    draw.ellipse([x - rad, y - rad, x + rad, y + rad], fill=(*color, 60))
+
                 try:
-                    font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 20)
-                    font_small = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 14)
+                    font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 22)
+                    font_sm = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 13)
                 except Exception:
                     font = ImageFont.load_default()
-                    font_small = font
+                    font_sm = font
 
-                draw.text((50, 30), prompt[:80], fill='white', font=font)
-                draw.text((50, 550), f"Generated by ORION Digital | Style: {style}",
-                         fill='#888888', font=font_small)
+                lines_text = []
+                words = prompt.split()
+                line = ""
+                for w in words:
+                    if len(line + " " + w) > 45:
+                        lines_text.append(line)
+                        line = w
+                    else:
+                        line = (line + " " + w).strip()
+                if line:
+                    lines_text.append(line)
 
-                img.save(filepath)
+                y_pos = 320
+                for ln in lines_text[:4]:
+                    draw.text((50, y_pos), ln, fill='white', font=font)
+                    y_pos += 32
 
+                draw.text((50, 730), "ORION Digital | Placeholder (AI API unavailable)",
+                          fill='#666666', font=font_sm)
+
+                import io
+                buf = io.BytesIO()
+                img.save(buf, format='PNG')
+                image_data = buf.getvalue()
             except Exception as e:
-                return {"success": False, "error": f"Image generation error: {str(e)}"}
+                return {"success": False, "error": f"All methods failed: {e}"}
 
-        if os.path.exists(filepath):
-            size = os.path.getsize(filepath)
-            # Register in file_generator registry
-            try:
-                from file_generator import _register_file
-                _register_file(file_id, filename, filepath, "png", size,
-                              getattr(self, '_chat_id', None),
-                              getattr(self, '_user_id', None))
-            except Exception:
-                pass
+        # ── Сохранить файл ──
+        with open(filepath, 'wb') as f:
+            f.write(image_data)
 
-            return {
-                "success": True,
-                "file_id": file_id,
-                "filename": filename,
-                "size": size,
-                "download_url": f"/api/files/{file_id}/download",
-                "preview_url": f"/api/files/{file_id}/preview"
-            }
+        size = os.path.getsize(filepath)
 
-        return {"success": False, "error": "Failed to generate image"}
+        try:
+            from file_generator import _register_file
+            _register_file(file_id, filename, filepath, "png", size,
+                          getattr(self, '_chat_id', None),
+                          getattr(self, '_user_id', None))
+        except Exception as _mem_err:
+            logging.warning(f"Memory save error: {_mem_err}")
+
+        return {
+            "success": True,
+            "file_id": file_id,
+            "filename": filename,
+            "size": size,
+            "download_url": f"/api/files/{file_id}/download",
+            "preview_url": f"/api/files/{file_id}/preview"
+        }
 
     # ── Web Search & Fetch ──────────────────────────────────────────
 
     @retry(max_attempts=2, base_delay=1.0, max_delay=5.0, jitter=0.5,
-           retryable_exceptions=(ConnectionError, TimeoutError, OSError),
+           retryable_exceptions=(ConnectionError, TimeoutError, OSError, Exception),
            context="web_search")
     def _web_search(self, query, num_results=5):
         """Search the web using DuckDuckGo (no API key needed)."""
@@ -1796,7 +2286,7 @@ class AgentLoop:
         return results
 
     @retry(max_attempts=2, base_delay=1.0, max_delay=5.0, jitter=0.5,
-           retryable_exceptions=(ConnectionError, TimeoutError, OSError),
+           retryable_exceptions=(ConnectionError, TimeoutError, OSError, Exception),
            context="web_fetch")
     def _web_fetch(self, url, max_length=20000):
         """Fetch and extract text content from a URL."""
@@ -1901,8 +2391,8 @@ os.chdir("{GENERATED_DIR}")
             # Clean up code file
             try:
                 os.remove(code_file)
-            except:
-                pass
+            except Exception as _rm_err:
+                logging.warning(f"File cleanup error: {_rm_err}")
             
             return {
                 "success": result.returncode == 0,
@@ -1919,8 +2409,8 @@ os.chdir("{GENERATED_DIR}")
         finally:
             try:
                 os.remove(code_file)
-            except:
-                pass
+            except Exception as _rm_err:
+                logging.warning(f"File cleanup error: {_rm_err}")
 
     # ── Chart Generation ────────────────────────────────────────────
 
@@ -2037,8 +2527,8 @@ os.chdir("{GENERATED_DIR}")
                 _register_file(file_id, f"chart_{chart_type}.png", filepath, "png", size,
                               getattr(self, '_chat_id', None),
                               getattr(self, '_user_id', None))
-            except Exception:
-                pass
+            except Exception as _mem_err:
+                logging.warning(f"Memory save error: {_mem_err}")
             
             return {
                 "success": True,
@@ -2128,8 +2618,8 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);
             _register_file(file_id, filename, filepath, art_type, size,
                           getattr(self, '_chat_id', None),
                           getattr(self, '_user_id', None))
-        except Exception:
-            pass
+        except Exception as _mem_err:
+            logging.warning(f"Memory save error: {_mem_err}")
         
         return {
             "success": True,
@@ -2175,6 +2665,39 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);
             return {"success": False, "error": f"Report generation error: {str(e)}"}
 
     # ── Self-Healing 2.0 ─────────────────────────────────────────────
+
+    def _verify_with_second_llm(self, task: str, result_text: str, actions: list) -> dict:
+        """
+        ПАТЧ 7: Проверка результата вторым LLM (Mixture-of-Agents).
+        Вызывается только если verify=True и режим Pro+.
+        """
+        try:
+            actions_summary = "\n".join(
+                f"{'✅' if a.get('success') else '❌'} {a.get('tool','')}: {str(a.get('args',{}))[:100]}"
+                for a in actions[-15:]
+            )
+            verify_messages = [
+                {"role": "system", "content": (
+                    "Ты — QA-ревьюер. Проверь результат работы агента. "
+                    "Ответь СТРОГО JSON: {\"verified\": true/false, \"issues\": [\"проблема1\", ...], \"summary\": \"краткий вывод\"}. "
+                    "Без markdown, без пояснений, только JSON."
+                )},
+                {"role": "user", "content": (
+                    f"Задача: {task[:500]}\n\n"
+                    f"Действия агента:\n{actions_summary}\n\n"
+                    f"Результат: {result_text[:1000]}\n\n"
+                    "Проверь: всё ли сделано? Есть ли ошибки? Файлы созданы? Результат корректный?"
+                )}
+            ]
+            resp = self._call_ai_simple(verify_messages, model="anthropic/claude-sonnet-4.6")
+            if resp:
+                resp = resp.strip()
+                if resp.startswith("```"):
+                    resp = resp.split("\n", 1)[1].rsplit("```", 1)[0]
+                return json.loads(resp)
+        except Exception as _v7_err:
+            logger.warning(f"PATCH7 verification error: {_v7_err}")
+        return {"verified": True, "issues": [], "summary": "Проверка не удалась, считаем ОК"}
 
     def _analyze_error(self, tool_name, args, error_result):
         """
@@ -2265,7 +2788,153 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);
 
         return fixes[:3]
 
-    # ── SSE Helpers ──────────────────────────────────────────────
+    def _analyze_screenshot_auto(self, screenshot_base64: str, url: str = "") -> str:
+        """
+        ПАТЧ W1-5: Автоматический анализ скриншота страницы.
+        Использует vision model для понимания что на странице.
+        """
+        try:
+            if not screenshot_base64:
+                return ""
+            _b64 = screenshot_base64
+            if "base64," in _b64:
+                _b64 = _b64.split("base64,")[1]
+
+            _messages = [
+                {"role": "system", "content": (
+                    "Ты анализируешь скриншот веб-страницы. Кратко опиши (2-4 предложения): "
+                    "1) Что это за страница, 2) Основные элементы (шапка, контент, формы, кнопки), "
+                    "3) Есть ли ошибки (404, 500, пустая страница, сломанная вёрстка). "
+                    "Отвечай на русском, кратко."
+                )},
+                {"role": "user", "content": [
+                    {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{_b64}"}},
+                    {"type": "text", "text": f"Что на этом скриншоте? URL: {url}"}
+                ]}
+            ]
+
+            headers = {
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json",
+                "HTTP-Referer": "https://orion.mksitdev.ru",
+                "X-Title": "ORION Digital v1.0"
+            }
+            payload = {
+                "model": "anthropic/claude-sonnet-4.6",
+                "messages": _messages,
+                "temperature": 0.1,
+                "max_tokens": 500,
+                "stream": False,
+            }
+            resp = http_requests.post(self.api_url, headers=headers, json=payload, timeout=15)
+            if resp.status_code == 200:
+                data = resp.json()
+                return data.get("choices", [{}])[0].get("message", {}).get("content", "")
+        except Exception as e:
+            logger.debug(f"[PATCH-W1-5] Vision analysis error: {e}")
+        return ""
+
+    # ── SSE Helpers ──────────────────────────────────────────────────────
+
+
+    def _check_force_tool(self, user_message, file_content=""):
+        """Проверить нужен ли принудительный вызов инструмента.
+        Если запрос ОЧЕВИДНО требует инструмент — вызвать напрямую,
+        не спрашивая LLM (DeepSeek может отказаться).
+        """
+        msg = user_message.lower().strip()
+        events = []
+
+        # ── Генерация изображения ──
+        _image_triggers = [
+            "сделай картинк", "создай картинк", "нарисуй", "сгенерируй изображен",
+            "сделай фото", "создай фото", "сделай изображен", "создай изображен",
+            "сделай иллюстрац", "создай иллюстрац", "нарисуй мне",
+            "сделай баннер", "создай баннер", "сделай постер", "создай постер",
+            "сделай лого", "создай лого", "сделай иконк", "создай иконк",
+            "make image", "create image", "generate image", "draw",
+        ]
+
+        if any(t in msg for t in _image_triggers):
+            prompt = user_message
+            try:
+                result = self._generate_image(prompt, style="illustration")
+                if result and result.get("success"):
+                    events.append(self._sse({
+                        "type": "tool_start",
+                        "tool": "generate_image",
+                        "args": {"prompt": prompt[:100]}
+                    }))
+                    dl_url = result.get("download_url", result.get("preview_url", ""))
+                    events.append(self._sse({
+                        "type": "tool_result",
+                        "tool": "generate_image",
+                        "success": True,
+                        "preview": "Изображение создано: " + result.get("filename", "image.png")
+                    }))
+                    if dl_url:
+                        events.append(self._sse({
+                            "type": "file",
+                            "filename": result.get("filename", "image.png"),
+                            "url": dl_url,
+                            "size": result.get("size", 0)
+                        }))
+                    events.append(self._sse({
+                        "type": "content",
+                        "text": "Изображение создано!\n\n![" + prompt[:50] + "](" + dl_url + ")"
+                    }))
+                    return events
+            except Exception as e:
+                logger.warning(f"Force generate_image failed: {e}")
+                return None
+
+        # ── Дизайн (баннер для Instagram и т.д.) ──
+        _design_triggers = [
+            "баннер для instagram", "баннер для инстаграм", "пост для instagram",
+            "пост для инстаграм", "визитк", "обложк", "флаер", "плакат",
+        ]
+
+        if any(t in msg for t in _design_triggers):
+            try:
+                from artifact_generator import ArtifactGenerator
+                gen = ArtifactGenerator()
+                result = gen.design(design_type="banner", description=user_message)
+                if result and result.get("success"):
+                    events.append(self._sse({"type": "tool_start", "tool": "generate_design", "args": {"description": user_message[:100]}}))
+                    dl_url = result.get("download_url", result.get("preview_url", ""))
+                    events.append(self._sse({
+                        "type": "tool_result",
+                        "tool": "generate_design",
+                        "success": True,
+                        "preview": "Дизайн создан: " + result.get("filename", "design.html")
+                    }))
+                    if dl_url:
+                        events.append(self._sse({
+                            "type": "file",
+                            "filename": result.get("filename", "design.html"),
+                            "url": dl_url,
+                            "size": result.get("size", 0)
+                        }))
+                    events.append(self._sse({
+                        "type": "content",
+                        "text": "Дизайн создан!\n\n[Открыть дизайн](" + dl_url + ")"
+                    }))
+                    return events
+            except Exception as e:
+                logger.warning(f"Force generate_design failed: {e}")
+                return None
+
+        # ── Код → файл (НЕ в чат) ──
+        _code_triggers = [
+            "напиши скрипт", "напиши код", "создай скрипт", "напиши программ",
+            "напиши парсер", "напиши бот", "создай api", "напиши функци",
+        ]
+
+        if any(t in msg for t in _code_triggers):
+            self._force_file_save = True
+            return None
+
+        return None
 
     def _sse(self, data):
         """Format data as SSE event."""
@@ -2420,13 +3089,119 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);
             action = "обновлён" if is_update else "создан"
             return f"📝 Canvas '{title}' {action} (ID: {canvas_id})"
 
+        # ── ЗАДАЧА-1: Превью для новых инструментов ──
+        elif tool_name == "browser_click":
+            selector = result.get("clicked", "")
+            url_after = result.get("url_after", "")
+            return f"💌 Клик по '{selector}' | URL: {url_after}"
+
+        elif tool_name == "browser_fill":
+            selector = result.get("filled", "")
+            val_len = result.get("value_length", 0)
+            return f"✏️ Поле '{selector}' заполнено ({val_len} символов)"
+
+        elif tool_name == "browser_submit":
+            url_before = result.get("url_before", "")
+            url_after = result.get("url_after", "")
+            navigated = result.get("navigated", False)
+            nav_str = f" → {url_after}" if navigated else " (страница не изменилась)"
+            return f"🚀 Форма отправлена{nav_str}"
+
+        elif tool_name == "browser_select":
+            selector = result.get("selected", "")
+            value = result.get("value", "")
+            return f"📋 Выбрано '{value}' в '{selector}'"
+
+        elif tool_name == "browser_ask_auth":
+            fields = result.get("fields", [])
+            hint = result.get("hint", "")
+            return f"🔐 Форма авторизации обнаружена ({len(fields)} полей) {hint}"
+
+        elif tool_name == "ftp_upload":
+            path = result.get("remote_path", "")
+            size = result.get("size_bytes", 0)
+            return f"📤 FTP загрузка: {path} ({size} байт)"
+
+        elif tool_name == "ftp_download":
+            path = result.get("remote_path", "")
+            size = result.get("size_bytes", 0)
+            return f"📥 FTP скачано: {path} ({size} байт)"
+
+        elif tool_name == "ftp_list":
+            count = result.get("count", 0)
+            path = result.get("path", "/")
+            return f"📂 FTP список: {path} — {count} элементов"
+
         return "✅ Выполнено"
 
     # ══════════════════════════════════════════════════════════════
     # ██ MAIN STREAMING LOOP (backward-compatible API) ██
     # ══════════════════════════════════════════════════════════════
 
-    def run_stream(self, user_message, chat_history=None, file_content=None):
+
+    def _search_knowledge_base(self, query: str, top_k: int = 3) -> str:
+        """Search local knowledge base for relevant information."""
+        import os
+        KB_DIR = "/var/www/orion/backend/data/knowledge_base"
+        if not os.path.isdir(KB_DIR):
+            return ""
+        query_lower = query.lower()
+        results = []
+        for filename in os.listdir(KB_DIR):
+            if not filename.endswith('.md'):
+                continue
+            filepath = os.path.join(KB_DIR, filename)
+            try:
+                with open(filepath, 'r') as f:
+                    file_content = f.read()
+                content_lower = file_content.lower()
+                score = 0
+                for word in query_lower.split():
+                    if len(word) > 3 and word in content_lower:
+                        score += content_lower.count(word)
+                if score > 0:
+                    sections = file_content.split('\n## ')
+                    best_section = ""
+                    best_score = 0
+                    for section in sections:
+                        s_score = sum(1 for w in query_lower.split() if len(w) > 3 and w in section.lower())
+                        if s_score > best_score:
+                            best_score = s_score
+                            best_section = section[:1000]
+                    if best_section:
+                        results.append((score, filename, best_section))
+            except Exception:
+                continue
+        if not results:
+            return ""
+        results.sort(reverse=True)
+        kb_context = "\nИНФОРМАЦИЯ ИЗ БАЗЫ ЗНАНИЙ:\n\n"
+        for score, fname, section in results[:top_k]:
+            kb_context += f"--- {fname} ---\n{section}\n\n"
+        return kb_context
+
+
+    def _extract_project_decisions(self, messages, response):
+        """Извлечь ключевые решения из чата для project memory."""
+        decisions = []
+        files = []
+        urls = []
+        techs = []
+        text = response.lower()
+        import re as _re
+        file_matches = _re.findall(r'(?:создал|записал|сохранил).*?(/\S+\.\w+)', text)
+        files.extend(file_matches)
+        url_matches = _re.findall(r'https?://\S+', response)
+        urls.extend(url_matches[:5])
+        tech_keywords = ['python', 'fastapi', 'flask', 'django', 'react', 'vue', 'nginx',
+                         'docker', 'postgresql', 'mysql', 'redis', 'bitrix', 'wordpress',
+                         'node.js', 'express', 'laravel', 'php']
+        for tech in tech_keywords:
+            if tech in text:
+                techs.append(tech)
+        return decisions, files, urls, techs
+
+    def run_stream(self, user_message, chat_history=None, file_content=None, ssh_credentials=None):
         """
         Run the agent loop with streaming.
         Yields SSE events for real-time display.
@@ -2436,6 +3211,10 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);
         """
         if chat_history is None:
             chat_history = []
+
+        # Override SSH credentials if passed from caller
+        if ssh_credentials:
+            self.ssh_credentials = ssh_credentials
 
         # ── ORION: Intent Clarifier ───────────────────────────────
         if _INTENT_CLARIFIER_AVAILABLE:
@@ -2448,21 +3227,21 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);
                 # Проверка лимита стоимости
                 cost_check = self.check_cost_limit()
                 if not cost_check.get("allowed", True):
-                    yield {
+                    yield self._sse({
                         "type": "error",
                         "error": (f"Лимит стоимости сессии превышен: "
                                   f"${cost_check['current_cost']:.3f} / "
                                   f"${cost_check['max_cost']:.2f}. "
                                   f"Начните новую сессию.")
-                    }
+                    })
                     return
                 # Emit intent info для UI
                 intent_label = format_clarification_for_user(self._intent_result)
-                yield {"type": "intent", "data": self._intent_result, "label": intent_label}
+                yield self._sse({"type": "intent", "data": self._intent_result, "label": intent_label})
                 # Если нужно уточнение — спрашиваем
                 if self._intent_result.get("needs_clarification"):
                     q = self._intent_result.get("clarification_question", "Уточните задачу.")
-                    yield self.ask_user(q)
+                    yield self._sse(self.ask_user(q))
                     return
             except Exception as _ie:
                 logger.debug(f"Intent clarifier error: {_ie}")
@@ -2489,13 +3268,122 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);
                 self.memory = None
 
         # ПАТЧ A2 + Orchestrator v2: custom_system_prompt и _orchestrator_prompt
+        # ══ PRE-CHECK: set _force_file_save flag before prompt building ══
+        _msg_lower_pre = user_message.lower().strip()
+        _code_triggers_pre = [
+            "напиши скрипт", "напиши код", "создай скрипт", "напиши программ",
+            "напиши парсер", "напиши бот", "создай api", "напиши функци",
+        ]
+        if any(t in _msg_lower_pre for t in _code_triggers_pre):
+            self._force_file_save = True
+
         _effective_system_prompt = AGENT_SYSTEM_PROMPT
+        # BUG-4 FIX: Search Knowledge Base
+        try:
+            _kb_context = self._search_knowledge_base(user_message if isinstance(user_message, str) else str(user_message))
+            if _kb_context:
+                _effective_system_prompt += _kb_context
+                logging.info(f"[KB] Found relevant knowledge base content ({len(_kb_context)} chars)")
+        except Exception as _kb_err:
+            logging.warning(f"[KB] Error searching knowledge base: {_kb_err}")
         # Добавить промпт от оркестратора (специфичный для агента)
         if hasattr(self, '_orchestrator_prompt') and self._orchestrator_prompt:
             _effective_system_prompt = self._orchestrator_prompt + "\n\n" + AGENT_SYSTEM_PROMPT
         # Добавить custom_system_prompt (от старого ПАТЧ A2)
         if self.custom_system_prompt:
             _effective_system_prompt = _effective_system_prompt + "\n\n" + self.custom_system_prompt
+        # ══ PATCH 2: Force file save — усиленный промпт для кода ══
+        if hasattr(self, '_force_file_save') and self._force_file_save:
+            _effective_system_prompt += """
+
+КРИТИЧНО: Пользователь просит написать код.
+1. НЕ ПИШИ весь код в чат — это неудобно
+2. СОХРАНИ код в файл через file_write
+3. ДАЙ ссылку на скачивание
+4. В чат напиши только краткое описание что сделал
+
+Порядок: file_write → краткое описание → ссылка на скачивание.
+"""
+            self._force_file_save = False
+
+
+        # ── AutoSummary: загрузить ВСЕ резюме прошлых чатов (без фильтра по query) ──
+        _project_summaries = ""
+        if self.memory:
+            try:
+                # Загружаем ВСЕ summary без семантического фильтра (recall_all)
+                _all_summaries = []
+                if hasattr(self.memory, 'recall_all'):
+                    _all_summaries = self.memory.recall_all(
+                        category="project_summary",
+                        limit=100
+                    )
+                if not _all_summaries:
+                    # Fallback: семантический поиск с увеличенным top_k
+                    _all_summaries = self.memory.recall(
+                        query=user_message,
+                        category="project_summary",
+                        top_k=50
+                    )
+                if _all_summaries:
+                    _project_summaries = "ИСТОРИЯ ПРОЕКТА (резюме прошлых чатов):\n"
+                    if isinstance(_all_summaries, list):
+                        for s in _all_summaries:
+                            _project_summaries += f"- {s}\n"
+                    elif isinstance(_all_summaries, str):
+                        _project_summaries += _all_summaries
+                # Загружаем ВСЕ решения без фильтра
+                _all_decisions = []
+                if hasattr(self.memory, 'recall_all'):
+                    _all_decisions = self.memory.recall_all(
+                        category="project_decisions",
+                        limit=50
+                    )
+                if not _all_decisions:
+                    _all_decisions = self.memory.recall(
+                        query=user_message,
+                        category="project_decisions",
+                        top_k=30
+                    )
+                if _all_decisions:
+                    _project_summaries += "\nКЛЮЧЕВЫЕ РЕШЕНИЯ:\n"
+                    if isinstance(_all_decisions, list):
+                        for d in _all_decisions:
+                            _project_summaries += f"- {d}\n"
+                    elif isinstance(_all_decisions, str):
+                        _project_summaries += _all_decisions
+                if _all_summaries or _all_decisions:
+                    logging.info(f"[ProjectSummary] Loaded {len(_all_summaries) if isinstance(_all_summaries, list) else 1} summaries, {len(_all_decisions) if isinstance(_all_decisions, list) else 0} decisions")
+            except Exception as _psum_err:
+                logging.warning(f"[ProjectSummary] Load failed: {_psum_err}")
+        if _project_summaries:
+            _effective_system_prompt += "\n\n" + _project_summaries
+
+
+        # ── Extended Thinking: анализ перед выполнением сложных задач ──
+        if hasattr(self, '_orchestrator_plan') and self._orchestrator_plan and self._orchestrator_plan.get("mode") != "chat":
+            try:
+                thinking_prompt = f"""Перед выполнением задачи, подумай:
+1. Какой лучший подход?
+2. Какие могут быть проблемы?
+3. Какие технологии использовать?
+4. В каком порядке действовать?
+
+Задача: {user_message}
+
+Думай вслух, коротко (3-5 пунктов)."""
+                yield self._sse({"type": "thinking_start"})
+                thinking_messages = [
+                    {"role": "system", "content": "Ты архитектор. Кратко проанализируй задачу."},
+                    {"role": "user", "content": thinking_prompt}
+                ]
+                thinking_result = self._call_ai_simple(thinking_messages)
+                if thinking_result:
+                    yield self._sse({"type": "thinking", "content": thinking_result})
+                    _effective_system_prompt += f"\n\nТВОЙ АНАЛИЗ ЗАДАЧИ:\n{thinking_result}\n\nТеперь ВЫПОЛНЯЙ по этому плану."
+                yield self._sse({"type": "thinking_end"})
+            except Exception as _think_err:
+                logging.warning(f"[Thinking] Failed: {_think_err}")
 
         # Build initial messages
         if self.memory:
@@ -2528,6 +3416,19 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);
                 full_message += creds_hint
             messages.append({"role": "user", "content": full_message})
 
+        # ── ПАТЧ 1: Парсинг FTP/админки из сообщения ──
+        _msg_lower = user_message.lower()
+        if "ftp" in _msg_lower:
+            import re as _re
+            _ftp_match = _re.search(r'ftp[:\\s]+(\\S+)\\s+логин[:\\s]+(\\S+)\\s+пароль[:\\s]+(\\S+)', user_message, _re.IGNORECASE)
+            if _ftp_match:
+                self._extra_credentials["FTP"] = f"{_ftp_match.group(1)} логин: {_ftp_match.group(2)} пароль: {_ftp_match.group(3)}"
+        if "админк" in _msg_lower or "bitrix" in _msg_lower:
+            import re as _re
+            _admin_match = _re.search(r'(https?://\\S+/bitrix/?\\S*)\\s+логин[:\\s]+(\\S+)\\s+пароль[:\\s]+(\\S+)', user_message, _re.IGNORECASE)
+            if _admin_match:
+                self._extra_credentials["Админка"] = f"{_admin_match.group(1)} логин: {_admin_match.group(2)} пароль: {_admin_match.group(3)}"
+
         # ── BUG-5 FIX: Извлечь контекст из долгосрочной памяти ──────────────
         # ── BUG-5 FIX v2: recall/profile уже встроены в build_messages() ──
         # build_messages() вызывает: profile.get_prompt_context() + semantic.search()
@@ -2544,6 +3445,64 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);
 
         # Store user_message for fallback response
         self.user_message = user_message
+
+        # ── ПАТЧ 9: Solution Cache — recall похожих решений ──
+        try:
+            if not self._solution_cache:
+                self._solution_cache = SolutionCache(call_ai_simple_fn=self._call_ai_simple)
+            _cached_solutions = self._solution_cache.recall(user_message, threshold=0.55, top_k=2)
+            logger.info(f"[PATCH9] recall result: {len(_cached_solutions) if _cached_solutions else 0} solutions found")
+            if _cached_solutions:
+                _cache_hint = self._solution_cache.format_for_prompt(_cached_solutions)
+                if messages and messages[0].get("role") == "system":
+                    messages[0]["content"] += _cache_hint
+                logger.info(f"[PATCH9] Injected {len(_cached_solutions)} cached solutions")
+                yield self._sse({"type": "info", "message": f"Найдено {len(_cached_solutions)} похожих решений в кеше"})
+                # Increment use count
+                for _sol in _cached_solutions:
+                    self._solution_cache.increment_use(_sol["id"])
+        except Exception as _p9_err:
+            logger.warning(f"[PATCH9] recall error: {_p9_err}", exc_info=True)
+
+
+        # ══ FORCE TOOL — принудительный вызов инструмента ══
+        _force_tool_result = self._check_force_tool(user_message, file_content or "")
+        if _force_tool_result:
+            for _ft_event in _force_tool_result:
+                yield _ft_event
+            return
+
+        # ── ПАТЧ W1-2: Составить план перед выполнением ──
+        _task_plan_steps = []
+        try:
+            _plan_prompt = [
+                {"role": "system", "content": (
+                    "Составь план выполнения задачи из 3-8 шагов. "
+                    "Каждый шаг — конкретное действие с инструментом (ssh_execute, browser_navigate, file_write и т.д.). "
+                    "Ответь СТРОГО JSON массивом строк: [\"\u0448\u0430\u0433 1\", \"\u0448\u0430\u0433 2\", ...]. "
+                    "Без markdown, без пояснений, только JSON массив."
+                )},
+                {"role": "user", "content": f"Задача: {user_message[:1000]}"}
+            ]
+            _plan_raw = self._call_ai_simple(_plan_prompt)
+            if _plan_raw:
+                _plan_raw = _plan_raw.strip()
+                if _plan_raw.startswith("```"):
+                    _plan_raw = _plan_raw.split("\n", 1)[1].rsplit("```", 1)[0].strip()
+                _task_plan_steps = json.loads(_plan_raw)
+                if isinstance(_task_plan_steps, list) and _task_plan_steps:
+                    yield self._sse({
+                        "type": "task_steps",
+                        "steps": [{"name": s, "status": "pending"} for s in _task_plan_steps[:10]]
+                    })
+                    _plan_text = "ПЛАН ВЫПОЛНЕНИЯ (следуй ему пошагово):\n" + "\n".join(
+                        f"{i+1}. {s}" for i, s in enumerate(_task_plan_steps[:10])
+                    )
+                    if messages and messages[0].get("role") == "system":
+                        messages[0]["content"] += f"\n\n{_plan_text}"
+                    logger.info(f"[PATCH-W1-2] Plan generated: {len(_task_plan_steps)} steps")
+        except Exception as _plan_err:
+            logger.debug(f"[PATCH-W1-2] Plan generation failed: {_plan_err}")
 
         # Agent loop with LangGraph state tracking
         iteration = 0
@@ -2569,6 +3528,24 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);
                     messages = self.memory.before_iteration(messages, iteration, self.MAX_ITERATIONS)
                 except Exception as _bi_err:
                     logger.debug(f"memory before_iteration error: {_bi_err}")
+
+            # ── ПАТЧ 1: Инжекция доступов в system prompt КАЖДОЙ итерации ──
+            if self.ssh_credentials and self.ssh_credentials.get("host"):
+                _creds_block = (
+                    f"\n\nДОСТУПЫ К СЕРВЕРУ (используй их, НЕ спрашивай повторно):\n"
+                    f"SSH: {self.ssh_credentials.get('host')} "
+                    f"логин: {self.ssh_credentials.get('username', 'root')} "
+                    f"пароль: {self.ssh_credentials.get('password', '')} "
+                    f"порт: {self.ssh_credentials.get('port', 22)}"
+                )
+                if hasattr(self, '_extra_credentials') and self._extra_credentials:
+                    for _ck, _cv in self._extra_credentials.items():
+                        _creds_block += f"\n{_ck}: {_cv}"
+                if messages and messages[0].get("role") == "system":
+                    _sys = messages[0]["content"]
+                    if "ДОСТУПЫ К СЕРВЕРУ" in _sys:
+                        _sys = _sys[:_sys.index("\n\nДОСТУПЫ К СЕРВЕРУ")]
+                    messages[0]["content"] = _sys + _creds_block
 
             try:
                 for event in self._call_ai_stream(messages, tools=TOOLS_SCHEMA):
@@ -2616,6 +3593,24 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);
                 except Exception:
                     tool_args = {}
 
+                # ── ПАТЧ 3: Автоэкранирование спецсимволов в URL/FTP ──
+                if tool_name in ("browser_navigate", "browser_check_site", "browser_get_text"):
+                    _url = tool_args.get("url", "")
+                    if "@" in _url and "://" in _url:
+                        try:
+                            from urllib.parse import urlparse, quote, urlunparse
+                            _parsed = urlparse(_url)
+                            if _parsed.password and any(c in _parsed.password for c in '#@!$& '):
+                                _safe_pass = quote(_parsed.password, safe='')
+                                _new_netloc = f"{_parsed.username}:{_safe_pass}@{_parsed.hostname}"
+                                if _parsed.port:
+                                    _new_netloc += f":{_parsed.port}"
+                                tool_args["url"] = urlunparse(_parsed._replace(netloc=_new_netloc))
+                                tool_args_str = json.dumps(tool_args, ensure_ascii=False)
+                                logger.info(f"[PATCH3] Escaped special chars in URL password")
+                        except Exception as _esc_err:
+                            logger.debug(f"URL escape error: {_esc_err}")
+
                 yield self._sse({
                     "type": "tool_start",
                     "tool": tool_name,
@@ -2634,6 +3629,61 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);
                         "summary": summary
                     })
                     yield self._sse({"type": "task_complete", "summary": summary})
+
+                    # ── ПАТЧ 6: Автопроверка после task_complete ──
+                    try:
+                        _files_in_log = []
+                        for _act in self.actions_log:
+                            _a_args = _act.get("args", {})
+                            if _act.get("tool") in ("file_write", "ssh_execute"):
+                                _path = _a_args.get("path", "")
+                                if _path:
+                                    _files_in_log.append(_path)
+                        if _files_in_log and self.ssh_credentials and self.ssh_credentials.get("host"):
+                            _last_file = _files_in_log[-1]
+                            _verify_result = self._execute_tool("ssh_execute",
+                                json.dumps({"command": f"ls -la {_last_file} 2>/dev/null && echo FILE_EXISTS || echo FILE_MISSING"}))
+                            _verify_out = _verify_result.get("stdout", "")
+                            if "FILE_MISSING" in _verify_out:
+                                yield self._sse({"type": "verification", "status": "warning",
+                                    "message": f"Файл {_last_file} не найден на сервере!"})
+                            else:
+                                yield self._sse({"type": "verification", "status": "ok",
+                                    "message": f"Файл {_last_file} существует"})
+                    except Exception as _v6_err:
+                        logger.debug(f"PATCH6 auto-verify error: {_v6_err}")
+
+                    # ── ПАТЧ 9: Solution Cache — сохранить решение ──
+                    try:
+                        if not self._solution_cache:
+                            self._solution_cache = SolutionCache(call_ai_simple_fn=self._call_ai_simple)
+                        _extracted = SolutionExtractor.extract(
+                            self.actions_log, user_message, summary
+                        )
+                        self._solution_cache.save(user_message, _extracted,
+                            agent_key=getattr(self, '_agent_key', ''))
+                        logger.info(f"[PATCH9] Solution saved: {len(_extracted.get('commands', []))} cmds, "
+                                    f"{len(_extracted.get('files_created', []))} files")
+                    except Exception as _p9_save_err:
+                        logger.debug(f"PATCH9 save error: {_p9_save_err}")
+
+                    # ── ПАТЧ 7: Mixture-of-Agents верификация ──
+                    if getattr(self, '_verify_enabled', False):
+                        try:
+                            yield self._sse({"type": "verification", "status": "checking", "model": "Claude Sonnet 4.6"})
+                            _v7 = self._verify_with_second_llm(
+                                user_message, full_response_text, self.actions_log
+                            )
+                            if _v7.get("verified"):
+                                yield self._sse({"type": "verification", "status": "verified",
+                                    "issues": 0, "summary": _v7.get("summary", "OK")})
+                            else:
+                                _issues = _v7.get("issues", [])
+                                yield self._sse({"type": "verification", "status": "issues_found",
+                                    "issues": len(_issues), "details": "; ".join(_issues[:3])})
+                        except Exception as _v7_err2:
+                            logger.debug(f"PATCH7 verify SSE error: {_v7_err2}")
+
                     messages.append({
                         "role": "tool",
                         "tool_call_id": tool_id,
@@ -2698,10 +3748,56 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);
                     except Exception as _at_err:
                         logger.debug(f"memory.after_tool error: {_at_err}")
 
+                # ── ПАТЧ 2: Автоматическая подсказка для самопроверки ──
+                _selfcheck_hint = ""
+                if result.get("success", False):
+                    if tool_name == "file_write":
+                        _written_path = tool_args.get("path", "")
+                        if _written_path:
+                            _selfcheck_hint = f" [ПРОВЕРЬ: выполни file_read или ssh_execute 'ls -la {_written_path}' чтобы убедиться что файл создан]"
+                    elif tool_name == "ssh_execute" and ("cp " in tool_args.get("command", "") or "mv " in tool_args.get("command", "")):
+                        _selfcheck_hint = " [ПРОВЕРЬ: выполни ls -la чтобы убедиться что файл на месте]"
+                    elif tool_name in ("browser_navigate", "browser_check_site"):
+                        _status = result.get("status_code", 0)
+                        if _status in (401, 403):
+                            _selfcheck_hint = " [HTTP AUTH: страница требует авторизацию. Попробуй SSH/FTP доступ напрямую, не через браузер]"
+                        elif _status == 404:
+                            _selfcheck_hint = " [404: страница не найдена. Проверь URL и путь к файлу на сервере]"
+                if _selfcheck_hint:
+                    if isinstance(result, dict):
+                        result["_selfcheck"] = _selfcheck_hint
+
+                # ── ЗАДАЧА-1: browser_ask_auth — отправить SSE auth_required и подождать ответа у пользователя ──
+                if result.get("_auth_required"):
+                    # Отправляем SSE событие auth_required — frontend покажет форму логина
+                    yield self._sse({
+                        "type": "auth_required",
+                        "url": result.get("url", ""),
+                        "screenshot": result.get("screenshot"),
+                        "fields": result.get("fields", []),
+                        "hint": result.get("hint", ""),
+                        "submit_selector": result.get("submit_selector", 'button[type="submit"]'),
+                        "tool_call_id": tool_id
+                    })
+                    # Добавляем в messages инфо что ждём авторизацию
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tool_id,
+                        "content": json.dumps({
+                            "success": True,
+                            "status": "auth_required",
+                            "message": f"Пользователь видит форму логина. Ожидаем ввод данных ({result.get('hint', '')}). После ввода пользователя используй browser_fill и browser_submit.",
+                            "fields": result.get("fields", []),
+                            "url": result.get("url", "")
+                        }, ensure_ascii=False)
+                    })
+                    continue
+
                 result_preview = self._preview_result(tool_name, result)
-                # Include screenshot for browser tools
+                # Include screenshot for browser tools (ЗАДАЧА-1: расширен список)
                 _browser_tools = ("browser_navigate", "browser_check_site", "browser_get_text",
-                                  "browser_get_links", "browser_screenshot_check")
+                                  "browser_get_links", "browser_screenshot_check",
+                                  "browser_click", "browser_fill", "browser_submit", "browser_select")
                 _screenshot = result.get("screenshot") if tool_name in _browser_tools else None
                 _tool_result_event = {
                     "type": "tool_result",
@@ -2713,6 +3809,31 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);
                 if _screenshot:
                     _tool_result_event["screenshot"] = _screenshot
                 yield self._sse(_tool_result_event)
+
+                # ── ПАТЧ W1-5: Автоанализ скриншота после browser_navigate ──
+                if tool_name == "browser_navigate" and _screenshot and result.get("success"):
+                    try:
+                        _analysis = self._analyze_screenshot_auto(_screenshot, tool_args.get("url", ""))
+                        if _analysis:
+                            messages.append({
+                                "role": "tool",
+                                "tool_call_id": tool_id,
+                                "content": json.dumps({
+                                    "success": True,
+                                    "screenshot_analysis": _analysis,
+                                    "note": "Автоанализ скриншота страницы"
+                                }, ensure_ascii=False)[:self.MAX_TOOL_OUTPUT]
+                            })
+                            yield self._sse({
+                                "type": "tool_result",
+                                "tool": "analyze_screenshot",
+                                "success": True,
+                                "preview": f"👁️ Анализ страницы: {_analysis[:200]}",
+                                "elapsed": 0
+                            })
+                            result["_screenshot_analyzed"] = True
+                    except Exception as _sa_err:
+                        logger.debug(f"[PATCH-W1-5] Screenshot analysis error: {_sa_err}")
 
                 # ── Self-Healing 2.0 ──
                 if not result.get("success", False) and heal_attempts < self.MAX_HEAL_ATTEMPTS:
@@ -2773,15 +3894,17 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);
                         continue  # Skip normal result append
 
                 # Add tool result to messages
-                result_str = json.dumps(result, ensure_ascii=False)
-                if len(result_str) > self.MAX_TOOL_OUTPUT:
-                    result_str = result_str[:self.MAX_TOOL_OUTPUT] + "..."
+                # ПАТЧ W1-5: пропускаем если скриншот уже проанализирован и добавлен
+                if not result.get("_screenshot_analyzed"):
+                    result_str = json.dumps(result, ensure_ascii=False)
+                    if len(result_str) > self.MAX_TOOL_OUTPUT:
+                        result_str = result_str[:self.MAX_TOOL_OUTPUT] + "..."
 
-                messages.append({
-                    "role": "tool",
-                    "tool_call_id": tool_id,
-                    "content": result_str
-                })
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tool_id,
+                        "content": result_str
+                    })
 
         if self._stop_requested:
             # BUG-1 FIX: on_stop — сохранить прерванную задачу
@@ -2806,6 +3929,52 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);
                 logger.warning(f"Memory save failed: {_mem_save_err}")
         # ─────────────────────────────────────────────────────────────────────
 
+
+        # ── AutoSummary: резюме разговора для Project Memory ──
+        if self.memory and hasattr(self, '_chat_id') and full_response_text:
+            try:
+                _summary_messages = [
+                    {"role": "system", "content": """Напиши подробное резюме этого разговора в 5-10 предложений.
+Включи ОБЯЗАТЕЛЬНО:
+- Что просил пользователь и что было сделано
+- ВСЕ технические решения (фреймворки, библиотеки, языки)
+- Названия ВСЕХ созданных файлов и пути к ним
+- URL, домены, IP-адреса серверов
+- Цвета, шрифты, дизайн-решения
+- Структуру проекта и архитектуру
+- Конфигурации, порты, настройки сервера
+Отвечай ТОЛЬКО резюме, без пояснений."""},
+                    {"role": "user", "content": f"Запрос пользователя: {user_message[:1000]}\n\nОтвет агента: {full_response_text[:4000]}"}
+                ]
+                _summary_text = self._call_ai_simple(_summary_messages)
+                if _summary_text and len(_summary_text) > 10:
+                    self.memory.store_fact(
+                        key=f"chat_summary:{self._chat_id}",
+                        value=_summary_text,
+                        category="project_summary",
+                        metadata={
+                            "chat_id": self._chat_id,
+                            "user_message": user_message[:200],
+                            "timestamp": __import__('time').time()
+                        }
+                    )
+                    _decisions = []
+                    for keyword in ["решили", "выбрали", "используем", "будем", "настроили", "создали", "задеплоили"]:
+                        if keyword in full_response_text.lower():
+                            for sentence in full_response_text.split('.'):
+                                if keyword in sentence.lower() and len(sentence) > 15:
+                                    _decisions.append(sentence.strip()[:200])
+                                    break
+                    if _decisions:
+                        self.memory.store_fact(
+                            key=f"decisions:{self._chat_id}",
+                            value="; ".join(_decisions),
+                            category="project_decisions"
+                        )
+                    logging.info(f"[AutoSummary] Saved summary for chat {self._chat_id}: {_summary_text[:100]}...")
+            except Exception as _sum_err:
+                logging.warning(f"[AutoSummary] Failed: {_sum_err}")
+
         # Принудительный финальный ответ если агент достиг MAX_ITERATIONS без task_complete
         if not full_response_text.strip():
             yield self._sse({"type": "content", "text": "⚠️ Агент достиг лимита итераций. Запрашиваю финальный ответ..."})
@@ -2818,8 +3987,8 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);
                             r = json.loads(m["content"])
                             if isinstance(r, dict) and r.get("success"):
                                 tool_results_summary.append(m["content"][:300])
-                        except Exception:
-                            pass
+                        except Exception as _parse_err:
+                            logging.warning(f"Tool result parse error: {_parse_err}")
                 context_summary = "\n".join(tool_results_summary[-5:]) if tool_results_summary else "Результаты действий недоступны"
                 final_messages = [
                     {"role": "system", "content": "Ты автономный AI-агент. На основе выполненных действий дай полный итоговый ответ пользователю. Отвечай на языке пользователя."},

@@ -60,7 +60,7 @@ def init_db():
             role TEXT DEFAULT 'user',
             created_at TEXT NOT NULL,
             is_active INTEGER DEFAULT 1,
-            monthly_limit REAL DEFAULT 999999,
+            monthly_limit REAL DEFAULT 2.0,
             total_spent REAL DEFAULT 0.0,
             settings TEXT DEFAULT '{}'
         );
@@ -155,7 +155,7 @@ def _migrate_from_json(conn):
                 (uid, user.get("email", ""), user.get("password_hash", ""),
                  user.get("name", ""), user.get("role", "user"),
                  user.get("created_at", now), 1 if user.get("is_active", True) else 0,
-                 user.get("monthly_limit", 999999), user.get("total_spent", 0.0),
+                 user.get("monthly_limit", 2.0), user.get("total_spent", 0.0),
                  json.dumps(user.get("settings", {}), ensure_ascii=False))
             )
 
@@ -332,7 +332,7 @@ def save_db(db):
                     (uid, user.get("email", ""), user.get("password_hash", ""),
                      user.get("name", ""), user.get("role", "user"),
                      user.get("created_at", now), 1 if user.get("is_active", True) else 0,
-                     user.get("monthly_limit", 999999), user.get("total_spent", 0.0),
+                     user.get("monthly_limit", 2.0), user.get("total_spent", 0.0),
                      json.dumps(user.get("settings", {}), ensure_ascii=False))
                 )
 

@@ -52,6 +52,7 @@ AGENT_ZONES = {
     "integrator": "/var/www/{project}/integrations/",
     "analyst":    "/var/www/{project}/reports/",
     "qa":         "/var/www/{project}/tests/",
+    "copywriter": "/var/www/{project}/frontend/",  # ПАТЧ W2-3
 }
 
 def get_agent_zone(agent_key: str, project: str = "orion") -> str:
@@ -184,8 +185,14 @@ class ParallelAgentOrchestrator:
                 model=agent_model,
                 api_key=self.api_key,
                 api_url=self.api_url,
-                ssh_credentials=self.ssh_credentials
+                ssh_credentials=self.ssh_credentials  # ПАТЧ W2-5: передаём SSH credentials
             )
+            # ПАТЧ W2-5: Передать SSH credentials в каждый AgentLoop
+            if self.ssh_credentials:
+                loop.ssh_host = self.ssh_credentials.get('host', '')
+                loop.ssh_user = self.ssh_credentials.get('username', 'root')
+                loop.ssh_pass = self.ssh_credentials.get('password', '')
+                loop.ssh_port = self.ssh_credentials.get('port', 22)
             # BUG-11 FIX: shared scratchpad (thread-safe)
             loop._shared_scratchpad = self.shared_scratchpad
             loop._agent_zone = get_agent_zone(agent_key)
@@ -218,7 +225,7 @@ class ParallelAgentOrchestrator:
             # Run agent iterations
             agent_text = ""
             iteration = 0
-            max_iterations = 8
+            max_iterations = 20  # ПАТЧ W2-5: было 8
             heal_attempts = 0
 
             while iteration < max_iterations and not self._stop_requested:
@@ -322,6 +329,15 @@ class ParallelAgentOrchestrator:
                         "success": result.get("success", False),
                         "elapsed": elapsed
                     })
+
+                    # ПАТЧ W2-5: Записывать в scratchpad при создании файлов
+                    if result.get("success") and tool_name in ("file_write", "create_artifact", "ftp_upload"):
+                        _file_path = tool_args.get("path", tool_args.get("filename", ""))
+                        if _file_path:
+                            self.shared_scratchpad.write(
+                                agent_key,
+                                self.shared_scratchpad.read(agent_key) + f"\nСоздан: {_file_path}"
+                            )
 
                     result_preview = loop._preview_result(tool_name, result)
                     self._event_queue.put(self._sse({
@@ -637,9 +653,19 @@ class ParallelAgentOrchestrator:
             if not agent_config:
                 continue
 
+            # ПАТЧ W2-5: Формируем улучшенный handoff context с scratchpad
+            _shared = dict(self._agent_results)
+            _scratchpad_ctx = self.shared_scratchpad.get_context_for_agent(agent_key)
+            if _scratchpad_ctx:
+                _shared["__scratchpad__"] = _scratchpad_ctx
+            if self.handoff_manager and _HANDOFF_AVAILABLE:
+                _handoff_ctx = self.handoff_manager.get_context_for_next_agent(agent_key)
+                if _handoff_ctx:
+                    _shared["__handoff__"] = _handoff_ctx
+
             result = self._run_single_agent(
                 agent_key, agent_config, user_message, chat_history,
-                file_content, self._agent_results
+                file_content, _shared
             )
             all_results.append(result)
             total_tokens_in += result.get("tokens_in", 0)

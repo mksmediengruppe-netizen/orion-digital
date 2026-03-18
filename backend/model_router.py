@@ -31,7 +31,7 @@ logger = logging.getLogger("model_router")
 
 MODELS = {
     "deepseek": {
-        "id": "deepseek/deepseek-v3.2",
+        "id": "openai/gpt-4.1-nano",
         "name": "DeepSeek V3.2",
         "input_price": 0.27,
         "output_price": 0.38,
@@ -56,6 +56,15 @@ MODELS = {
         "role": "brain",
         "description": "Общение, планирование, code review — стратегическое мышление",
         "max_tokens": 64000
+    },
+    "opus": {
+        "id": "anthropic/claude-opus-4",
+        "name": "Claude Opus 4",
+        "input_price": 15.00,
+        "output_price": 75.00,
+        "role": "architect",
+        "description": "Архитектура, глубокий анализ, аудит кода — для самых сложных задач",
+        "max_tokens": 32000
     }
 }
 
@@ -126,6 +135,22 @@ MODES = {
             "tester":           "deepseek",
             "analyst":          "sonnet",    # Глубокий анализ
             "code_reviewer":    "sonnet"
+        }
+    },
+    "architect": {
+        "label": "Architect",
+        "description": "Claude Opus для сложных задач. Архитектура, аудит, ТЗ.",
+        "max_cost_usd": 20.0,
+        "agents": {
+            "intent_clarifier": "opus",
+            "orchestrator":     "opus",
+            "designer":         "gemini",
+            "developer":        "deepseek",
+            "devops":           "deepseek",
+            "integrator":       "deepseek",
+            "tester":           "deepseek",
+            "analyst":          "opus",
+            "code_reviewer":    "opus"
         }
     }
 }
@@ -307,9 +332,9 @@ def select_model(query: str, variant: str = "standard",
 def _get_fallback_chain(model_key: str) -> List[str]:
     """Цепочка fallback моделей."""
     chains = {
-        "sonnet":   ["anthropic/claude-sonnet-4.6", "google/gemini-2.5-pro", "deepseek/deepseek-v3.2"],
-        "gemini":   ["google/gemini-2.5-pro", "anthropic/claude-sonnet-4.6", "deepseek/deepseek-v3.2"],
-        "deepseek": ["deepseek/deepseek-v3.2", "google/gemini-2.5-pro", "anthropic/claude-sonnet-4.6"],
+        "sonnet":   ["anthropic/claude-sonnet-4.6", "google/gemini-2.5-pro", "openai/gpt-4.1-mini"],
+        "gemini":   ["google/gemini-2.5-pro", "anthropic/claude-sonnet-4.6", "openai/gpt-4.1-mini"],
+        "deepseek": ["openai/gpt-4.1-mini", "google/gemini-2.5-pro", "anthropic/claude-sonnet-4.6"],
     }
     return chains.get(model_key, chains["deepseek"])
 

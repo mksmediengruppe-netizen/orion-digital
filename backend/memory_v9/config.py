@@ -25,10 +25,10 @@ class MemoryConfig:
     ANCHOR_MAX_ACTIONS = 8
 
     # ── Compaction ──
-    COMPACT_EVERY_N = 4
-    COMPACT_MSG_THRESHOLD = 30
-    COMPACT_KEEP_FIRST = 3
-    COMPACT_KEEP_LAST = 8
+    COMPACT_EVERY_N = 5          # ПАТЧ W2-1: было 4
+    COMPACT_MSG_THRESHOLD = 15     # ПАТЧ W2-1: было 30 — агрессивнее
+    COMPACT_KEEP_FIRST = 2         # ПАТЧ W2-1: было 3
+    COMPACT_KEEP_LAST = 6          # ПАТЧ W2-1: было 8
 
     # ── Tool Output ──
     TOOL_OUTPUT_MAX_CHARS = 2400

@@ -313,6 +313,8 @@ Assistant: {assistant_msg}"""
                 items = json.loads(json_match.group(0))
                 stored = []
                 for item in items:
+                    if not isinstance(item, dict) or "key" not in item or "value" not in item:
+                        continue
                     if item.get("confidence", 0) >= 0.7:
                         result = store_memory(
                             key=item["key"],
