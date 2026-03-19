@@ -1639,6 +1639,24 @@ const Chat = {
                     // Screenshot from browser tools
                     if (evt.screenshot) {
                         ActivityPanel.addScreenshot(evt.url || '', evt.screenshot, evt.status || '');
+                        // FIX: Also display screenshot inline in main chat
+                        if (evt.tool === 'browser_screenshot' || evt.tool === 'browser_navigate') {
+                            const src = evt.screenshot.startsWith('data:') ? evt.screenshot : 'data:image/png;base64,' + evt.screenshot;
+                            const imgHtml = '<div class="chat-screenshot" style="margin:8px 0;">' +
+                                '<img src="' + src + '" alt="Screenshot" style="max-width:100%;border-radius:8px;border:1px solid var(--border-color);cursor:pointer;" ' +
+                                'onclick="Lightbox.open(this.src)">' +
+                                (evt.url ? '<div style="font-size:11px;color:var(--text-secondary);margin-top:4px;">' + Utils.escapeHtml(evt.url) + '</div>' : '') +
+                                '</div>';
+                            // Try aiMsgEl first (passed as parameter), then fallback to querySelector
+                            const msgBubble = (aiMsgEl && aiMsgEl.querySelector('.msg-bubble')) || 
+                                              document.querySelector('#messages-container .message.ai:last-child .msg-bubble');
+                            if (msgBubble) {
+                                msgBubble.insertAdjacentHTML('beforeend', imgHtml);
+                                console.log('[SCREENSHOT] Inline screenshot added to chat for', evt.tool);
+                            } else {
+                                console.warn('[SCREENSHOT] No msg-bubble found for inline screenshot');
+                            }
+                        }
                     }
                 }
                 break;

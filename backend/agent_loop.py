@@ -1731,7 +1731,36 @@ class AgentLoop:
 
     # ── Tool Execution with Retry + Idempotency ──────────────────
 
+    # ── MANUS FEATURE 2: FILE SYSTEM AS CONTEXT ──
     def _execute_tool(self, tool_name, arguments):
+        """Wrapper: выполняет tool и сохраняет большие результаты в файлы."""
+        result = self._execute_tool_raw(tool_name, arguments)
+        # Пост-обработка: сохраняем большие результаты в файл
+        _fs_context_tools = ("ssh_execute", "browser_navigate", "browser_get_text", "web_fetch", "browser_check_site")
+        if tool_name in _fs_context_tools and isinstance(result, dict) and result.get("success"):
+            try:
+                _result_text = json.dumps(result, ensure_ascii=False, default=str)
+                if len(_result_text) > 500:
+                    _save_path = f"/tmp/orion_result_{tool_name}_{int(time.time())}.txt"
+                    with open(_save_path, 'w') as _rf:
+                        _rf.write(_result_text)
+                    result["_saved_to"] = _save_path
+                    result["_original_length"] = len(_result_text)
+                    # Обрезать для контекста
+                    if "stdout" in result and len(str(result["stdout"])) > 200:
+                        result["stdout"] = str(result["stdout"])[:200] + f"\n... (полный результат в {_save_path})"
+                    if "html" in result and len(str(result["html"])) > 200:
+                        result["html"] = str(result["html"])[:200] + f"\n... (полный HTML в {_save_path})"
+                    if "text" in result and len(str(result["text"])) > 300:
+                        result["text"] = str(result["text"])[:300] + f"\n... (полный текст в {_save_path})"
+                    if "content" in result and len(str(result["content"])) > 300:
+                        result["content"] = str(result["content"])[:300] + f"\n... (полный контент в {_save_path})"
+                    logger.info(f"[FS-CONTEXT] Saved {len(_result_text)} chars to {_save_path}")
+            except Exception as _fs_err:
+                logger.debug(f"[FS-CONTEXT] Error saving result: {_fs_err}")
+        return result
+
+    def _execute_tool_raw(self, tool_name, arguments):
         """Execute a tool with retry and idempotency."""
         try:
             args = json.loads(arguments) if isinstance(arguments, str) and arguments.strip() else (arguments if isinstance(arguments, dict) else {})
@@ -3993,6 +4022,20 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);
                 except Exception as _bi_err:
                     logger.debug(f"memory before_iteration error: {_bi_err}")
 
+            # ── MANUS FEATURE 1: TODO.MD — план в файле ──
+            _todo_path = f"/tmp/orion_todo_{getattr(self, '_chat_id', 'default')}.md"
+            if os.path.exists(_todo_path):
+                try:
+                    with open(_todo_path, 'r') as _tf:
+                        _todo = _tf.read()
+                    if _todo.strip():
+                        # Удаляем предыдущий TODO из messages (чтобы не дублировать)
+                        messages = [m for m in messages if not (m.get('role') == 'system' and '[ТЕКУЩИЙ ПЛАН' in str(m.get('content', '')))]
+                        messages.append({"role": "system",
+                            "content": f"[ТЕКУЩИЙ ПЛАН — обнови через file_write в {_todo_path}]\n{_todo}"})
+                        logger.info(f"[TODO.MD] Injected plan from {_todo_path} ({len(_todo)} chars)")
+                except Exception as _todo_err:
+                    logger.debug(f"[TODO.MD] Error reading plan: {_todo_err}")
             # ── ПАТЧ 1: Инжекция доступов в system prompt КАЖДОЙ итерации ──
             if self.ssh_credentials and self.ssh_credentials.get("host"):
                 _creds_block = (
@@ -4154,7 +4197,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);
                     messages.append({
                         "role": "tool",
                         "tool_call_id": tool_id,
-                        "content": json.dumps(result, ensure_ascii=False)
+                        "content": json.dumps({k: ("[screenshot sent to user]" if k == "screenshot" else v) for k, v in result.items()}, ensure_ascii=False)
                     })
                     # ── BUG-5 FIX: Сохранить память при task_complete ──
                     if self.memory:
@@ -4283,7 +4326,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);
 
                 result_preview = self._preview_result(tool_name, result)
                 # Include screenshot for browser tools (ЗАДАЧА-1: расширен список)
-                _browser_tools = ("browser_navigate", "browser_check_site", "browser_get_text",
+                _browser_tools = ("browser_navigate", "browser_check_site", "browser_get_text", "browser_screenshot",
                                   "browser_get_links", "browser_screenshot_check",
                                   "browser_click", "browser_fill", "browser_submit", "browser_select")
                 _screenshot = result.get("screenshot") if tool_name in _browser_tools else None
@@ -4296,6 +4339,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);
                 }
                 if _screenshot:
                     _tool_result_event["screenshot"] = _screenshot
+                    _tool_result_event["url"] = result.get("url", "")
                 yield self._sse(_tool_result_event)
 
                 # ── ПАТЧ W1-5: Автоанализ скриншота после browser_navigate ──
@@ -4384,7 +4428,11 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);
                 # Add tool result to messages
                 # ПАТЧ W1-5: пропускаем если скриншот уже проанализирован и добавлен
                 if not result.get("_screenshot_analyzed"):
-                    result_str = json.dumps(result, ensure_ascii=False)
+                    # FIX: strip screenshot base64 from AI messages to prevent raw text output
+                    _result_for_ai = result.copy()
+                    if "screenshot" in _result_for_ai:
+                        _result_for_ai["screenshot"] = "[screenshot sent to user as image]"
+                    result_str = json.dumps(_result_for_ai, ensure_ascii=False)
                     if len(result_str) > self.MAX_TOOL_OUTPUT:
                         result_str = result_str[:self.MAX_TOOL_OUTPUT] + "..."
 
@@ -4742,7 +4790,8 @@ class MultiAgentLoop(AgentLoop):
                     result_preview = self._preview_result(tool_name, result)
                     yield self._sse({"type": "tool_result", "tool": tool_name, "result": result_preview})
                     
-                    result_str = _json.dumps(result, ensure_ascii=False)
+                    _result_clean = {k: ("[screenshot sent to user]" if k == "screenshot" else v) for k, v in result.items()}
+                    result_str = _json.dumps(_result_clean, ensure_ascii=False)
                     if len(result_str) > self.MAX_TOOL_OUTPUT:
                         result_str = result_str[:self.MAX_TOOL_OUTPUT] + "..."
                     
@@ -4891,7 +4940,7 @@ class MultiAgentLoop(AgentLoop):
                         messages.append({
                             "role": "tool",
                             "tool_call_id": tool_id,
-                            "content": json.dumps(result, ensure_ascii=False)
+                            "content": json.dumps({k: ("[screenshot sent to user]" if k == "screenshot" else v) for k, v in result.items()}, ensure_ascii=False)
                         })
                         return
 
@@ -5025,7 +5074,8 @@ class MultiAgentLoop(AgentLoop):
                             })
                             continue
 
-                    result_str = json.dumps(result, ensure_ascii=False)
+                    _result_clean = {k: ("[screenshot sent to user]" if k == "screenshot" else v) for k, v in result.items()}
+                    result_str = json.dumps(_result_clean, ensure_ascii=False)
                     if len(result_str) > self.MAX_TOOL_OUTPUT:
                         result_str = result_str[:self.MAX_TOOL_OUTPUT] + "..."
 

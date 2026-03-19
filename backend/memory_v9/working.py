@@ -159,6 +159,16 @@ class ContextCompactor:
                 role = m['role'].upper()
                 content = str(m.get('content', ''))
                 # Для tool результатов — извлекаем ключевое
+                # ── MANUS FEATURE 3: RESTORABLE COMPRESSION ──
+                if role == 'TOOL' and len(content) > 300:
+                    # Если результат был сохранён в файл — оставить только ссылку
+                    try:
+                        _data = json.loads(content) if content.startswith('{') else {}
+                        if _data.get('_saved_to'):
+                            middle_parts.append(f"TOOL: result in {_data['_saved_to']}")
+                            continue
+                    except Exception:
+                        pass
                 if role == 'TOOL':
                     try:
                         _td = json.loads(content) if content.startswith('{') else {}
