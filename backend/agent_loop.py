@@ -4387,8 +4387,8 @@ class MultiAgentLoop(AgentLoop):
             max_iterations = 20
             
             while iteration < max_iterations and not self._stop_requested:
+                iteration += 1
                 yield {"type": "heartbeat", "message": "agent_thinking"}
-            iteration += 1
                 tool_calls_received = None
                 ai_text = ""
                 import logging as _pipe_log
