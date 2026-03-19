@@ -1569,7 +1569,7 @@ class AgentLoop:
                 "max_tokens": 2000,
                 "stream": False,
             }
-            resp = http_requests.post(self.api_url, headers=headers, json=payload, timeout=(30, 120))
+            resp = http_requests.post(self.api_url, headers=headers, json=payload, timeout=(30, 600))
             if resp.status_code == 200:
                 data = resp.json()
                 return data.get("choices", [{}])[0].get("message", {}).get("content", "")
@@ -1612,7 +1612,7 @@ class AgentLoop:
                 headers=headers,
                 json=payload,
                 stream=True,
-                timeout=(30, 120)
+                timeout=(30, 600)
             )
 
             if resp.status_code in RETRYABLE_HTTP_CODES:
@@ -1629,7 +1629,7 @@ class AgentLoop:
             # PATCH-STREAM-V2: Use threading.Timer to force-close hung streams
             import time as _time
             import threading as _threading
-            _stream_deadline = _time.monotonic() + 180  # 3 min max per LLM call
+            _stream_deadline = _time.monotonic() + 600  # 10 min max per LLM call
             _stream_timed_out = _threading.Event()
 
             def _kill_stream():
@@ -1638,9 +1638,9 @@ class AgentLoop:
                     resp.close()
                 except Exception:
                     pass
-                logger.warning("[PATCH-STREAM-V2] Force-closed hung stream after 180s")
+                logger.warning("[PATCH-STREAM-V2] Force-closed hung stream after 600s")
 
-            _stream_timer = _threading.Timer(180, _kill_stream)
+            _stream_timer = _threading.Timer(600, _kill_stream)
             _stream_timer.daemon = True
             _stream_timer.start()
 
@@ -1650,9 +1650,9 @@ class AgentLoop:
                 if hasattr(_raw, '_fp') and hasattr(_raw._fp, 'fp'):
                     _inner = _raw._fp.fp
                     if hasattr(_inner, 'raw') and hasattr(_inner.raw, '_sock'):
-                        _inner.raw._sock.settimeout(90)
+                        _inner.raw._sock.settimeout(300)
                     elif hasattr(_inner, '_sock'):
-                        _inner._sock.settimeout(90)
+                        _inner._sock.settimeout(300)
             except Exception:
                 pass
 
@@ -1758,7 +1758,7 @@ class AgentLoop:
                         _cl_payload["tools"] = tools
                         _cl_payload["tool_choice"] = "auto"
                     _cl_resp = http_requests.post(self.api_url, headers=headers,
-                                                  json=_cl_payload, stream=True, timeout=(30, 120))
+                                                  json=_cl_payload, stream=True, timeout=(30, 600))
                     _cl_resp.raise_for_status()
                     _cl_content = ""
                     _cl_tool_calls_data = {}
@@ -1819,7 +1819,7 @@ class AgentLoop:
                         _fb_payload["tools"] = tools
                         _fb_payload["tool_choice"] = "auto"
                     _fb_resp = http_requests.post(self.api_url, headers=headers,
-                                                  json=_fb_payload, stream=True, timeout=(30, 120))
+                                                  json=_fb_payload, stream=True, timeout=(30, 600))
                     _fb_resp.raise_for_status()
                     _fb_content = ""
                     for _fb_line in _fb_resp.iter_lines():
@@ -4282,6 +4282,9 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);
                             full_response_text += f"\n\n❌ Агент не смог продолжить после {heal_attempts} ошибок AI."
                             break  # break instead of return — so done event is sent
                         continue  # retry next iteration
+            except GeneratorExit:
+                logger.warning(f"[run_stream] GeneratorExit at iteration {iteration}, cleaning up")
+                return
             except Exception as e:
                 error_msg = f"Ошибка при вызове AI: {str(e)}"
                 yield self._sse({"type": "error", "text": error_msg})
@@ -4292,6 +4295,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);
                     break  # break instead of return — so done event is sent
                 continue  # retry next iteration
 
+            logger.info(f"[DEBUG-IT] iteration={iteration} completed, tool_calls={'yes' if tool_calls_received else 'no'}")
             if not tool_calls_received:
                 break
 

@@ -1595,7 +1595,8 @@ def send_message(chat_id):
                             event = "data: " + _j.dumps(event, ensure_ascii=False) + chr(10) + chr(10)
                         yield event
                     except GeneratorExit:
-                        break
+                        logging.warning(f"[PRO] GeneratorExit - client disconnected")
+                        return
                     try:
                         event_data = json.loads(event.replace("data: ", "").strip())
                         if event_data.get("type") == "content":
@@ -1880,7 +1881,8 @@ def send_message(chat_id):
                     try:
                         yield event
                     except GeneratorExit:
-                        break
+                        logging.warning(f"[PRO] GeneratorExit - client disconnected")
+                        return
                     # Capture text content
                     try:
                         event_data = json.loads(event.replace("data: ", "").strip())
