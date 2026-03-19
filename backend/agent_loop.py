@@ -1521,7 +1521,22 @@ class AgentLoop:
         if resp.status_code in RETRYABLE_HTTP_CODES:
             raise ConnectionError(f"HTTP {resp.status_code}: {resp.text[:200]}")
 
-        resp.raise_for_status()
+        if resp.status_code == 400:
+            # Log the error body and try to clean messages
+            _err_body = resp.text[:500] if resp.text else "empty"
+            logger.warning(f"[_call_ai] 400 Bad Request: {_err_body}")
+            # Try with cleaned messages
+            _cleaned = self._strip_large_content(messages)
+            if _cleaned != messages:
+                logger.info("[_call_ai] Retrying with cleaned messages")
+                payload["messages"] = _cleaned
+                resp = http_requests.post(self.api_url, headers=headers, json=payload, timeout=300)
+                if resp.status_code != 200:
+                    raise ConnectionError(f"HTTP {resp.status_code} even after cleaning: {resp.text[:200]}")
+            else:
+                raise ConnectionError(f"HTTP 400: {_err_body}")
+        else:
+            resp.raise_for_status()
         data = resp.json()
 
         usage = data.get("usage", {})
@@ -1722,13 +1737,83 @@ class AgentLoop:
 
         except Exception as e:
             breaker.record_failure()
-            # ── FALLBACK: try Sonnet if DeepSeek/primary fails ──
+            import logging as _log
+            # ── Log response body for debugging ──
+            _err_body = ""
+            if hasattr(e, 'response') and e.response is not None:
+                try:
+                    _err_body = e.response.text[:500]
+                except Exception:
+                    pass
+            _log.warning(f"[agent_loop] LLM stream error on {self.model}: {e}. Response: {_err_body}")
+            
+            # ── FALLBACK 1: Strip base64/large content from messages and retry same model ──
+            _cleaned_messages = self._strip_large_content(messages)
+            if _cleaned_messages != messages:
+                _log.info(f"[agent_loop] Retrying with cleaned messages (stripped base64/large content)")
+                try:
+                    _cl_payload = {"model": self.model, "messages": _cleaned_messages,
+                                   "temperature": 0.2, "max_tokens": 16000, "stream": True}
+                    if tools:
+                        _cl_payload["tools"] = tools
+                        _cl_payload["tool_choice"] = "auto"
+                    _cl_resp = http_requests.post(self.api_url, headers=headers,
+                                                  json=_cl_payload, stream=True, timeout=(30, 120))
+                    _cl_resp.raise_for_status()
+                    _cl_content = ""
+                    _cl_tool_calls_data = {}
+                    for _cl_line in _cl_resp.iter_lines():
+                        if not _cl_line:
+                            continue
+                        _cl_ls = _cl_line.decode("utf-8", errors="replace")
+                        if not _cl_ls.startswith("data: "):
+                            continue
+                        _cl_ps = _cl_ls[6:]
+                        if _cl_ps.strip() == "[DONE]":
+                            break
+                        try:
+                            _cl_chunk = json.loads(_cl_ps)
+                            _cl_choices = _cl_chunk.get("choices", [])
+                            if _cl_choices:
+                                _cl_delta = _cl_choices[0].get("delta", {})
+                                _cl_text = _cl_delta.get("content", "")
+                                if _cl_text:
+                                    _cl_content += _cl_text
+                                    yield {"type": "text_delta", "text": _cl_text}
+                                _cl_tc = _cl_delta.get("tool_calls")
+                                if _cl_tc:
+                                    for _cl_call in _cl_tc:
+                                        _cl_idx = _cl_call.get("index", 0)
+                                        if _cl_idx not in _cl_tool_calls_data:
+                                            _cl_tool_calls_data[_cl_idx] = {"id": _cl_call.get("id", f"call_{_cl_idx}"), "name": "", "arguments": ""}
+                                        _cl_fn = _cl_call.get("function", {})
+                                        if _cl_fn.get("name"):
+                                            _cl_tool_calls_data[_cl_idx]["name"] = _cl_fn["name"]
+                                        if _cl_fn.get("arguments"):
+                                            _cl_tool_calls_data[_cl_idx]["arguments"] += _cl_fn["arguments"]
+                                        if _cl_call.get("id"):
+                                            _cl_tool_calls_data[_cl_idx]["id"] = _cl_call["id"]
+                        except json.JSONDecodeError:
+                            continue
+                    if _cl_tool_calls_data:
+                        _cl_tool_calls = []
+                        for _cl_idx in sorted(_cl_tool_calls_data.keys()):
+                            _cl_tc = _cl_tool_calls_data[_cl_idx]
+                            _cl_tool_calls.append({"id": _cl_tc["id"], "type": "function", "function": {"name": _cl_tc["name"], "arguments": _cl_tc["arguments"]}})
+                        yield {"type": "tool_calls", "tool_calls": _cl_tool_calls, "content": _cl_content}
+                        return
+                    elif _cl_content:
+                        yield {"type": "text_complete", "content": _cl_content}
+                        return
+                except Exception as _cl_e:
+                    _log.warning(f"[agent_loop] Retry with cleaned messages also failed: {_cl_e}")
+            
+            # ── FALLBACK 2: try different model ──
             _fallback_model_id = "openai/gpt-4.1-nano"
             if self.model != _fallback_model_id:
-                import logging as _log
-                _log.warning(f"[agent_loop] LLM stream error on {self.model}: {e}. Retrying with Sonnet")
+                _log.warning(f"[agent_loop] Trying fallback model {_fallback_model_id}")
                 try:
-                    _fb_payload = {"model": _fallback_model_id, "messages": messages,
+                    _fb_payload = {"model": _fallback_model_id, "messages": _cleaned_messages or messages,
                                    "temperature": 0.2, "max_tokens": 16000, "stream": True}
                     if tools:
                         _fb_payload["tools"] = tools
@@ -1760,12 +1845,49 @@ class AgentLoop:
                         yield {"type": "text_complete", "content": _fb_content}
                         return
                 except Exception as _fb_e:
-                    _log.warning(f"[agent_loop] Fallback Sonnet also failed: {_fb_e}")
+                    _log.warning(f"[agent_loop] Fallback model also failed: {_fb_e}")
             yield {"type": "error", "error": str(e)}
 
     # ── Tool Execution with Retry + Idempotency ──────────────────
 
     # ── MANUS FEATURE 2: FILE SYSTEM AS CONTEXT ──
+
+    def _strip_large_content(self, messages):
+        """Strip base64 images and large content from messages to avoid 400 errors."""
+        import copy
+        cleaned = []
+        changed = False
+        for msg in messages:
+            new_msg = copy.copy(msg)
+            content = msg.get("content", "")
+            if isinstance(content, str):
+                # Strip base64 data URIs
+                if "data:image/" in content and ";base64," in content:
+                    new_content = re.sub(r'data:image/[^;]+;base64,[A-Za-z0-9+/=]+', '[IMAGE_REMOVED]', content)
+                    if new_content != content:
+                        new_msg["content"] = new_content
+                        changed = True
+                # Strip very long tool results (>10000 chars)
+                if len(content) > 10000:
+                    new_msg["content"] = content[:5000] + "\n... [TRUNCATED] ...\n" + content[-2000:]
+                    changed = True
+            elif isinstance(content, list):
+                # Handle multimodal content (list of text/image blocks)
+                new_parts = []
+                for part in content:
+                    if isinstance(part, dict):
+                        if part.get("type") == "image_url":
+                            new_parts.append({"type": "text", "text": "[IMAGE_REMOVED - too large for context]"})
+                            changed = True
+                        else:
+                            new_parts.append(part)
+                    else:
+                        new_parts.append(part)
+                if changed:
+                    new_msg["content"] = new_parts
+            cleaned.append(new_msg)
+        return cleaned if changed else messages
+
     def _execute_tool(self, tool_name, arguments):
         """Wrapper: выполняет tool и сохраняет большие результаты в файлы."""
         result = self._execute_tool_raw(tool_name, arguments)
@@ -4150,14 +4272,25 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);
                         break
 
                     elif event["type"] == "error":
-                        yield self._sse({"type": "error", "text": f"AI Error: {event['error']}"})
-                        return
+                        _error_text = f"AI Error: {event['error']}"
+                        yield self._sse({"type": "error", "text": _error_text})
+                        # Don't return — try to continue with next iteration
+                        logger.warning(f"[run_stream] AI error at iteration {iteration}, will retry: {_error_text}")
+                        heal_attempts += 1
+                        if heal_attempts >= 3:
+                            yield self._sse({"type": "content", "text": f"\n\n❌ Агент не смог продолжить после {heal_attempts} ошибок AI."})
+                            full_response_text += f"\n\n❌ Агент не смог продолжить после {heal_attempts} ошибок AI."
+                            break  # break instead of return — so done event is sent
+                        continue  # retry next iteration
             except Exception as e:
                 error_msg = f"Ошибка при вызове AI: {str(e)}"
                 yield self._sse({"type": "error", "text": error_msg})
                 yield self._sse({"type": "content", "text": f"\n\n❌ {error_msg}"})
                 full_response_text += f"\n\n❌ {error_msg}"
-                return
+                heal_attempts += 1
+                if heal_attempts >= 3:
+                    break  # break instead of return — so done event is sent
+                continue  # retry next iteration
 
             if not tool_calls_received:
                 break
