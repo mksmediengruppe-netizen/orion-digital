@@ -1090,6 +1090,8 @@ CMS (Битрикс/WordPress):
 - Для выполнения команд на сервере используй ТОЛЬКО ssh_execute.
 - Для выполнения Python кода используй ТОЛЬКО code_interpreter.
 - Перед деплоем ВСЕГДА проверяй nginx конфиг: ssh_execute('cat /etc/nginx/sites-enabled/* | grep root') чтобы узнать правильный webroot.
+- При записи файлов через echo/printf ЭКРАНИРУЙ спецсимволы (!, $, `, \). Лучше используй file_write вместо echo.
+- Для записи больших файлов используй file_write — он работает через SFTP и не зависит от shell-экранирования.
 """
 
 # AGENT_SYSTEM_PROMPT_PRO - minimal prompt for smart models (Sonnet, Opus)
@@ -1109,12 +1111,20 @@ ftp_list, store_memory, recall_memory, update_scratchpad, task_complete.
 5. Проверь результат: открой сайт, сделай скриншот, убедись.
 6. Для фото на сайтах — генерируй через generate_image.
 7. Завершай только когда ВСЁ сделано. Не пропускай шаги.
+8. НЕ ПЕРЕДЕЛЫВАЙ рабочий результат. Сначала выполни ВСЕ пункты ТЗ (DNS, SSL, фото, скриншоты), потом улучшай если остались итерации.
 
 Для дизайна сайтов:
 Используй Tailwind CSS (cdn.tailwindcss.com), Google Fonts Inter
-(https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900),
-AOS анимации (https://unpkg.com/aos@2.3.1/dist/aos.css + aos.js),
-Lucide иконки (https://unpkg.com/lucide@latest).
+(https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900).
+ОБЯЗАТЕЛЬНО подключи AOS анимации:
+  <link href="https://unpkg.com/aos@2.3.1/dist/aos.css" rel="stylesheet">
+  <script src="https://unpkg.com/aos@2.3.1/dist/aos.js"></script>
+  <script>AOS.init({duration: 800, once: true});</script>
+  Добавь data-aos="fade-up" на каждую секцию и карточку.
+ОБЯЗАТЕЛЬНО подключи Lucide иконки:
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <script>lucide.createIcons();</script>
+  Используй <i data-lucide="building-2"></i> вместо SVG.
 Стиль: градиенты, тени shadow-2xl, hover эффекты, 
 скругления rounded-2xl, анимации, backdrop-blur.
 Минимум 500 строк HTML. Мобильная версия обязательна.
@@ -1131,17 +1141,22 @@ Lucide иконки (https://unpkg.com/lucide@latest).
 5. Если generate_image не сработал — оставь placeholder, не ломай сайт
 
 После деплоя:
-1. Проверь DNS: ssh_execute 'dig +short домен'. 
+1. Проверь DNS: ssh_execute('dig +short домен'). 
    Если IP неправильный — зайди в панель хостинга через 
    browser_navigate и измени A-запись. Или используй API хостинга.
-2. Сделай скриншот сайта и оцени дизайн.
-3. Если оценка < 8/10 — улучши и повтори.
+   Для Beget: browser_navigate('https://cp.beget.com'), войди, 
+   найди DNS и измени A-запись на IP сервера.
+2. Настрой SSL: ssh_execute('certbot --nginx -d домен --non-interactive --agree-tos -m admin@домен || certbot certonly --standalone -d домен --non-interactive --agree-tos -m admin@домен')
+3. Сделай скриншот сайта на десктопе и мобильном и оцени дизайн.
+4. Если оценка < 8/10 — улучши конкретные проблемы (НЕ переделывай с нуля).
 
 ## ЗАПРЕЩЁННЫЕ ОПЕРАЦИИ В SANDBOX
 - НЕ используй subprocess.Popen, os.system, subprocess.call — они ЗАБЛОКИРОВАНЫ sandbox-ом.
 - Для выполнения команд на сервере используй ТОЛЬКО ssh_execute.
 - Для выполнения Python кода используй ТОЛЬКО code_interpreter.
 - Перед деплоем ВСЕГДА проверяй nginx конфиг: ssh_execute('cat /etc/nginx/sites-enabled/* | grep root') чтобы узнать правильный webroot.
+- При записи файлов через echo/printf ЭКРАНИРУЙ спецсимволы (!, $, `, \). Лучше используй file_write вместо echo.
+- Для записи больших файлов используй file_write — он работает через SFTP и не зависит от shell-экранирования.
 """
 
 # Pro modes use minimal prompt
@@ -1268,6 +1283,12 @@ if _MEMORY_V9_AVAILABLE and ALL_MEMORY_TOOLS:
         if _mt["function"]["name"] not in _existing_names:
             TOOLS_SCHEMA.append(_mt)
 
+
+
+def _escape_shell_arg(s):
+    """Escape special characters in shell arguments (passwords, etc.)."""
+    import shlex
+    return shlex.quote(s)
 
 class AgentLoop:
     """
@@ -1450,7 +1471,7 @@ class AgentLoop:
             model_cfg = MODELS.get(model_key, MODELS["deepseek"])
             cost = (tokens_in * model_cfg["input_price"] / 1_000_000 +
                     tokens_out * model_cfg["output_price"] / 1_000_000)
-            cost = 0.0  # КРИТ-2: стоимость всегда $0.00
+            # cost = 0.0  # КРИТ-2: REMOVED — now tracking real cost
             self._session_cost += cost
             add_session_cost(self.session_id, cost)
             log_cost(
@@ -4327,6 +4348,37 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);
                     "elapsed": elapsed,
                     "timestamp": datetime.now(timezone.utc).isoformat()
                 })
+
+                # ── FIX-4: Auto step_update — match tool calls to plan steps ──
+                if _task_plan_steps and result.get("success", False):
+                    _tool_desc = f"{tool_name} {json.dumps(self._sanitize_args(tool_args), ensure_ascii=False)[:100]}"
+                    for _si, _step_name in enumerate(_task_plan_steps):
+                        _step_lower = _step_name.lower()
+                        _tool_lower = tool_name.lower()
+                        # Match tool to step by keywords
+                        _matched = False
+                        if _tool_lower == "ssh_execute" and any(kw in _step_lower for kw in ["ssh", "команд", "установ", "настро", "серв", "deploy", "деплой", "nginx", "ssl", "certbot", "dns"]):
+                            _matched = True
+                        elif _tool_lower == "file_write" and any(kw in _step_lower for kw in ["файл", "html", "css", "код", "напис", "созда", "file"]):
+                            _matched = True
+                        elif _tool_lower in ("browser_navigate", "browser_check_site") and any(kw in _step_lower for kw in ["провер", "сайт", "браузер", "скриншот", "откр", "check"]):
+                            _matched = True
+                        elif _tool_lower == "generate_image" and any(kw in _step_lower for kw in ["фото", "изображ", "картин", "генер", "image"]):
+                            _matched = True
+                        
+                        if _matched:
+                            # Check if this step was already marked done
+                            if not hasattr(self, '_completed_steps'):
+                                self._completed_steps = set()
+                            if _si not in self._completed_steps:
+                                self._completed_steps.add(_si)
+                                yield self._sse({
+                                    "type": "step_update",
+                                    "step_index": _si,
+                                    "status": "done",
+                                    "name": _step_name
+                                })
+                            break
 
                 # ── BUG-1 FIX: after_tool (ToolLearning, ErrorPatterns, SessionMemory) ──
                 if self.memory:

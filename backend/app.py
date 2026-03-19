@@ -1646,7 +1646,7 @@ def send_message(chat_id):
                     )
                 except Exception as _lc_err:
                     logging.warning(f"log_cost error: {_lc_err}")
-                yield f"data: {json.dumps({'type': 'done', 'cost': _cost})}" + "\n\n"
+                yield f"data: {json.dumps({'type': 'done', 'cost': _cost, 'tokens_in': tokens_in, 'tokens_out': tokens_out, 'model': _pro_model_name})}" + "\n\n"
         
         return Response(stream_with_context(_pro_generate()), mimetype='text/event-stream',
                        headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'})
