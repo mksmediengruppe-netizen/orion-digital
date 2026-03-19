@@ -53,7 +53,55 @@ try:
         get_model_for_agent, get_max_cost, check_cost_limit,
         add_session_cost, log_cost, DEFAULT_MODE, MODES
     )
-    _INTENT_CLARIFIER_AVAILABLE = True
+except ImportError:
+    pass
+
+# ══════════════════════════════════════════════════════════════
+# TURBO DUAL-BRAIN: BRAIN (MiniMax) vs HANDS (MiMo)
+# ══════════════════════════════════════════════════════════════
+
+# Инструменты для HANDS (MiMo-V2-Flash) — действия на сервере
+HANDS_TOOLS = frozenset([
+    "ssh_execute", "ftp_upload", "ftp_download", "ftp_list",
+    "browser_navigate", "browser_check_site", "browser_get_text",
+    "browser_check_api", "browser_click", "browser_fill",
+    "browser_submit", "browser_select", "browser_ask_auth",
+    "browser_type", "browser_js", "browser_press_key",
+    "browser_scroll", "browser_hover", "browser_wait",
+    "browser_elements", "browser_screenshot", "browser_page_info",
+    "browser_ask_user", "browser_takeover_done",
+])
+
+# Инструменты для BRAIN (MiniMax M2.5) — думает, пишет код
+BRAIN_TOOLS = frozenset([
+    "create_artifact", "file_write", "generate_image",
+    "search_web", "read_url", "python_exec",
+])
+
+TURBO_BRAIN_MODEL = "minimax/minimax-m2.5"
+TURBO_HANDS_MODEL = "xiaomi/mimo-v2-flash"
+TURBO_FALLBACK_MODEL = "openai/gpt-4.1-nano"
+
+
+def _get_dual_brain_model(tool_name: str, orion_mode: str, base_model: str) -> str:
+    """
+    Для Turbo режима выбирает модель по типу инструмента:
+    - HANDS tools (SSH, FTP, браузер) → MiMo-V2-Flash
+    - BRAIN tools (код, дизайн, генерация) → MiniMax M2.5
+    - Остальные → MiniMax M2.5 (по умолчанию думает)
+    Для Pro/Architect — возвращает base_model без изменений.
+    """
+    if orion_mode not in ("turbo_standard", "turbo_premium"):
+        return base_model
+    if tool_name in HANDS_TOOLS:
+        return TURBO_HANDS_MODEL
+    # BRAIN или неизвестный инструмент → MiniMax
+    return TURBO_BRAIN_MODEL
+
+
+_INTENT_CLARIFIER_AVAILABLE = True
+try:
+    pass
 except ImportError as _e:
     _INTENT_CLARIFIER_AVAILABLE = False
     logger = __import__("logging").getLogger("agent_loop")
@@ -1588,6 +1636,24 @@ class AgentLoop:
 
         # ПАТЧ A2: model_override — использовать переопределённую модель если задана
         _model = self.model_override if self.model_override else self.model
+        # DUAL-BRAIN: для Turbo режима выбираем модель по следующему tool call
+        _orion_mode = getattr(self, 'orion_mode', 'turbo_standard')
+        if _orion_mode in ("turbo_standard", "turbo_premium") and not self.model_override:
+            # Определяем следующий tool call из последнего assistant сообщения
+            _next_tool = None
+            for _msg in reversed(messages):
+                if _msg.get("role") == "assistant":
+                    for _tc in (_msg.get("tool_calls") or []):
+                        _next_tool = _tc.get("function", {}).get("name")
+                        break
+                    break
+            if _next_tool:
+                _model = _get_dual_brain_model(_next_tool, _orion_mode, _model)
+                _log.debug(f"[DUAL-BRAIN] tool={_next_tool} → model={_model}")
+            else:
+                # Нет tool call → думаем → MiniMax
+                if _orion_mode in ("turbo_standard", "turbo_premium"):
+                    _model = TURBO_BRAIN_MODEL
 
         payload = {
             "model": _model,
@@ -1809,8 +1875,18 @@ class AgentLoop:
                     _log.warning(f"[agent_loop] Retry with cleaned messages also failed: {_cl_e}")
             
             # ── FALLBACK 2: try different model ──
-            _fallback_model_id = "openai/gpt-4.1-nano"
-            if self.model != _fallback_model_id:
+            _orion_mode_fb = getattr(self, 'orion_mode', 'turbo_standard')
+            if _orion_mode_fb in ("turbo_standard", "turbo_premium"):
+                # Dual-brain fallback: если HANDS упал → BRAIN, если BRAIN упал → FALLBACK
+                if _model == TURBO_HANDS_MODEL:
+                    _fallback_model_id = TURBO_BRAIN_MODEL
+                elif _model == TURBO_BRAIN_MODEL:
+                    _fallback_model_id = TURBO_FALLBACK_MODEL
+                else:
+                    _fallback_model_id = TURBO_FALLBACK_MODEL
+            else:
+                _fallback_model_id = "openai/gpt-4.1-nano"
+            if self.model != _fallback_model_id and _model != _fallback_model_id:
                 _log.warning(f"[agent_loop] Trying fallback model {_fallback_model_id}")
                 try:
                     _fb_payload = {"model": _fallback_model_id, "messages": _cleaned_messages or messages,

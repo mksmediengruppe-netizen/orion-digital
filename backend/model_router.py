@@ -65,6 +65,25 @@ MODELS = {
         "role": "architect",
         "description": "Архитектура, глубокий анализ, аудит кода — для самых сложных задач",
         "max_tokens": 32000
+    },
+    # ── Turbo Dual-Brain Architecture ──────────────────────────
+    "minimax": {
+        "id": "minimax/minimax-m2.5",
+        "name": "MiniMax M2.5",
+        "input_price": 0.20,
+        "output_price": 1.20,
+        "role": "brain",
+        "description": "Turbo Brain: думает, пишет код, дизайн, планирует — быстро и умно",
+        "max_tokens": 65536
+    },
+    "mimo": {
+        "id": "xiaomi/mimo-v2-flash",
+        "name": "MiMo-V2-Flash",
+        "input_price": 0.09,
+        "output_price": 0.29,
+        "role": "hands",
+        "description": "Turbo Hands: SSH, FTP, браузер, деплой — действия на сервере",
+        "max_tokens": 32768
     }
 }
 
@@ -75,35 +94,35 @@ MODELS = {
 MODES = {
     "turbo_standard": {
         "label": "Turbo Обычный",
-        "description": "Быстро и дёшево. DeepSeek везде, Gemini для дизайна.",
+        "description": "Два мозга: MiniMax думает и пишет код, MiMo действует (SSH/браузер/деплой).",
         "max_cost_usd": 2.0,
         "agents": {
-            "intent_clarifier": "deepseek",
-            "orchestrator":     "deepseek",
-            "designer":         "gemini",    # ВСЕГДА Gemini
-            "developer":        "deepseek",
-            "devops":           "deepseek",
-            "integrator":       "deepseek",
-            "tester":           "deepseek",
-            "analyst":          "deepseek",
-            "copywriter":       "deepseek",
-            "code_reviewer":    None          # нет в Turbo
+            "intent_clarifier": "minimax",   # MiniMax: понимает задачу
+            "orchestrator":     "minimax",   # MiniMax: планирует
+            "designer":         "minimax",   # MiniMax: HTML/CSS/дизайн
+            "developer":        "mimo",      # MiMo: пишет и деплоит код
+            "devops":           "mimo",      # MiMo: SSH, сервер, nginx
+            "integrator":       "mimo",      # MiMo: API интеграции
+            "tester":           "minimax",   # MiniMax: анализирует тесты
+            "analyst":          "minimax",   # MiniMax: анализ данных
+            "copywriter":       "minimax",   # MiniMax: тексты
+            "code_reviewer":    None         # нет в Turbo
         }
     },
     "turbo_premium": {
         "label": "Turbo Премиум",
-        "description": "Быстро с умным общением. Sonnet для диалога, DeepSeek для работы.",
+        "description": "Два мозга + Sonnet для общения. MiniMax думает, MiMo действует, Sonnet общается.",
         "max_cost_usd": 2.0,
         "agents": {
-            "intent_clarifier": "sonnet",    # Премиум общение
-            "orchestrator":     "deepseek",
-            "designer":         "gemini",
-            "developer":        "deepseek",
-            "devops":           "deepseek",
-            "integrator":       "deepseek",
-            "tester":           "deepseek",
-            "analyst":          "deepseek",
-            "copywriter":       "deepseek",
+            "intent_clarifier": "sonnet",    # Sonnet: премиум общение
+            "orchestrator":     "minimax",   # MiniMax: планирование
+            "designer":         "minimax",   # MiniMax: дизайн
+            "developer":        "mimo",      # MiMo: код и деплой
+            "devops":           "mimo",      # MiMo: SSH/сервер
+            "integrator":       "mimo",      # MiMo: интеграции
+            "tester":           "minimax",   # MiniMax: тесты
+            "analyst":          "minimax",   # MiniMax: анализ
+            "copywriter":       "minimax",   # MiniMax: тексты
             "code_reviewer":    None
         }
     },
@@ -340,6 +359,8 @@ def _get_fallback_chain(model_key: str) -> List[str]:
         "sonnet":   ["anthropic/claude-sonnet-4.6", "google/gemini-2.5-pro", "openai/gpt-4.1-mini"],
         "gemini":   ["google/gemini-2.5-pro", "anthropic/claude-sonnet-4.6", "openai/gpt-4.1-mini"],
         "deepseek": ["openai/gpt-4.1-mini", "google/gemini-2.5-pro", "anthropic/claude-sonnet-4.6"],
+        "minimax":  ["minimax/minimax-m2.5", "minimax/minimax-m2.7", "openai/gpt-4.1-mini"],
+        "mimo":     ["xiaomi/mimo-v2-flash", "xiaomi/mimo-v2-omni", "openai/gpt-4.1-mini"],
     }
     return chains.get(model_key, chains["deepseek"])
 
