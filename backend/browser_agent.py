@@ -354,6 +354,7 @@ class BrowserAgent:
         """
         Кликнуть по элементу на текущей странице.
         selector — CSS-селектор или текст кнопки (text=Войти).
+        Для SPA (Vue.js/React) ждёт networkidle после клика.
         """
         if not _playwright_available:
             return {"success": False, "error": "Playwright не установлен. Выполни: pip install playwright && playwright install chromium"}
@@ -363,14 +364,24 @@ class BrowserAgent:
                 if page is None:
                     return {"success": False, "error": "Playwright page не инициализирована. Сначала вызови browser_navigate."}
 
+                url_before = page.url
+
                 # Поддержка text=... селекторов
                 if selector.startswith("text="):
                     text_val = selector[5:]
                     page.get_by_text(text_val, exact=False).first.click(timeout=timeout)
+                elif selector.startswith("[st="):
+                    # Beget st-атрибут селектор
+                    page.click(selector, timeout=timeout)
                 else:
                     page.click(selector, timeout=timeout)
 
-                page.wait_for_timeout(800)
+                # Ждём навигацию или SPA-переход (Vue.js/React)
+                try:
+                    page.wait_for_load_state("networkidle", timeout=8000)
+                except Exception:
+                    page.wait_for_timeout(3000)
+
                 screenshot = base64.b64encode(page.screenshot(full_page=False)).decode("utf-8")
                 self._last_screenshot_b64 = screenshot
                 url_after = page.url
@@ -378,7 +389,9 @@ class BrowserAgent:
                 return {
                     "success": True,
                     "clicked": selector,
+                    "url_before": url_before,
                     "url_after": url_after,
+                    "navigated": url_before != url_after,
                     "screenshot": screenshot
                 }
         except Exception as e:
