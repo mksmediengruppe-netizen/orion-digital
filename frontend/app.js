@@ -1525,6 +1525,8 @@ const Chat = {
                     }
                 }
                 break;
+            case 'heartbeat':  // agent keepalive, ignore silently
+                break;
             case 'meta':  // backend sends metadata at start, ignore
                 break;
 

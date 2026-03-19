@@ -1,0 +1,22 @@
+{
+  "user_id": "test",
+  "chat_count": 7,
+  "facts": [
+    "Пользователь использует хостинг Beget с логином asmksm58",
+    "Домен пользователя — asmksm58.beget.tech",
+    "Пользователь хочет установить A-запись для домена на IP 45.67.57.175",
+    "Текущий IP домена asmksm58.beget.tech — 5.101.153.53",
+    "Пользователь использует хостинг Beget (cp.beget.com)",
+    "Логин пользователя на Beget: asmksm58",
+    "Домен пользователя: asmksm58.beget.tech",
+    "Пользователь хочет установить A-запись для домена asmksm58.beget.tech на IP 45.67.57.175",
+    "Текущий IP домена asmksm58.beget.tech: 5.101.153.53"
+  ],
+  "preferences": {
+    "hosting": "Beget",
+    "domain": "asmksm58.beget.tech",
+    "target_ip": "45.67.57.175",
+    "dns_tool": "dig"
+  },
+  "expertise_level": "unknown"
+}

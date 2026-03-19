@@ -1,0 +1,9 @@
+{
+  "user_id": "test_bug5_user",
+  "chat_count": 3,
+  "facts": [
+    "Тестер3"
+  ],
+  "preferences": {},
+  "expertise_level": "unknown"
+}

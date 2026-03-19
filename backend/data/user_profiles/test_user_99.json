@@ -1,0 +1,10 @@
+{
+  "user_id": "test_user_99",
+  "chat_count": 3,
+  "facts": [
+    "Пользователя зовут Тестер5",
+    "Работает с Java и Kafka"
+  ],
+  "preferences": {},
+  "expertise_level": "unknown"
+}

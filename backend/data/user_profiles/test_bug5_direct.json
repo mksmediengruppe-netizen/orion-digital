@@ -1,0 +1,12 @@
+{
+  "user_id": "test_bug5_direct",
+  "chat_count": 0,
+  "facts": [
+    "Пользователя зовут Тестер2",
+    "Работает с Rust и Kubernetes"
+  ],
+  "preferences": {
+    "стек": "Rust, Kubernetes"
+  },
+  "expertise_level": "unknown"
+}

@@ -3692,7 +3692,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);
         _original_model = self.model
 
         while iteration < self.MAX_ITERATIONS and not self._stop_requested:
-            yield {"type": "heartbeat", "message": "agent_thinking"}
+            yield self._sse({"type": "heartbeat", "message": "agent_thinking"})
             iteration += 1
 
             yield self._sse({
@@ -3924,7 +3924,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);
                         logging.warning(f"[ANTI-LOOP] Pro mode loop detected: {_last_tools[0][0]}")
                     else:
                         # Turbo: escalate to Sonnet
-                        self.model = "anthropic/claude-sonnet-4-20250514"
+                        self.model = "anthropic/claude-sonnet-4"
                         messages.append({"role": "system", "content":
                             "Предыдущий подход не сработал. Ты переключен на более "
                             "умную модель. Проанализируй что пошло не так и "
@@ -4388,7 +4388,7 @@ class MultiAgentLoop(AgentLoop):
             
             while iteration < max_iterations and not self._stop_requested:
                 iteration += 1
-                yield {"type": "heartbeat", "message": "agent_thinking"}
+                yield self._sse({"type": "heartbeat", "message": "agent_thinking"})
                 tool_calls_received = None
                 ai_text = ""
                 import logging as _pipe_log
@@ -4533,7 +4533,7 @@ class MultiAgentLoop(AgentLoop):
             heal_attempts = 0
 
             while agent_iteration < max_agent_iterations and not self._stop_requested:
-                yield {"type": "heartbeat", "message": "agent_thinking"}
+                yield self._sse({"type": "heartbeat", "message": "agent_thinking"})
                 agent_iteration += 1
 
                 tool_calls_received = None

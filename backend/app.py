@@ -1581,6 +1581,10 @@ def send_message(chat_id):
             try:
                 for event in _pro_loop.run_stream(user_message, history, file_content):
                     try:
+                        # Safety: convert dict events to SSE string format
+                        if isinstance(event, dict):
+                            import json as _j
+                            event = "data: " + _j.dumps(event, ensure_ascii=False) + chr(10) + chr(10)
                         yield event
                     except GeneratorExit:
                         break
@@ -1711,6 +1715,10 @@ def send_message(chat_id):
 
             try:
                 for event in agent.run_stream(user_message, history, file_content):
+                    # Safety: convert dict events to SSE string format
+                    if isinstance(event, dict):
+                        import json as _j
+                        event = "data: " + _j.dumps(event, ensure_ascii=False) + chr(10) + chr(10)
                     yield event
                     try:
                         event_data = json.loads(event.replace("data: ", "").strip())
