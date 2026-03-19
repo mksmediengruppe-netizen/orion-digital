@@ -1574,29 +1574,53 @@ def send_message(chat_id):
         with _agents_lock:
             _active_agents[chat_id] = _pro_loop
         
-        def _pro_generate():
+        # ══ PRO BACKGROUND THREAD: agent runs in background, SSE reads from queue ══
+        # This ensures GeneratorExit (client disconnect) does NOT kill the agent
+        import queue as _queue_module
+        _saved_user_id_pro = request.user_id
+        _saved_db_pro = db
+        
+        # Register task in _running_tasks with event queue
+        with _tasks_lock:
+            _running_tasks[chat_id] = {
+                "status": "running",
+                "events": [],
+                "started_at": time.time(),
+                "user_id": _saved_user_id_pro,
+                "message": user_message[:100],
+                "_queue": _queue_module.Queue(),
+            }
+        
+        def _pro_background_worker():
+            """Runs agent in background thread, puts events into queue."""
             full_response = ""
             tokens_in = 0
             tokens_out = 0
+            _q = None
             with _tasks_lock:
-                _running_tasks[chat_id] = {
-                    "status": "running", "events": [], "started_at": time.time(),
-                    "user_id": request.user_id, "message": user_message[:100],
-                }
-            # Send meta
-            yield f"data: {json.dumps({'type': 'meta', 'variant': variant, 'model': _pro_auto_prefix + _pro_model_name, 'enhanced': False, 'self_check_level': 'none', 'agent_mode': True, 'tier': 'pro', 'complexity': 'high'})}" + "\n\n"
+                task = _running_tasks.get(chat_id)
+                if task:
+                    _q = task["_queue"]
+            
+            def _put(event):
+                """Put event into queue and buffer."""
+                if isinstance(event, dict):
+                    event = "data: " + json.dumps(event, ensure_ascii=False) + "\n\n"
+                with _tasks_lock:
+                    task = _running_tasks.get(chat_id)
+                    if task:
+                        task["events"].append(event)
+                if _q:
+                    _q.put(event)
+            
+            # Send meta event
+            _put(f"data: {json.dumps({'type': 'meta', 'variant': variant, 'model': _pro_auto_prefix + _pro_model_name, 'enhanced': False, 'self_check_level': 'none', 'agent_mode': True, 'tier': 'pro', 'complexity': 'high'})}\n\n")
             
             try:
                 for event in _pro_loop.run_stream(user_message, history, file_content):
-                    try:
-                        # Safety: convert dict events to SSE string format
-                        if isinstance(event, dict):
-                            import json as _j
-                            event = "data: " + _j.dumps(event, ensure_ascii=False) + chr(10) + chr(10)
-                        yield event
-                    except GeneratorExit:
-                        logging.warning(f"[PRO] GeneratorExit - client disconnected")
-                        return
+                    if isinstance(event, dict):
+                        event = "data: " + json.dumps(event, ensure_ascii=False) + "\n\n"
+                    _put(event)
                     try:
                         event_data = json.loads(event.replace("data: ", "").strip())
                         if event_data.get("type") == "content":
@@ -1607,35 +1631,32 @@ def send_message(chat_id):
                     except:
                         pass
             except Exception as e:
-                logging.error(f"[PRO BYPASS] Error: {e}")
-                yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}" + "\n\n"
+                logging.error(f"[PRO BG] Error: {e}")
+                _put(f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n")
             finally:
                 with _agents_lock:
                     _active_agents.pop(chat_id, None)
-                with _tasks_lock:
-                    _running_tasks.pop(chat_id, None)
                 # Save response
                 if full_response:
+                    with _tasks_lock:
+                        pass  # db access outside lock
                     chat["messages"].append({"role": "assistant", "content": full_response, "created_at": _now_iso()})
-                    _save_db(db)
+                    _save_db(_saved_db_pro)
                 # Cost tracking
                 _cost = _calc_cost(tokens_in, tokens_out, _pro_agent_model)
                 chat["total_cost"] = chat.get("total_cost", 0) + _cost
-                # Update user total_spent
-                _user = db["users"].get(request.user_id, {})
+                _user = _saved_db_pro["users"].get(_saved_user_id_pro, {})
                 if _user:
                     _user["total_spent"] = _user.get("total_spent", 0) + _cost
-                # Update analytics
-                _analytics = db.get("analytics", {})
+                _analytics = _saved_db_pro.get("analytics", {})
                 _analytics["total_tokens_in"] = _analytics.get("total_tokens_in", 0) + tokens_in
                 _analytics["total_tokens_out"] = _analytics.get("total_tokens_out", 0) + tokens_out
                 _analytics["total_cost"] = _analytics.get("total_cost", 0) + _cost
                 _analytics["total_requests"] = _analytics.get("total_requests", 0) + 1
-                _save_db(db)
-                # Log to cost_log.json
+                _save_db(_saved_db_pro)
                 try:
                     log_cost(
-                        user_id=request.user_id,
+                        user_id=_saved_user_id_pro,
                         model_id=_pro_agent_model,
                         tokens_in=tokens_in,
                         tokens_out=tokens_out,
@@ -1647,9 +1668,51 @@ def send_message(chat_id):
                     )
                 except Exception as _lc_err:
                     logging.warning(f"log_cost error: {_lc_err}")
-                yield f"data: {json.dumps({'type': 'done', 'cost': _cost, 'tokens_in': tokens_in, 'tokens_out': tokens_out, 'model': _pro_model_name})}" + "\n\n"
+                # Send done event
+                _put(f"data: {json.dumps({'type': 'done', 'cost': _cost, 'tokens_in': tokens_in, 'tokens_out': tokens_out, 'model': _pro_model_name})}\n\n")
+                # Mark task done and signal queue
+                with _tasks_lock:
+                    task = _running_tasks.get(chat_id)
+                    if task:
+                        task["status"] = "done"
+                        task["finished_at"] = time.time()
+                if _q:
+                    _q.put(None)  # Sentinel: stream ended
+                logging.info(f"[PRO BG] Worker finished for chat {chat_id}")
         
-        return Response(stream_with_context(_pro_generate()), mimetype='text/event-stream',
+        # Start background thread
+        _bg_thread = threading.Thread(target=_pro_background_worker, daemon=True, name=f"pro-agent-{chat_id[:8]}")
+        _bg_thread.start()
+        
+        def _pro_sse_stream():
+            """SSE stream that reads from queue. Survives client reconnects."""
+            with _tasks_lock:
+                task = _running_tasks.get(chat_id)
+                _q = task["_queue"] if task else None
+            
+            if not _q:
+                return
+            
+            try:
+                while True:
+                    try:
+                        event = _q.get(timeout=30)  # 30s timeout per event
+                        if event is None:  # Sentinel: stream ended
+                            break
+                        yield event
+                    except _queue_module.Empty:
+                        # Check if task is still running
+                        with _tasks_lock:
+                            task = _running_tasks.get(chat_id)
+                        if not task or task.get("status") == "done":
+                            break
+                        # Send keepalive
+                        yield ": keepalive\n\n"
+            except GeneratorExit:
+                logging.info(f"[PRO SSE] Client disconnected from chat {chat_id}, agent continues in background")
+                # Do NOT stop the agent - it continues in background thread
+        
+        return Response(stream_with_context(_pro_sse_stream()), mimetype='text/event-stream',
                        headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'})
     
     # ═══ TURBO: оркестратор + pipeline как раньше ═══
