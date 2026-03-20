@@ -1,0 +1,8 @@
+
+План выполнения:
+1. Проверить окружение сервера (python3, pip3)
+2. Установить FastAPI, uvicorn, sqlalchemy
+3. Создать /opt/shop_api/main.py с полным CRUD API
+4. Создать systemd unit файл
+5. Запустить сервис
+6. Проверить /docs в браузере

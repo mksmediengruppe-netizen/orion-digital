@@ -1,0 +1,1 @@
+file_write без content тоже не работает. Нужно передавать content. Буду создавать HTML через Python на сервере с помощью ssh_execute + python3 -c или через heredoc.

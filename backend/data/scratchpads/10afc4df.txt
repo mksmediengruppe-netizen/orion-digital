@@ -1,0 +1,1 @@
+Проблема: nginx на 45.67.57.175 отдаёт сайт "Iron Body" вместо "Белая улыбка". Конфиг ironbody перехватывает запросы. Нужно исправить nginx конфиг - сделать dental default_server и убрать ironbody с default_server.

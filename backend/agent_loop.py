@@ -1789,6 +1789,14 @@ class AgentLoop:
               except Exception:
                   pass
 
+            # Fallback: estimate tokens if API didn't return usage
+            if self.total_tokens_in == 0 and self.total_tokens_out == 0:
+                _est_in = sum(len(str(m.get("content", ""))) // 4 for m in messages)
+                _est_out = len(content) // 4
+                self.total_tokens_in += _est_in
+                self.total_tokens_out += _est_out
+                logger.info(f"[TOKEN-EST] Estimated tokens: in={_est_in}, out={_est_out}")
+
             if tool_calls_data:
                 tool_calls = []
                 for idx in sorted(tool_calls_data.keys()):
@@ -1983,14 +1991,14 @@ class AgentLoop:
                     result["_saved_to"] = _save_path
                     result["_original_length"] = len(_result_text)
                     # Обрезать для контекста
-                    if "stdout" in result and len(str(result["stdout"])) > 200:
-                        result["stdout"] = str(result["stdout"])[:200] + f"\n... (полный результат сохранён на ORION-сервере в {_save_path}, используй file_read для чтения)"
-                    if "html" in result and len(str(result["html"])) > 200:
-                        result["html"] = str(result["html"])[:200] + f"\n... (полный HTML сохранён на ORION-сервере в {_save_path}, используй file_read для чтения)"
-                    if "text" in result and len(str(result["text"])) > 300:
-                        result["text"] = str(result["text"])[:300] + f"\n... (полный текст сохранён на ORION-сервере в {_save_path}, используй file_read для чтения)"
-                    if "content" in result and len(str(result["content"])) > 300:
-                        result["content"] = str(result["content"])[:300] + f"\n... (полный контент сохранён на ORION-сервере в {_save_path}, используй file_read для чтения)"
+                    if "stdout" in result and len(str(result["stdout"])) > 2000:
+                        result["stdout"] = str(result["stdout"])[:2000] + "\n... [вывод обрезан до 2000 символов]"
+                    if "html" in result and len(str(result["html"])) > 1000:
+                        result["html"] = str(result["html"])[:1000] + "\n... [HTML обрезан до 1000 символов]"
+                    if "text" in result and len(str(result["text"])) > 2000:
+                        result["text"] = str(result["text"])[:2000] + "\n... [текст обрезан до 2000 символов]"
+                    if "content" in result and len(str(result["content"])) > 2000:
+                        result["content"] = str(result["content"])[:2000] + "\n... [контент обрезан до 2000 символов]"
                     logger.info(f"[FS-CONTEXT] Saved {len(_result_text)} chars to {_save_path}")
             except Exception as _fs_err:
                 logger.debug(f"[FS-CONTEXT] Error saving result: {_fs_err}")
@@ -2094,10 +2102,23 @@ class AgentLoop:
 
             elif tool_name == "file_read":
                 path = args.get("path", "")
-                if not host or not path:
-                    return {"success": False, "error": "host and path are required"}
+                if not path:
+                    return {"success": False, "error": "path is required"}
 
-                result = self._file_read_with_retry(host, username, password, path)
+                # If path is a local ORION temp file, read locally
+                if path.startswith("/tmp/orion_result_") or path.startswith("/tmp/orion_todo_"):
+                    try:
+                        with open(path, 'r') as _lf:
+                            _local_content = _lf.read()
+                        result = {"success": True, "content": _local_content, "path": path}
+                    except FileNotFoundError:
+                        result = {"success": False, "error": f"Local file not found: {path}"}
+                    except Exception as _lfe:
+                        result = {"success": False, "error": f"Error reading local file: {_lfe}"}
+                elif not host:
+                    return {"success": False, "error": "host is required for remote file_read"}
+                else:
+                    result = self._file_read_with_retry(host, username, password, path)
                 if result.get("success") and len(result.get("content", "")) > self.MAX_TOOL_OUTPUT:
                     result["content"] = result["content"][:self.MAX_TOOL_OUTPUT] + "\n... [truncated]"
                 return result
@@ -4188,12 +4209,12 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);
         _msg_lower = user_message.lower()
         if "ftp" in _msg_lower:
             import re as _re
-            _ftp_match = _re.search(r'ftp[:\\s]+(\\S+)\\s+логин[:\\s]+(\\S+)\\s+пароль[:\\s]+(\\S+)', user_message, _re.IGNORECASE)
+            _ftp_match = _re.search(r'ftp[:\s]+(\S+)\s+логин[:\s]+(\S+)\s+пароль[:\s]+(\S+)', user_message, _re.IGNORECASE)
             if _ftp_match:
                 self._extra_credentials["FTP"] = f"{_ftp_match.group(1)} логин: {_ftp_match.group(2)} пароль: {_ftp_match.group(3)}"
         if "админк" in _msg_lower or "bitrix" in _msg_lower:
             import re as _re
-            _admin_match = _re.search(r'(https?://\\S+/bitrix/?\\S*)\\s+логин[:\\s]+(\\S+)\\s+пароль[:\\s]+(\\S+)', user_message, _re.IGNORECASE)
+            _admin_match = _re.search(r'(https?://\S+/bitrix/?\S*)\s+логин[:\s]+(\S+)\s+пароль[:\s]+(\S+)', user_message, _re.IGNORECASE)
             if _admin_match:
                 self._extra_credentials["Админка"] = f"{_admin_match.group(1)} логин: {_admin_match.group(2)} пароль: {_admin_match.group(3)}"
 
@@ -4940,8 +4961,8 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);
                         yield self._sse({"type": "content", "text": event["text"]})
                     # Обработка browser_ask_user / smart_login takeover
                     if result.get("_takeover_required"):
-                        yield self._sse("browser_takeover", {
-                            "type": result.get("type", "browser_takeover_request"),
+                        yield self._sse({"type": "browser_takeover",
+                            "subtype": result.get("type", "browser_takeover_request"),
                             "reason": result.get("reason", ""),
                             "message": result.get("message", "Требуется ваше участие"),
                             "instruction": result.get("instruction", ""),

@@ -6,6 +6,9 @@ contracts validation, self-healing 2.0, LangGraph StateGraph.
 v6.0: Creative Suite, Web Search, Memory & Projects, Canvas, Multi-Model Routing.
 """
 
+import logging
+logger = logging.getLogger(__name__)
+
 import os
 try:
     from dotenv import load_dotenv
@@ -214,6 +217,8 @@ def _calc_cost(tokens_in, tokens_out, model_name):
     PRICING = {
         'anthropic/claude-sonnet-4.6': (3.00, 15.00),
         'anthropic/claude-opus-4': (15.00, 75.00),
+        'anthropic/claude-sonnet-4.6': (3.00, 15.00),
+        'anthropic/claude-sonnet-4': (3.00, 15.00),
         'openai/gpt-4.1-mini': (0.26, 0.38),
         'openai/gpt-4.1-nano': (0.10, 0.40),
     }

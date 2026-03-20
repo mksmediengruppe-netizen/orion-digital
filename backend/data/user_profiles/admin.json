@@ -1,6 +1,6 @@
 {
   "user_id": "admin",
-  "chat_count": 472,
+  "chat_count": 548,
   "facts": [
     "Пользователя зовут Тестер5",
     "Работает с Elixir и Phoenix",
@@ -117,7 +117,19 @@
     "mobile_required": true,
     "ssl": "certbot",
     "color_background": "белый",
-    "color_base": "#ffffff"
+    "color_base": "#ffffff",
+    "framework": "FastAPI",
+    "deployment": "systemd",
+    "server_user": "root",
+    "api_port": "8000",
+    "api_style": "REST",
+    "язык программирования": "Python",
+    "формат данных для сохранения": "JSON",
+    "серверный путь для сохранения": " /tmp/dns_prices.json",
+    "сайт для парсинга": "dns-shop.ru",
+    "технологии": "Chart.js",
+    "тип задач": "деплой и аналитика",
+    "доступ к серверу": "SSH/SFTP"
   },
   "expertise_level": "unknown"
 }

@@ -22,25 +22,19 @@ const API_BASE = '/api';
 const SSE_TIMEOUT = 120000;
 
 const MODES = {
-    'auto':          { label: 'Авто',            tag: 'AUTO',  desc: 'Автоматический выбор модели по сложности задачи.' },
-    'turbo-basic':   { label: 'Turbo Обычный',  tag: 'TURBO', desc: 'Быстрые ответы, DeepSeek V3. Идеально для задач разработки.' },
-    'turbo-premium': { label: 'Turbo Премиум',  tag: 'PRO',   desc: 'Turbo + Claude Sonnet. Лучшее качество для сложных задач.' },
-    'pro-basic':     { label: 'Pro Обычный',    tag: 'AGENT', desc: 'Агентный режим с инструментами. SSH, браузер, файлы.' },
-    'pro-premium':   { label: 'Pro Премиум',    tag: 'ELITE', desc: 'Мультиагент: Designer + Developer + DevOps одновременно.' },
-    'architect':     { label: 'Architect',        tag: 'OPUS',  desc: 'Claude Opus 4. Архитектура, глубокий анализ, аудит кода.' }
+    'turbo-basic':   { label: 'Turbo',     tag: 'TURBO', desc: 'MiniMax думает + MiMo действует. Быстро и экономично.' },
+    'pro-basic':     { label: 'Pro',       tag: 'PRO',   desc: 'Claude Sonnet 4.6. Планирование, code review, качество.' },
+    'architect':     { label: 'Architect', tag: 'OPUS',  desc: 'Claude Opus 4. Архитектура, глубокий анализ, аудит кода.' }
 };
 
 /* ── MODE_INFO (УЛУЧ-3) ──────────────────────────────────── */
 const MODE_INFO = {
-    'auto':           { text: 'Автоматический выбор модели · По сложности задачи', icon: '🔮' },
-    'turbo-basic':    { text: 'Быстрые ответы · DeepSeek V3 · Экономичный', icon: '⚡' },
-    'turbo_basic':    { text: 'Быстрые ответы · DeepSeek V3 · Экономичный', icon: '⚡' },
-    'turbo-premium':  { text: 'Sonnet общение · DeepSeek работа · Умный и дешёвый', icon: '✨' },
-    'turbo_premium':  { text: 'Sonnet общение · DeepSeek работа · Умный и дешёвый', icon: '✨' },
-    'pro-basic':      { text: 'Sonnet планирует · DeepSeek исполняет · Качество', icon: '🧠' },
-    'pro_basic':      { text: 'Sonnet планирует · DeepSeek исполняет · Качество', icon: '🧠' },
-    'pro-premium':    { text: 'Claude Sonnet 4.6 · Максимум качества', icon: '🚀' },
-    'pro_premium':    { text: 'Claude Sonnet 4.6 · Максимум качества', icon: '🚀' },
+    'turbo-basic':    { text: 'MiniMax M2.5 + MiMo Flash · Быстро и экономично', icon: '⚡' },
+    'turbo_basic':    { text: 'MiniMax M2.5 + MiMo Flash · Быстро и экономично', icon: '⚡' },
+    'turbo_standard': { text: 'MiniMax M2.5 + MiMo Flash · Быстро и экономично', icon: '⚡' },
+    'pro-basic':      { text: 'Claude Sonnet 4.6 · Планирование и качество', icon: '🧠' },
+    'pro_basic':      { text: 'Claude Sonnet 4.6 · Планирование и качество', icon: '🧠' },
+    'pro_standard':   { text: 'Claude Sonnet 4.6 · Планирование и качество', icon: '🧠' },
     'architect':      { text: 'Claude Opus 4 · Архитектор · Для сложных задач', icon: '🏛' },
 };
 
@@ -56,9 +50,10 @@ const WELCOME_CHIPS = [
 ];
 
 const MODEL_TAGS = [
-    { name: 'DeepSeek V3', color: '#3B82F6' },
+    { name: 'MiniMax M2.5', color: '#3B82F6' },
+    { name: 'MiMo Flash', color: '#06B6D4' },
     { name: 'Claude Sonnet', color: '#8B5CF6' },
-    { name: 'Gemini Pro', color: '#10B981' }
+    { name: 'Claude Opus', color: '#7C3AED' }
 ];
 
 /* ── STATE ────────────────────────────────────────────────── */
@@ -68,7 +63,7 @@ const state = {
     chats: [],
     currentChatId: null,
     messages: [],
-    mode: 'auto',
+    mode: 'turbo-basic',
     theme: 'light',
     isStreaming: false,
     streamController: null,
@@ -248,7 +243,7 @@ const API = {
     async uploadFile(file) {
         const fd = new FormData();
         fd.append('file', file);
-        return API.request('POST', '/files/upload', fd, true);
+        return API.request('POST', '/api/upload', fd, true);
     }
 };
 
@@ -443,7 +438,7 @@ const UI = {
         // ПАТЧ W1-1: Восстановить режим из localStorage
         try {
             const savedMode = localStorage.getItem('orion_mode');
-            if (savedMode && ['auto', 'turbo_basic', 'turbo-basic', 'turbo_premium', 'turbo-premium', 'pro_basic', 'pro-basic', 'pro_premium', 'pro-premium', 'architect'].includes(savedMode)) {
+            if (savedMode && ['turbo_basic', 'turbo-basic', 'turbo_standard', 'pro_basic', 'pro-basic', 'pro_standard', 'architect'].includes(savedMode)) {
                 state.mode = savedMode;
             }
         } catch(e) {}
@@ -516,11 +511,12 @@ const UI = {
         this.showModeInfo(key);  // УЛУЧ-3: обновить инфо-бар при выборе
         // Improvement 3: Update model label on mode switch
         const MODEL_LABELS = {
-            'auto': 'Авто',
-            'turbo-basic': 'DeepSeek V3',
-            'turbo-premium': 'Claude Sonnet',
-            'pro-basic': 'DeepSeek V3 + Sonnet',
-            'pro-premium': 'Claude Sonnet',
+            'turbo-basic': 'MiniMax + MiMo',
+            'turbo_basic': 'MiniMax + MiMo',
+            'turbo_standard': 'MiniMax + MiMo',
+            'pro-basic': 'Claude Sonnet',
+            'pro_basic': 'Claude Sonnet',
+            'pro_standard': 'Claude Sonnet',
             'architect': 'Claude Opus 4'
         };
         const modelLabel = document.querySelector('.header-model, .model-label, [data-model]');

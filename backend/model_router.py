@@ -1,7 +1,7 @@
 """
 Model Router — ORION Digital v2.0
 ==================================
-3 модели × 4 режима (Turbo/Pro × Обычное/Премиум).
+3 режима: Turbo (MiniMax+MiMo), Pro (Sonnet), Architect (Opus).
 
 Модели:
   deepseek → worker  (код, SSH, DevOps, интеграции)
@@ -9,10 +9,9 @@ Model Router — ORION Digital v2.0
   sonnet   → brain   (общение, планирование, code review)
 
 Режимы:
-  turbo_standard  — DeepSeek везде, Gemini для дизайна
-  turbo_premium   — Sonnet для общения, DeepSeek для работы
-  pro_standard    — Sonnet для оркестрации + code review
-  pro_premium     — Sonnet везде где нужен мозг
+  turbo_standard  — MiniMax думает, MiMo действует (быстро и дёшево)
+  pro_standard    — Sonnet для оркестрации, code review и копирайтинга
+  architect       — Opus для архитектуры, аудита и сложных задач
 """
 
 import os
@@ -31,10 +30,10 @@ logger = logging.getLogger("model_router")
 
 MODELS = {
     "deepseek": {
-        "id": "openai/gpt-4.1-nano",
+        "id": "deepseek/deepseek-v3.2",
         "name": "DeepSeek V3.2",
-        "input_price": 0.27,
-        "output_price": 0.38,
+        "input_price": 0.30,
+        "output_price": 0.88,
         "role": "worker",
         "description": "Код, SSH, DevOps, интеграции — быстро и дёшево",
         "max_tokens": 32000
@@ -93,7 +92,7 @@ MODELS = {
 
 MODES = {
     "turbo_standard": {
-        "label": "Turbo Обычный",
+        "label": "Turbo",
         "description": "Два мозга: MiniMax думает и пишет код, MiMo действует (SSH/браузер/деплой).",
         "max_cost_usd": 2.0,
         "agents": {
@@ -109,25 +108,9 @@ MODES = {
             "code_reviewer":    None         # нет в Turbo
         }
     },
-    "turbo_premium": {
-        "label": "Turbo Премиум",
-        "description": "Два мозга + Sonnet для общения. MiniMax думает, MiMo действует, Sonnet общается.",
-        "max_cost_usd": 2.0,
-        "agents": {
-            "intent_clarifier": "sonnet",    # Sonnet: премиум общение
-            "orchestrator":     "minimax",   # MiniMax: планирование
-            "designer":         "minimax",   # MiniMax: дизайн
-            "developer":        "mimo",      # MiMo: код и деплой
-            "devops":           "mimo",      # MiMo: SSH/сервер
-            "integrator":       "mimo",      # MiMo: интеграции
-            "tester":           "minimax",   # MiniMax: тесты
-            "analyst":          "minimax",   # MiniMax: анализ
-            "copywriter":       "minimax",   # MiniMax: тексты
-            "code_reviewer":    None
-        }
-    },
+
     "pro_standard": {
-        "label": "Pro Обычный",
+        "label": "Pro",
         "description": "Профессиональное планирование. Sonnet для оркестрации и code review.",
         "max_cost_usd": 10.0,
         "agents": {
@@ -143,24 +126,7 @@ MODES = {
             "code_reviewer":    "sonnet"     # Pro code review
         }
     },
-    "pro_premium": {
-        "label": "Pro Премиум",
-        "description": "Максимальное качество. Sonnet везде где нужен мозг.",
-        "max_cost_usd": 10.0,
-        "agents": {
-            "intent_clarifier": "sonnet",
-            "orchestrator":     "sonnet",
-            "designer":         "gemini",
-            "developer":        "deepseek",
-            "devops":           "deepseek",
-            "integrator":       "deepseek",
-            "tester":           "deepseek",
-            "analyst":          "sonnet",    # Глубокий анализ
-            "copywriter":       "sonnet",
-            "code_reviewer":    "sonnet"
-        }
-    },
-    "architect": {
+"architect": {
         "label": "Architect",
         "description": "Claude Opus для сложных задач. Архитектура, аудит, ТЗ.",
         "max_cost_usd": 20.0,
@@ -358,7 +324,7 @@ def _get_fallback_chain(model_key: str) -> List[str]:
     chains = {
         "sonnet":   ["anthropic/claude-sonnet-4.6", "google/gemini-2.5-pro", "openai/gpt-4.1-mini"],
         "gemini":   ["google/gemini-2.5-pro", "anthropic/claude-sonnet-4.6", "openai/gpt-4.1-mini"],
-        "deepseek": ["openai/gpt-4.1-mini", "google/gemini-2.5-pro", "anthropic/claude-sonnet-4.6"],
+        "deepseek": ["deepseek/deepseek-v3.2", "openai/gpt-4.1-mini", "anthropic/claude-sonnet-4.6"],
         "minimax":  ["minimax/minimax-m2.5", "minimax/minimax-m2.7", "openai/gpt-4.1-mini"],
         "mimo":     ["xiaomi/mimo-v2-flash", "xiaomi/mimo-v2-omni", "openai/gpt-4.1-mini"],
     }
