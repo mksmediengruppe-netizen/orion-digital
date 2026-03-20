@@ -1294,6 +1294,7 @@ def send_message(chat_id):
     data = request.get_json() or {}
     user_message = data.get("message", "").strip()
     file_content = data.get("file_content", "")
+    premium_design = data.get("premium_design", False)
     # ── BUG-1 FIX: Extract and normalize orion_mode ──
     _raw_mode = data.get("mode", "turbo-basic")
     _MODE_NORMALIZE = {
@@ -1569,6 +1570,7 @@ def send_message(chat_id):
             api_url=OPENROUTER_BASE_URL,
             ssh_credentials=ssh_credentials,
             user_id=request.user_id,
+            premium_design=premium_design,
         )
         _pro_loop._chat_id = chat_id
         _pro_loop._verify_enabled = data.get("verify", False)
@@ -2579,6 +2581,7 @@ def direct_chat():
     data = request.get_json() or {}
     user_message = data.get("message", "").strip()
     file_content = data.get("file_content", "")
+    premium_design = data.get("premium_design", False)
     # ── BUG-1 FIX: Extract and normalize orion_mode ──
     _raw_mode = data.get("mode", "turbo-basic")
     _MODE_NORMALIZE = {

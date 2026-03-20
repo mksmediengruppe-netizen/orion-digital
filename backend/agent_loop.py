@@ -1411,9 +1411,11 @@ class AgentLoop:
 
         # ── ORION Sprint 5: режим, сессия, scratchpad, snapshot ──
         self.orion_mode = orion_mode
-        self.premium_design = kwargs.get('premium_design', False) or DEFAULT_MODE
+        self.premium_design = bool(kwargs.get('premium_design', False))
         self.session_id = session_id or f"sess_{int(__import__('time').time())}"
         self.scratchpad = []          # Патч 6: промежуточные мысли агента
+        self._premium_competitors = []  # Premium Design: competitor screenshots
+        self._premium_hero_html = ""    # Premium Design: best hero variant
         self.task_charter = {           # ПАТЧ 24: Task Charter
             "goal": "",
             "pages": [],
@@ -2812,6 +2814,111 @@ class AgentLoop:
         }
 
     # ── Image Generation ─────────────────────────────────────────────────────
+
+
+    # ═══ PREMIUM DESIGN: Competitor Analysis ═══
+    def _premium_competitor_analysis(self, niche_query):
+        """Analyze 3 competitor websites before creating design."""
+        import logging as _pca_log
+        _pca_log.info(f"[PremiumDesign] Starting competitor analysis for: {niche_query}")
+        competitors = []
+        try:
+            # Step 1: Search for best websites in niche
+            search_query = f"{niche_query} лучший сайт дизайн"
+            search_result = self._execute_tool('web_search', {'query': search_query, 'num_results': 5})
+            urls = []
+            if search_result.get('success') and search_result.get('results'):
+                for r in search_result['results'][:5]:
+                    url = r.get('url', r.get('link', ''))
+                    if url and 'google' not in url and 'yandex' not in url:
+                        urls.append(url)
+                    if len(urls) >= 3:
+                        break
+            
+            # Step 2: Visit each competitor and take screenshot
+            for url in urls[:3]:
+                try:
+                    nav_result = self._execute_tool('browser_navigate', {'url': url})
+                    import time; time.sleep(2)
+                    ss_result = self._execute_tool('browser_screenshot', {})
+                    screenshot = ss_result.get('screenshot', '')
+                    text = self._execute_tool('browser_get_text', {'url': url})
+                    competitors.append({
+                        'url': url,
+                        'screenshot': screenshot[:5000] if screenshot else '',
+                        'text': (text.get('text', '') if isinstance(text, dict) else str(text))[:2000],
+                    })
+                    _pca_log.info(f"[PremiumDesign] Analyzed competitor: {url}")
+                except Exception as e:
+                    _pca_log.warning(f"[PremiumDesign] Failed to analyze {url}: {e}")
+        except Exception as e:
+            _pca_log.warning(f"[PremiumDesign] Competitor search failed: {e}")
+        
+        return competitors
+
+    # ═══ PREMIUM DESIGN: Generate 2 Hero Variants ═══
+    def _premium_hero_variants(self, site_description, style_notes=""):
+        """Generate 2 hero section variants and let Opus pick the best."""
+        import logging as _phv_log
+        import requests as _phv_req
+        _phv_log.info("[PremiumDesign] Generating 2 hero variants")
+        
+        _opus_model = "anthropic/claude-opus-4"
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+            "HTTP-Referer": "https://orion.mksitdev.ru",
+            "X-Title": "ORION Digital v1.0"
+        }
+        
+        variants = []
+        for i in range(2):
+            style = "bold and dramatic with large typography" if i == 0 else "elegant and minimal with subtle animations"
+            try:
+                resp = _phv_req.post(self.api_url, headers=headers, json={
+                    "model": _opus_model,
+                    "messages": [{"role": "user", "content": (
+                        f"Create hero section HTML for: {site_description}\n"
+                        f"Style: {style}. {style_notes}\n"
+                        "Use Tailwind CSS. Include gradient background, animated elements, "
+                        "professional typography. Make it Dribbble/Awwwards quality.\n"
+                        "Return ONLY the <section> HTML code, nothing else."
+                    )}],
+                    "temperature": 0.7,
+                    "max_tokens": 4000,
+                }, timeout=60)
+                
+                content = resp.json().get("choices", [{}])[0].get("message", {}).get("content", "")
+                if content:
+                    variants.append({"style": style, "html": content})
+                    _phv_log.info(f"[PremiumDesign] Hero variant {i+1} generated ({len(content)} chars)")
+            except Exception as e:
+                _phv_log.warning(f"[PremiumDesign] Hero variant {i+1} failed: {e}")
+        
+        if len(variants) < 2:
+            return variants[0]["html"] if variants else ""
+        
+        # Opus picks the best
+        try:
+            pick_resp = _phv_req.post(self.api_url, headers=headers, json={
+                "model": _opus_model,
+                "messages": [{"role": "user", "content": (
+                    f"Compare these 2 hero section variants for {site_description}.\n\n"
+                    f"VARIANT A ({variants[0]['style']}):\n{variants[0]['html'][:3000]}\n\n"
+                    f"VARIANT B ({variants[1]['style']}):\n{variants[1]['html'][:3000]}\n\n"
+                    "Which is better for a professional website? Answer ONLY 'A' or 'B'."
+                )}],
+                "temperature": 0.1,
+                "max_tokens": 10,
+            }, timeout=30)
+            
+            choice = pick_resp.json().get("choices", [{}])[0].get("message", {}).get("content", "A").strip().upper()
+            winner = 0 if "A" in choice else 1
+            _phv_log.info(f"[PremiumDesign] Opus chose variant {'A' if winner == 0 else 'B'}")
+            return variants[winner]["html"]
+        except Exception as e:
+            _phv_log.warning(f"[PremiumDesign] Opus pick failed: {e}")
+            return variants[0]["html"]
 
     def _generate_image(self, prompt, style="illustration", filename="image.png"):
         """Generate image using AI via OpenRouter (chat/completions + modalities)."""
@@ -4383,6 +4490,34 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);
         _loop_model_escalation = 0  # 0=original, 1=sonnet, 2=opus
         _original_model = self.model
 
+        # ═══ PREMIUM DESIGN: COMPETITOR ANALYSIS PHASE ═══
+        if getattr(self, 'premium_design', False) and not getattr(self, '_premium_analyzed', False):
+            self._premium_analyzed = True
+            import logging as _pd_log
+            _pd_log.info("[PremiumDesign] Premium Design enabled — running pre-analysis")
+            _pd_msg = messages[-1].get("content", "") if messages else ""
+            _pd_keywords = ["сайт", "лендинг", "landing", "website", "страниц", "дизайн", "page"]
+            if any(kw in _pd_msg.lower() for kw in _pd_keywords):
+                _pd_niche = _pd_msg[:200]
+                yield self._sse({"type": "content", "text": "\n✨ **Premium Design**: Анализирую конкурентов...\n", "agent": "Premium Design"})
+                try:
+                    self._premium_competitors = self._premium_competitor_analysis(_pd_niche)
+                    if self._premium_competitors:
+                        yield self._sse({"type": "content", "text": f"📊 Проанализировано {len(self._premium_competitors)} конкурентов\n", "agent": "Premium Design"})
+                        _comp_info = "\n".join([f"- {c['url']}: {c['text'][:300]}" for c in self._premium_competitors])
+                        messages.append({"role": "system", "content": f"[PREMIUM DESIGN] Проанализированы конкуренты:\n{_comp_info}\nСоздай дизайн ЛУЧШЕ чем у этих конкурентов. Уровень Dribbble/Awwwards."})
+                except Exception as _pd_e:
+                    _pd_log.warning(f"[PremiumDesign] Competitor analysis failed: {_pd_e}")
+                
+                yield self._sse({"type": "content", "text": "🎨 Генерирую 2 варианта Hero секции...\n", "agent": "Premium Design"})
+                try:
+                    self._premium_hero_html = self._premium_hero_variants(_pd_niche)
+                    if self._premium_hero_html:
+                        yield self._sse({"type": "content", "text": "✅ Лучший Hero вариант выбран Opus\n", "agent": "Premium Design"})
+                        messages.append({"role": "system", "content": f"[PREMIUM DESIGN] Используй этот Hero секцию (выбран Opus из 2 вариантов):\n{self._premium_hero_html[:4000]}"})
+                except Exception as _pd_e2:
+                    _pd_log.warning(f"[PremiumDesign] Hero variants failed: {_pd_e2}")
+
         while iteration < self.MAX_ITERATIONS and not self._stop_requested:
             yield self._sse({"type": "heartbeat", "message": "agent_thinking"})
             iteration += 1
@@ -5662,7 +5797,29 @@ class MultiAgentLoop(AgentLoop):
                                 'team': 'Professional portrait of business person in modern office, confident smile, soft lighting, 8k quality',
                                 'service': 'Abstract technology concept with glowing blue connections and data visualization, dark background, 8k quality',
                             }
-                            _prompt = 'Professional high quality business photo, modern clean aesthetic, 8k quality photorealistic'
+                            # PREMIUM DESIGN: Enhanced AI photo prompts
+                            if getattr(self, 'premium_design', False):
+                                # Use Opus to generate detailed photo prompt
+                                try:
+                                    import requests as _aip_req
+                                    _aip_headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
+                                    _aip_resp = _aip_req.post(self.api_url, headers=_aip_headers, json={
+                                        "model": "anthropic/claude-opus-4",
+                                        "messages": [{"role": "user", "content": (
+                                            f"Generate a detailed 20-30 word photo prompt in English for a website image. "
+                                            f"Context: image placeholder was '{_img_src}'. "
+                                            "The photo should be photorealistic, 8K quality, professional. "
+                                            "Return ONLY the prompt text, nothing else."
+                                        )}],
+                                        "temperature": 0.5, "max_tokens": 100,
+                                    }, timeout=20)
+                                    _ai_prompt = _aip_resp.json().get("choices", [{}])[0].get("message", {}).get("content", "")
+                                    if _ai_prompt and len(_ai_prompt) > 10:
+                                        _prompt = _ai_prompt.strip()
+                                except Exception:
+                                    pass
+                            else:
+                                _prompt = 'Professional high quality business photo, modern clean aesthetic, 8k quality photorealistic'
                             for _key, _val in _prompts.items():
                                 if _key in _img_context:
                                     _prompt = _val
