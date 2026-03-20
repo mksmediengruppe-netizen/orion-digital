@@ -2016,6 +2016,9 @@ class AgentLoop:
                     _file_paths = _re.findall(r'(/[a-zA-Z0-9_./-]+\.[a-zA-Z0-9]+)', command)
                     for _fp in _file_paths[:3]:
                         try:
+                            # BUG-FIX: не делать бэкап .bak файлов (иначе цепочка .bak.bak.bak)
+                            if '.bak' in _fp:
+                                continue
                             _bak_cmd = f"[ -f {_fp} ] && cp {_fp} {_fp}.bak.$(date +%s) 2>/dev/null || true"
                             self._ssh_execute_with_retry(host, username, password, _bak_cmd)
                             logger.info(f"[PATCH-W1-3] Auto-backup: {_fp}")
@@ -2050,9 +2053,11 @@ class AgentLoop:
 
                 # ── ПАТЧ W1-3: Автобэкап перед перезаписью ──
                 try:
-                    _bak_cmd = f"[ -f {path} ] && cp {path} {path}.bak.$(date +%s) 2>/dev/null || true"
-                    self._ssh_execute_with_retry(host, username, password, _bak_cmd)
-                    logger.info(f"[PATCH-W1-3] Auto-backup before write: {path}")
+                    # BUG-FIX: не делать бэкап .bak файлов (иначе цепочка .bak.bak.bak)
+                    if '.bak' not in path:
+                        _bak_cmd = f"[ -f {path} ] && cp {path} {path}.bak.$(date +%s) 2>/dev/null || true"
+                        self._ssh_execute_with_retry(host, username, password, _bak_cmd)
+                        logger.info(f"[PATCH-W1-3] Auto-backup before write: {path}")
                 except Exception:
                     pass
 
