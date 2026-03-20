@@ -5644,7 +5644,9 @@ class MultiAgentLoop(AgentLoop):
                     
                     # Find all img src with placeholder or missing images
                     import re as _ap_re
-                    _placeholder_imgs = _ap_re.findall(r'<img[^>]+src=["']([^"']*(?:placehold|placeholder|photo\d|image\d|hero|about|team|service)[^"']*)["']', _ap_html, _ap_re.IGNORECASE)
+                    # Fixed: use compiled pattern to avoid quote escaping issues
+                    _ap_pattern = re.compile(r'<img[^>]+src=[\x22\x27]([^\x22\x27]*(?:placehold|placeholder|photo\d|image\d|hero|about|team|service)[^\x22\x27]*)[\x22\x27]', re.IGNORECASE)
+                    _placeholder_imgs = _ap_pattern.findall(_ap_html)
                     
                     if _placeholder_imgs:
                         _ap_log.info(f"[AutoPhoto] Found {len(_placeholder_imgs)} placeholder images")
@@ -5704,7 +5706,7 @@ class MultiAgentLoop(AgentLoop):
                             'host': _qc_host,
                             'username': self.ssh_credentials.get('username', 'root'),
                             'password': self.ssh_credentials.get('password', ''),
-                            'command': "sed -i 's|</head>|<script src="https://cdn.tailwindcss.com"></script>\n</head>|' /var/www/html/index.html 2>/dev/null"
+                            'command': 'sed -i \'s|</head>|<script src="https://cdn.tailwindcss.com"></script>\n</head>|\' /var/www/html/index.html 2>/dev/null'
                         })
                         yield self._sse({"type": "content", "text": "✅ Tailwind CDN добавлен\n", "agent": "Tailwind Check"})
                     else:
