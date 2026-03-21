@@ -318,7 +318,18 @@ Assistant: {assistant_msg}"""
             try:
                 items = json.loads(json_match.group(0))
             except (json.JSONDecodeError, ValueError):
-                return []
+                # Fallback: try to extract JSON array from LLM response
+                import re as _re
+                _json_match = _re.search(r'\[\s*\{.*?\}\s*\]', raw_text, _re.DOTALL)
+                if _json_match:
+                    try:
+                        items = json.loads(_json_match.group())
+                    except (json.JSONDecodeError, ValueError):
+                        logger.debug(f"Memory extraction: JSON fallback also failed")
+                        return []
+                else:
+                    logger.debug(f"Memory extraction: no JSON array found in LLM response")
+                    return []
             if not isinstance(items, list):
                 return []
             stored = []

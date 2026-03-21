@@ -1220,7 +1220,7 @@ CMS (Битрикс/WordPress):
 - Для выполнения команд на сервере используй ТОЛЬКО ssh_execute.
 - Для выполнения Python кода используй ТОЛЬКО code_interpreter.
 - Перед деплоем ВСЕГДА проверяй nginx конфиг: ssh_execute('cat /etc/nginx/sites-enabled/* | grep root') чтобы узнать правильный webroot.
-- При записи файлов через echo/printf ЭКРАНИРУЙ спецсимволы (!, $, `, \). Лучше используй file_write вместо echo.
+- При записи файлов через echo/printf ЭКРАНИРУЙ спецсимволы (!, $, `, \\). Лучше используй file_write вместо echo.
 - Для записи больших файлов используй file_write — он работает через SFTP и не зависит от shell-экранирования.
 - ВАЖНО: file_write имеет ограничение на размер контента в одном вызове (~8000 символов). Если HTML/CSS файл больше — ОБЯЗАТЕЛЬНО используй ssh_execute с Python heredoc: ssh_execute('python3 -c "import base64,os; open(path,\'wb\').write(base64.b64decode(encoded))"') или записывай файл частями через несколько ssh_execute с >> оператором.
 - НИКОГДА не пытайся передать весь большой HTML (>200 строк) в одном вызове file_write — он будет обрезан и вернёт ошибку.
@@ -1299,7 +1299,7 @@ ftp_list, store_memory, recall_memory, update_scratchpad, task_complete.
 - Для выполнения команд на сервере используй ТОЛЬКО ssh_execute.
 - Для выполнения Python кода используй ТОЛЬКО code_interpreter.
 - Перед деплоем ВСЕГДА проверяй nginx конфиг: ssh_execute('cat /etc/nginx/sites-enabled/* | grep root') чтобы узнать правильный webroot.
-- При записи файлов через echo/printf ЭКРАНИРУЙ спецсимволы (!, $, `, \). Лучше используй file_write вместо echo.
+- При записи файлов через echo/printf ЭКРАНИРУЙ спецсимволы (!, $, `, \\). Лучше используй file_write вместо echo.
 - Для записи больших файлов используй file_write — он работает через SFTP и не зависит от shell-экранирования.
 - ВАЖНО: file_write имеет ограничение на размер контента в одном вызове (~8000 символов). Если HTML/CSS файл больше — ОБЯЗАТЕЛЬНО используй ssh_execute с Python heredoc: ssh_execute('python3 -c "import base64,os; open(path,\'wb\').write(base64.b64decode(encoded))"') или записывай файл частями через несколько ssh_execute с >> оператором.
 - НИКОГДА не пытайся передать весь большой HTML (>200 строк) в одном вызове file_write — он будет обрезан и вернёт ошибку.
