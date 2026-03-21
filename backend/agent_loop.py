@@ -2141,6 +2141,32 @@ class AgentLoop:
 
     def _execute_tool(self, tool_name, arguments):
         """Wrapper: выполняет tool и сохраняет большие результаты в файлы."""
+        # ═══ BLOCK 4: ToolSandbox check ═══
+        if hasattr(self, '_tool_sandbox') and self._tool_sandbox:
+            try:
+                _sb_check = self._tool_sandbox.check(tool_name)
+                if not _sb_check["allowed"]:
+                    logger.warning(f"[BLOCK4] Tool blocked by sandbox: {tool_name} — {_sb_check['reason']}")
+                    return {"success": False, "error": f"Tool blocked: {_sb_check['reason']}"}
+            except Exception as _sb_err:
+                logger.debug(f"[BLOCK4] ToolSandbox check error: {_sb_err}")
+        # ═══ BLOCK 4: TaskScorecard — record tool call ═══
+        if hasattr(self, '_scorecard_store') and self._scorecard_store:
+            try:
+                _sc_task_id = getattr(self, '_current_task_id', None)
+                if _sc_task_id:
+                    self._scorecard_store.record_tool_call(_sc_task_id, tool_name)
+            except Exception as _sc_err:
+                logger.debug(f"[BLOCK4] Scorecard record_tool_call error: {_sc_err}")
+        # ═══ BLOCK 4: AutonomyManager — track counters ═══
+        if hasattr(self, '_autonomy_manager') and self._autonomy_manager:
+            try:
+                if tool_name == "ssh_execute":
+                    self._autonomy_manager.increment_ssh()
+                elif tool_name == "file_write":
+                    self._autonomy_manager.increment_file_write()
+            except Exception:
+                pass
         result = self._execute_tool_raw(tool_name, arguments)
         # Пост-обработка: сохраняем большие результаты в файл
         _fs_context_tools = ("ssh_execute", "browser_navigate", "browser_get_text", "web_fetch", "browser_check_site")
@@ -4377,6 +4403,27 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);
                     logger.info(f"[BLOCK3] Crash recovery injected for {_b3_charter['task_id']}")
 
         # ── ORION: Intent Clarifier ───────────────────────────────
+        # ═══ BLOCK 4: TaskScorecard — start tracking ═══
+        if hasattr(self, '_scorecard_store') and self._scorecard_store:
+            try:
+                _sc_task_id = getattr(self, '_current_task_id', None)
+                if _sc_task_id:
+                    self._scorecard_store.start(
+                        task_id=_sc_task_id,
+                        chat_id=getattr(self, 'chat_id', ''),
+                        user_id=getattr(self, 'user_id', ''),
+                        orion_mode=getattr(self, 'orion_mode', 'default'),
+                        objective=str(user_message)[:500] if user_message else '',
+                        max_iterations=getattr(self, 'max_iterations', 30)
+                    )
+            except Exception as _sc_start_err:
+                logger.debug(f"[BLOCK4] Scorecard start error: {_sc_start_err}")
+        # ═══ BLOCK 4: AutonomyManager — reset counters for new task ═══
+        if hasattr(self, '_autonomy_manager') and self._autonomy_manager:
+            try:
+                self._autonomy_manager.reset_counters()
+            except Exception:
+                pass
         if _INTENT_CLARIFIER_AVAILABLE:
             try:
                 self._intent_result = clarify_intent(
@@ -4446,6 +4493,14 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);
                 logging.info(f"[KB] Found relevant knowledge base content ({len(_kb_context)} chars)")
         except Exception as _kb_err:
             logging.warning(f"[KB] Error searching knowledge base: {_kb_err}")
+        # ═══ BLOCK 4: AutonomyManager — add mode info to prompt ═══
+        if hasattr(self, '_autonomy_manager') and self._autonomy_manager:
+            try:
+                _autonomy_prompt = self._autonomy_manager.format_for_prompt()
+                if _autonomy_prompt:
+                    _effective_system_prompt += "\n\n" + _autonomy_prompt
+            except Exception as _am_err:
+                logger.debug(f"[BLOCK4] AutonomyManager prompt error: {_am_err}")
         # Добавить промпт от оркестратора (специфичный для агента)
         if hasattr(self, '_orchestrator_prompt') and self._orchestrator_prompt:
             _effective_system_prompt = self._orchestrator_prompt + "\n\n" + AGENT_SYSTEM_PROMPT
@@ -4763,6 +4818,23 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);
         while iteration < self.MAX_ITERATIONS and not self._stop_requested:
             yield self._sse({"type": "heartbeat", "message": "agent_thinking"})
             iteration += 1
+            # ═══ BLOCK 4: TaskScorecard — record iteration ═══
+            if hasattr(self, '_scorecard_store') and self._scorecard_store:
+                try:
+                    _sc_task_id = getattr(self, '_current_task_id', None)
+                    if _sc_task_id:
+                        self._scorecard_store.record_iteration(_sc_task_id)
+                except Exception:
+                    pass
+            # ═══ BLOCK 4: AutonomyManager — check iteration limit ═══
+            if hasattr(self, '_autonomy_manager') and self._autonomy_manager:
+                try:
+                    self._autonomy_manager.increment_iteration()
+                    _iter_check = self._autonomy_manager.check_iteration_limit()
+                    if _iter_check.get("exceeded"):
+                        logger.warning(f"[BLOCK4] Iteration limit exceeded by autonomy manager")
+                except Exception:
+                    pass
 
             # ── Update per-task cost from session tracker ──
             _task_cost = max(0.0, self._session_cost - _task_cost_prev)
@@ -4880,7 +4952,14 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);
             try:
                 logger.info(f"[DEBUG] Calling AI stream, iteration {iteration}, messages: {len(messages)}")
                 _iter_text_buffer = ""  # accumulate text for thinking_text
-                for event in self._call_ai_stream(messages, tools=TOOLS_SCHEMA):
+                # ═══ BLOCK 4: ToolSandbox — filter tools by mode/autonomy ═══
+                _filtered_tools = TOOLS_SCHEMA
+                if hasattr(self, '_tool_sandbox') and self._tool_sandbox:
+                    try:
+                        _filtered_tools = self._tool_sandbox.filter_tools_schema(TOOLS_SCHEMA)
+                    except Exception as _tsf_err:
+                        logger.debug(f"[BLOCK4] ToolSandbox filter error: {_tsf_err}")
+                for event in self._call_ai_stream(messages, tools=_filtered_tools):
                     if event["type"] == "text_delta":
                         ai_text += event["text"]
                         _iter_text_buffer += event["text"]
@@ -5100,6 +5179,42 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);
                     except Exception as _v6_err:
                         logger.debug(f"PATCH6 auto-verify error: {_v6_err}")
 
+                    # ═══ BLOCK 4: FinalJudge — independent verification ═══
+                    if hasattr(self, '_final_judge') and self._final_judge:
+                        try:
+                            _fj_verdict = self._final_judge.judge(
+                                objective=str(user_message)[:500],
+                                actions_log=getattr(self, 'actions_log', [])[-10:],
+                                final_answer=summary[:1000],
+                                files_created=[],
+                            )
+                            _fj_v = _fj_verdict.get("verdict", "")
+                            _fj_s = _fj_verdict.get("score", 0)
+                            logger.info(f"[BLOCK4] FinalJudge: {_fj_v} score={_fj_s}")
+                            yield self._sse({
+                                "type": "final_judge",
+                                "verdict": _fj_v,
+                                "score": _fj_s,
+                                "details": _fj_verdict.get("details", "")
+                            })
+                        except Exception as _fj_err:
+                            logger.debug(f"[BLOCK4] FinalJudge error: {_fj_err}")
+                    # ═══ BLOCK 4: TaskScorecard — finish ═══
+                    if hasattr(self, '_scorecard_store') and self._scorecard_store:
+                        try:
+                            _sc_task_id = getattr(self, '_current_task_id', None)
+                            if _sc_task_id:
+                                _fj_v = locals().get('_fj_v', '')
+                                _fj_s = locals().get('_fj_s', 0)
+                                self._scorecard_store.finish(
+                                    task_id=_sc_task_id,
+                                    verdict=_fj_v,
+                                    quality_score=_fj_s,
+                                    final_answer_len=len(summary),
+                                    status="done"
+                                )
+                        except Exception as _sc_fin_err:
+                            logger.debug(f"[BLOCK4] Scorecard finish error: {_sc_fin_err}")
                     # ── ПАТЧ 9: Solution Cache — сохранить решение ──
                     try:
                         if not self._solution_cache:
