@@ -22,7 +22,9 @@ import importlib.util
 # HELPERS
 # ═══════════════════════════════════════════════════════════
 
-BACKEND_DIR = os.path.dirname(os.path.abspath(__file__))
+# Auto-detect backend dir (works from both backend/ and backend/tests/)
+_this_dir = os.path.dirname(os.path.abspath(__file__))
+BACKEND_DIR = os.path.dirname(_this_dir) if os.path.basename(_this_dir) == "tests" else _this_dir
 sys.path.insert(0, BACKEND_DIR)
 
 

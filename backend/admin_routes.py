@@ -296,7 +296,7 @@ def admin_update_user(user_id):
     if "is_blocked" in data:
         user["is_blocked"] = data["is_blocked"]
     if "password" in data and data["password"]:
-        user["password_hash"] = hashlib.sha256(data["password"].encode()).hexdigest()
+        user["password_hash"] = bcrypt.hashpw(data["password"].encode(), bcrypt.gensalt()).decode()  # PATCH 16: bcrypt instead of sha256
 
     # Update permissions
     if "permissions" in data:
