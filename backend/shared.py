@@ -148,18 +148,12 @@ os.makedirs(DATA_DIR, exist_ok=True)
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(GENERATED_DIR, exist_ok=True)
 
-# SQLite database (migrated from JSON)
-try:
-    from database import load_db as _sqlite_load, save_db as _sqlite_save, init_db
-    _USE_SQLITE = True
-    init_db()
-except ImportError:
-    _USE_SQLITE = False
-except Exception as _db_init_err:
-    logging.warning(f"SQLite init failed: {_db_init_err}")
-    _USE_SQLITE = False
+# SQLite database (mandatory — JSON fallback removed in TASK 5)
+from database import load_db as _sqlite_load, save_db as _sqlite_save, init_db
+init_db()
 
-DB_FILE = os.path.join(DATA_DIR, "database.json")
+# DB_FILE removed in TASK 5 — SQLite is the only storage
+# DB_FILE = os.path.join(DATA_DIR, "database.json")  # LEGACY
 _lock = threading.Lock()
 
 # Active agent loops (for stop functionality)
@@ -408,36 +402,25 @@ _DEFAULT_DB = {
 
 
 def _load_db():
-    """Load database — SQLite primary, JSON fallback."""
-    if _USE_SQLITE:
-        try:
-            data = _sqlite_load()
-            if data and data.get("users"):
-                return data
-        except Exception as e:
-            logging.warning(f"SQLite load failed, falling back to JSON: {e}")
-    # JSON fallback
+    """Load database from SQLite (TASK 5: JSON fallback removed)."""
     try:
-        with open(DB_FILE, "r") as f:
-            return json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
+        data = _sqlite_load()
+        if data and data.get("users"):
+            return data
+        return _DEFAULT_DB.copy()
+    except Exception as e:
+        logging.error(f"SQLite load failed: {e}")
         return _DEFAULT_DB.copy()
 
 
 
 def _save_db(db):
-    """Save database — SQLite primary, JSON fallback."""
-    if _USE_SQLITE:
-        try:
-            _sqlite_save(db)
-            return
-        except Exception as e:
-            logging.warning(f"SQLite save failed, falling back to JSON: {e}")
-    # JSON fallback
-    tmp = DB_FILE + ".tmp"
-    with open(tmp, "w") as f:
-        json.dump(db, f, ensure_ascii=False, indent=2)
-    os.replace(tmp, DB_FILE)
+    """Save database to SQLite (TASK 5: JSON fallback removed)."""
+    try:
+        _sqlite_save(db)
+    except Exception as e:
+        logging.error(f"SQLite save failed: {e}")
+        raise
 
 
 
