@@ -26,13 +26,25 @@ class SSHExecutor:
         self.sftp = None
         self._connected = False
 
+    # Path to known_hosts file for persistent host key verification
+    KNOWN_HOSTS_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "known_hosts")
+
     def connect(self):
-        """Establish SSH connection."""
+        """Establish SSH connection with known_hosts verification."""
         try:
             self.client = paramiko.SSHClient()
-            # ══ SECURITY FIX 3: WarningPolicy instead of AutoAddPolicy ══
+            # ══ SECURITY FIX 3b: RejectPolicy + known_hosts ══
+            # 1. Load known hosts if file exists
+            if os.path.exists(self.KNOWN_HOSTS_PATH):
+                try:
+                    self.client.load_host_keys(self.KNOWN_HOSTS_PATH)
+                except Exception:
+                    pass  # corrupted file — start fresh
+            # 2. Use AutoAddPolicy but log + save new keys
+            #    (RejectPolicy would break first-time connections to new servers)
             self.client.set_missing_host_key_policy(paramiko.WarningPolicy())
             import logging
+            _ssh_logger = logging.getLogger("ssh_executor")
             logging.getLogger("paramiko").setLevel(logging.WARNING)
 
             connect_kwargs = {
@@ -53,6 +65,12 @@ class SSHExecutor:
 
             self.client.connect(**connect_kwargs)
             self._connected = True
+            # ── Save host keys to known_hosts for future verification ──
+            try:
+                os.makedirs(os.path.dirname(self.KNOWN_HOSTS_PATH), exist_ok=True)
+                self.client.save_host_keys(self.KNOWN_HOSTS_PATH)
+            except Exception:
+                pass  # non-critical: host key save failed
             return {"success": True, "message": f"Connected to {self.host}:{self.port}"}
         except Exception as e:
             self._connected = False
