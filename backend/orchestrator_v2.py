@@ -9,6 +9,7 @@ ORION Orchestrator v2.0 — Умный планировщик
 
 import json
 import logging
+from artifact_handoff import ArtifactHandoff, get_handoff_store
 import os
 import time
 import re
@@ -544,6 +545,43 @@ class Orchestrator:
 
     def update_context(self, result_summary):
         self.project_context += f"\nРезультат: {result_summary[:200]}\n"
+
+
+    def save_phase_artifacts(self, task_id, chat_id, phase_name, agent_key, artifacts):
+        """Save artifacts produced by an agent at end of a phase."""
+        store = get_handoff_store()
+        store.save(
+            task_id=task_id,
+            chat_id=chat_id,
+            from_agent=agent_key,
+            to_agent="next",
+            artifact_type="phase_output",
+            payload=artifacts,
+            metadata={"phase": phase_name}
+        )
+        logger.info(f"[Orchestrator] Saved artifacts for phase '{phase_name}' from {agent_key}")
+
+    def load_phase_artifacts(self, task_id, chat_id, phase_name=None):
+        """Load artifacts from previous phases for context."""
+        store = get_handoff_store()
+        all_artifacts = store.get_all_for_task(task_id)
+        if phase_name:
+            return [a for a in all_artifacts if a.get("metadata", {}).get("phase") == phase_name]
+        return all_artifacts
+
+    def build_handoff_context(self, task_id, chat_id):
+        """Build a context string from all previous phase artifacts."""
+        artifacts = self.load_phase_artifacts(task_id, chat_id)
+        if not artifacts:
+            return ""
+        parts = []
+        for a in artifacts:
+            phase = a.get("metadata", {}).get("phase", "unknown")
+            from_agent = a.get("from_agent", "unknown")
+            payload = a.get("payload", {})
+            summary = payload.get("summary", "") if isinstance(payload, dict) else str(payload)[:500]
+            parts.append(f"[Phase: {phase}, Agent: {from_agent}] {summary}")
+        return "\n--- Previous Phase Artifacts ---\n" + "\n".join(parts)
 
 
 def get_model_id(key):

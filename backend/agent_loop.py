@@ -332,6 +332,7 @@ class AgentLoop:
         self._goal_keeper._call_ai = self._call_ai_simple  # TASK 6: enable semantic alignment check
         # ═══ BLOCK 4: Artifact Handoff + Final Judge + Tool Sandbox + Scorecard + Autonomy ═══
         self._handoff_store = _handoff_store
+        self._tools_used_this_run = []
         self._scorecard_store = _scorecard_store
         self._autonomy_manager = get_autonomy_manager()
         self._tool_sandbox = get_tool_sandbox()
