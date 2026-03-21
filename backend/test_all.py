@@ -58,7 +58,7 @@ class TestTaskCharter(unittest.TestCase):
         """Получение charter"""
         charter = self.store.get("test-task-1")
         self.assertIsNotNone(charter)
-        self.assertEqual(charter["objective"], "Тестовая задача")
+        self.assertEqual(charter["primary_objective"], "Тестовая задача")
 
     def test_03_complete_charter(self):
         """Завершение charter — статус 'completed'"""
@@ -74,10 +74,10 @@ class TestTaskCharter(unittest.TestCase):
     def test_05_update_charter(self):
         """Обновление charter"""
         self.store.create("test-task-2", "Задача 2", "chat-2")
-        result = self.store.update("test-task-2", {"objective": "Обновлённая задача"})
+        result = self.store.update("test-task-2", {"current_objective": "Обновлённая задача"})
         self.assertIsNotNone(result)
         charter = self.store.get("test-task-2")
-        self.assertEqual(charter["objective"], "Обновлённая задача")
+        self.assertEqual(charter["current_objective"], "Обновлённая задача")
 
 
 class TestExecutionSnapshots(unittest.TestCase):
@@ -200,7 +200,7 @@ class TestArtifactHandoff(unittest.TestCase):
 
     def test_02_get_by_task(self):
         """Получение артефактов по задаче"""
-        artifacts = self.store.get_by_task("task-1")
+        artifacts = self.store.get_all_for_task("task-1")
         self.assertGreater(len(artifacts), 0)
 
     def test_03_create_multiple(self):
@@ -213,7 +213,7 @@ class TestArtifactHandoff(unittest.TestCase):
                 content=f"file_{i}.py",
                 to_agent="reviewer",
             )
-        artifacts = self.store.get_by_task("task-multi")
+        artifacts = self.store.get_all_for_task("task-multi")
         self.assertEqual(len(artifacts), 3)
 
 
