@@ -953,7 +953,7 @@ def send_message(chat_id):
                     logging.info(f"[_orch_llm_send] Content length: {len(_content)}")
                     return _content
                 
-                _orch_send = Orchestrator(_orch_llm_send, mode)
+                _orch_send = Orchestrator(_orch_llm_send, orion_mode)  # FIX: pass orion_mode not intent mode
                 _orch_plan_send = _orch_send.plan(user_message, history, 
                                                    has_ssh=bool(ssh_credentials.get("host")))
                 logging.info(f'[send_message] Orchestrator plan result: {_orch_plan_send}')

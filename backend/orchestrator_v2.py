@@ -315,6 +315,11 @@ class Orchestrator:
 
     def plan(self, message, chat_history=None, has_ssh=False, ssh_info=""):
         logger.info(f"[Orchestrator] Planning with mode={self.orion_mode}")
+        
+        # Smart Turbo: ALWAYS use LLM planning (Opus) - skip templates
+        if self.orion_mode == "smart_turbo":
+            logger.info("[Smart Turbo] Skipping templates, using Opus for planning")
+            return self._llm_plan(message, chat_history, has_ssh, ssh_info)
         msg = message.lower().strip()
 
         if self._is_simple_chat(msg):
