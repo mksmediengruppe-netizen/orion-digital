@@ -102,7 +102,7 @@ server_ip = "IP_СЕРВЕРА"  # например 45.67.57.175
 records = {"A": [{"priority": 10, "value": server_ip}]}
 input_data = json.dumps({"fqdn": fqdn, "records": records})
 url = f"https://api.beget.com/api/dns/changeRecords?login={login}&passwd={urllib.parse.quote(passwd)}&input_format=json&output_format=json&input_data={urllib.parse.quote(input_data)}"
-resp = requests.get(url, verify=False, timeout=30)
+resp = requests.get(url, verify=True, timeout=30)
 print("Beget API response:", resp.text)
 ```
 Сохрани этот код в файл и выполни через ssh_execute или локально через python_execute.

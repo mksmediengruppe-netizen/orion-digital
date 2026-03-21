@@ -62,6 +62,20 @@ _user_takeover_event = threading.Event()
 import concurrent.futures
 _pw_thread_pool = concurrent.futures.ThreadPoolExecutor(max_workers=1, thread_name_prefix="pw")
 
+
+# ══ SECURITY FIX 4: SSL verification with exceptions ══
+_SSL_VERIFY_EXCEPTIONS = {"cp.beget.com", "api.beget.com"}
+
+def _ssl_verify(url: str) -> bool:
+    """Return False only for known hosts with SSL issues."""
+    try:
+        from urllib.parse import urlparse
+        host = urlparse(url).hostname or ""
+        return host not in _SSL_VERIFY_EXCEPTIONS
+    except Exception:
+        return True
+
+
 def _run_in_pw_thread(fn, *args, **kwargs):
     """Run a function in the dedicated Playwright thread (no asyncio loop)."""
     try:
@@ -601,7 +615,7 @@ class BrowserAgent:
     def _navigate_requests(self, url: str) -> dict:
         """Fallback навигация через requests (без JS)."""
         try:
-            resp = self.session.get(url, timeout=self.timeout, allow_redirects=True, verify=False)
+            resp = self.session.get(url, timeout=self.timeout, allow_redirects=True, verify=_ssl_verify(url))
             self.history.append({"url": url, "status": resp.status_code, "time": time.time()})
             return {
                 "success": True,
@@ -1661,13 +1675,13 @@ class BrowserAgent:
                 extra_headers.update(headers)
             start = time.time()
             if method.upper() == "GET":
-                resp = self.session.get(url, headers=extra_headers, timeout=self.timeout, verify=False)
+                resp = self.session.get(url, headers=extra_headers, timeout=self.timeout, verify=_ssl_verify(url))
             elif method.upper() == "POST":
-                resp = self.session.post(url, json=data, headers=extra_headers, timeout=self.timeout, verify=False)
+                resp = self.session.post(url, json=data, headers=extra_headers, timeout=self.timeout, verify=_ssl_verify(url))
             elif method.upper() == "PUT":
-                resp = self.session.put(url, json=data, headers=extra_headers, timeout=self.timeout, verify=False)
+                resp = self.session.put(url, json=data, headers=extra_headers, timeout=self.timeout, verify=_ssl_verify(url))
             elif method.upper() == "DELETE":
-                resp = self.session.delete(url, headers=extra_headers, timeout=self.timeout, verify=False)
+                resp = self.session.delete(url, headers=extra_headers, timeout=self.timeout, verify=_ssl_verify(url))
             else:
                 return {"success": False, "error": f"Unsupported method: {method}"}
             elapsed = round((time.time() - start) * 1000)
@@ -1734,7 +1748,7 @@ class BrowserAgent:
                 url = "https://" + url
             resp = self.session.post(
                 url, data=data, json=json_data,
-                headers=headers or {}, timeout=self.timeout, verify=False
+                headers=headers or {}, timeout=self.timeout, verify=_ssl_verify(url)
             )
             return {
                 "success": True, "url": resp.url,

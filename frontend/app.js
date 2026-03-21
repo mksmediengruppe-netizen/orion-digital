@@ -74,6 +74,7 @@ const state = {
     premiumDesign: false,
     theme: 'light',
     isStreaming: false,
+    streamingChatId: null,
     streamController: null,
     messageQueue: [],
     attachments: [],
@@ -204,6 +205,7 @@ const API = {
         const opts = { method, headers };
         if (body) opts.body = isFormData ? body : JSON.stringify(body);
 
+        opts.credentials = 'include';
         const res = await fetch(API_BASE + path, opts);
         if (res.status === 401) {
             // BUG-12v4: Cache chats IMMEDIATELY before any logout
@@ -215,7 +217,7 @@ const API = {
             if (reloginOk) {
                 // Retry the original request with new token
                 headers['Authorization'] = 'Bearer ' + state.token;
-                const retry = await fetch(API_BASE + path, { method, headers, body: opts.body });
+                const retry = await fetch(API_BASE + path, { method, headers, body: opts.body, credentials: 'include' });
                 if (retry.ok) return retry.json();
             }
             Auth.softLogout();
@@ -235,6 +237,7 @@ const API = {
     async login(username, password) {
         const res = await fetch(API_BASE + '/auth/login', {
             method: 'POST',
+            credentials: 'include',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ email: username, password })
         });
@@ -707,6 +710,17 @@ const UI = {
 
     setStreaming(active) {
         state.isStreaming = active;
+        // Track which chat is streaming for sidebar indicator
+        if (active) {
+            state.streamingChatId = state.currentChatId;
+        }
+        // Update sidebar activity indicator
+        if (state.currentChatId) {
+            ChatList.updateActivity(state.currentChatId, active ? 'running' : 'done');
+        }
+        if (!active) {
+            state.streamingChatId = null;
+        }
         const sendBtn = $('btn-send');
         const stopBtn = $('btn-stop');
         // During streaming: show BOTH send (for queue) and stop buttons
@@ -1087,13 +1101,17 @@ const ChatList = {
             container.appendChild(label);
             items.forEach(chat => container.appendChild(this.renderItem(chat)));
         });
+        // Restore activity indicator for streaming chat
+        if (state.streamingChatId) {
+            this.updateActivity(state.streamingChatId, 'running');
+        }
     },
 
     renderItem(chat) {
         const item = el('div', 'chat-item' + (chat.id === state.currentChatId ? ' active' : ''));
         item.dataset.chatId = chat.id;
         item.innerHTML = `
-            <div class="chat-item-icon">💬</div>
+            <div class="chat-item-icon" id="chat-icon-${chat.id}"><span class="status-idle">${chat.total_cost > 0 ? "✅" : "💬"}</span></div>
             <div class="chat-item-body">
                 <div class="chat-item-title">${Utils.escapeHtml(chat.title || 'Новый чат')}</div>
                 <div class="chat-item-meta">
@@ -1119,6 +1137,28 @@ const ChatList = {
         if (!q) { this.render(); return; }
         const filtered = state.chats.filter(c => (c.title || '').toLowerCase().includes(q));
         this.render(filtered);
+    },
+
+    updateActivity(chatId, status) {
+        // status: 'running' | 'idle' | 'done' | 'error'
+        const iconEl = document.getElementById('chat-icon-' + chatId);
+        if (!iconEl) return;
+        switch (status) {
+            case 'running':
+                iconEl.innerHTML = '<div class="activity-spinner"></div><div class="activity-dot"></div>';
+                break;
+            case 'done':
+                iconEl.innerHTML = '<span class="status-done">✅</span>';
+                break;
+            case 'error':
+                iconEl.innerHTML = '<span style="color:var(--warning,#f59e0b);font-size:14px">⚠</span>';
+                setTimeout(() => {
+                    if (iconEl) iconEl.innerHTML = '<span class="status-idle">💬</span>';
+                }, 5000);
+                break;
+            default:
+                iconEl.innerHTML = '<span class="status-idle">💬</span>';
+        }
     },
 
     setActive(chatId) {
@@ -1408,24 +1448,70 @@ const Chat = {
         if (!text && !state.attachments.length) return;
 
         if (state.isStreaming) {
-            // Priority detection: "сейчас", "срочно", "now", "urgent" → push to front
-            const _urgentKw = ['сейчас', 'срочно', 'now', 'urgent', 'немедленно'];
-            const _isUrgent = _urgentKw.some(kw => text.toLowerCase().includes(kw));
-            const queueItem = { text, attachments: [...state.attachments], priority: _isUrgent };
-            if (_isUrgent) {
-                state.messageQueue.unshift(queueItem);
-                Toast.show('⚡ Срочная задача добавлена в начало очереди', 'info');
+            // PATCH14-FE: Classify message → interrupt / append / queue
+            const _lc = text.toLowerCase();
+            const _interruptKw = ['стоп', 'stop', 'срочно', 'urgent', 'прекрати', 'отмени', 'измени', 'переделай', 'немедленно', 'сейчас'];
+            const _appendKw = ['ещё', 'еще', 'добавь', 'также', 'дополнительно', 'плюс '];
+            const _queueKw = ['потом', 'после текущей', 'когда закончишь', 'следующим'];
+            const _isInterrupt = _interruptKw.some(kw => _lc.includes(kw));
+            const _isAppend = !_isInterrupt && _appendKw.some(kw => _lc.includes(kw));
+            const _isQueue = !_isInterrupt && !_isAppend && _queueKw.some(kw => _lc.includes(kw));
+
+            if (_isInterrupt) {
+                // INTERRUPT: stop current task, then send this message as new task
+                Toast.show('⚡ Прерываю текущую задачу...', 'warning');
+                textarea.value = '';
+                UI.autoResize(textarea);
+                const interruptAttachments = [...state.attachments];
+                state.attachments = [];
+                Attachments.renderPreviews();
+                sessionStorage.removeItem('draft_' + state.currentChatId);
+                // Stop current agent, then send new message
+                try {
+                    await API.post('/chats/' + state.currentChatId + '/stop');
+                } catch(e) { console.warn('Stop failed:', e); }
+                // Wait for streaming to finish
+                const _waitStop = () => new Promise(resolve => {
+                    const _check = setInterval(() => {
+                        if (!state.isStreaming) { clearInterval(_check); resolve(); }
+                    }, 200);
+                    setTimeout(() => { clearInterval(_check); resolve(); }, 5000);
+                });
+                await _waitStop();
+                await this._doSend(text, interruptAttachments);
+                return;
+            } else if (_isAppend) {
+                // APPEND: send to backend immediately via API (backend will inject into running loop)
+                Toast.show('📎 Дополнение отправлено агенту', 'info');
+                textarea.value = '';
+                UI.autoResize(textarea);
+                state.attachments = [];
+                Attachments.renderPreviews();
+                sessionStorage.removeItem('draft_' + state.currentChatId);
+                // Show user message in chat
+                const appendMsg = { id: Utils.generateId(), role: 'user', content: text, attachments: [], created_at: new Date().toISOString() };
+                state.messages.push(appendMsg);
+                const appendEl = Messages.render(appendMsg);
+                if (appendEl) $('messages-container').appendChild(appendEl);
+                this.scrollToBottom();
+                // Send to backend - it will be injected into running agent context
+                try {
+                    await API.post('/chats/' + state.currentChatId + '/send', { message: text, mode: state.mode });
+                } catch(e) { console.warn('Append send failed:', e); }
+                return;
             } else {
+                // QUEUE: local queue (default behavior)
+                const queueItem = { text, attachments: [...state.attachments], priority: false };
                 state.messageQueue.push(queueItem);
+                UI.showQueueIndicator(state.messageQueue.length);
+                Toast.show('⏳ Сообщение добавлено в очередь', 'info');
+                sessionStorage.removeItem('draft_' + state.currentChatId);
+                textarea.value = '';
+                UI.autoResize(textarea);
+                state.attachments = [];
+                Attachments.renderPreviews();
+                return;
             }
-            UI.showQueueIndicator(state.messageQueue.length);
-            // Clear draft on queue
-            sessionStorage.removeItem('draft_' + state.currentChatId);
-            textarea.value = '';
-            UI.autoResize(textarea);
-            state.attachments = [];
-            Attachments.renderPreviews();
-            return;
         }
 
         textarea.value = '';
@@ -1468,6 +1554,10 @@ const Chat = {
 
         // Start streaming
         UI.setStreaming(true);
+        // Ensure sidebar spinner is shown after streaming starts
+        if (state.currentChatId) {
+            ChatList.updateActivity(state.currentChatId, 'running');
+        }
         ActivityPanel.show();
         ActivityPanel.setStatus('running');
 
@@ -1497,9 +1587,9 @@ const Chat = {
                         Attachments.setFileStatus(att.id, 'uploading');
                         const fd = new FormData();
                         fd.append('file', att.file, att.name);
-                        const uploadRes = await fetch(API_BASE + '/api/upload', {
+                        const uploadRes = await fetch(API_BASE + '/api/upload', { credentials: 'include',
                             method: 'POST',
-                            headers: { 'Authorization': 'Bearer ' + state.token },
+                            credentials: 'include', headers: { 'Authorization': 'Bearer ' + state.token },
                             body: fd
                         });
                         if (uploadRes.ok) {
@@ -1538,6 +1628,7 @@ const Chat = {
 
             const res = await fetch(API_BASE + '/chats/' + state.currentChatId + '/send', {
                 method: 'POST',
+                credentials: 'include',
                 headers: {
                     'Content-Type': 'application/json',
                     'Authorization': 'Bearer ' + state.token
@@ -2075,7 +2166,9 @@ const Chat = {
                 ActivityPanel.addToGroup('thinking-step', '💭', evt.text || '');
                 break;
             case 'thinking_text': {
-                // Agent reasoning text between tool calls — show in Activity Panel as grey italic
+                // Agent reasoning text between tool calls
+                // NOTE: This text was already streamed as 'content' into msg-bubble,
+                // so we only send it to ActivityPanel, NOT to thinking-container.
                 const _thinkText = (evt.content || evt.text || '').trim();
                 if (_thinkText) {
                     ActivityPanel.addThinkingText(_thinkText);
@@ -2096,6 +2189,7 @@ const Chat = {
             }
             case 'error':
                 ActivityPanel.addLine('error', '❌', evt.message || evt.error || 'Ошибка');
+                if (state.currentChatId) ChatList.updateActivity(state.currentChatId, 'error');
                 break;
             case 'cost':
                 {
@@ -2118,7 +2212,14 @@ const Chat = {
                 if (evt.title) {
                     UI.updateChatTitle(evt.title);
                     const chat = state.chats.find(c => c.id === state.currentChatId);
-                    if (chat) { chat.title = evt.title; ChatList.render(); }
+                    if (chat) { 
+                        chat.title = evt.title; 
+                        ChatList.render();
+                        // Restore spinner after re-render during streaming
+                        if (state.streamingChatId) {
+                            ChatList.updateActivity(state.streamingChatId, 'running');
+                        }
+                    }
                 }
                 break;
         }
@@ -2200,9 +2301,16 @@ const Chat = {
         try {
             const status = await API.get('/chats/' + chatId + '/status');
             if (status.status === 'running') {
-                console.log('[TaskPersist] Running task found for chat', chatId, '- reconnecting...');
-                Toast.show('⚡ Переподключение к задаче...', 'info');
-                this._reconnectSSE(chatId);
+                // Only reconnect if task started within last 10 minutes
+                const startedAt = status.started_at || 0;
+                const ageSeconds = (Date.now() / 1000) - startedAt;
+                if (ageSeconds < 600) {
+                    console.log('[TaskPersist] Running task found for chat', chatId, '- reconnecting...');
+                    Toast.show('⚡ Переподключение к задаче...', 'info');
+                    this._reconnectSSE(chatId);
+                } else {
+                    console.log('[TaskPersist] Task too old (' + Math.round(ageSeconds) + 's), skipping reconnect');
+                }
             }
         } catch (e) {
             // No running task or endpoint not available — that's fine
@@ -2232,9 +2340,9 @@ const Chat = {
             state.streamController = controller;
             state.isStreaming = true;
 
-            const res = await fetch(API_BASE + '/chats/' + chatId + '/reconnect', {
+            const res = await fetch(API_BASE + '/chats/' + chatId + '/reconnect', { credentials: 'include',
                 method: 'GET',
-                headers: { 'Authorization': 'Bearer ' + state.token },
+                credentials: 'include', headers: { 'Authorization': 'Bearer ' + state.token },
                 signal: controller.signal
             });
 
@@ -2329,7 +2437,7 @@ const Chat = {
 
     async autoGenerateTitle(chatId, userMessage) {
         try {
-            const res = await fetch(API_BASE + '/chat/quick', {
+            const res = await fetch(API_BASE + '/chat/quick', { credentials: 'include',
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + state.token },
                 body: JSON.stringify({
@@ -2398,8 +2506,11 @@ const Messages = {
         wrapper.dataset.msgId = msg.id;
         const avatar = el('div', 'msg-avatar', '🤖');
         const body = el('div', 'msg-body');
+        // Thinking container: holds all agent thinking text (persists across content updates)
+        const thinkContainer = el('div', 'thinking-container');
         const bubble = el('div', 'msg-bubble msg-ai');
         bubble.innerHTML = '<span class="typing-indicator"><span class="typing-dot"></span><span class="typing-dot"></span><span class="typing-dot"></span></span>';
+        body.appendChild(thinkContainer);
         body.appendChild(bubble);
         wrapper.appendChild(avatar);
         wrapper.appendChild(body);
@@ -2424,6 +2535,9 @@ const Messages = {
         if (body) {
             body.appendChild(this.renderActions(content));
         }
+        // Clear thinking-container since its content is already in the bubble
+        const _tc = wrapper.querySelector('.thinking-container');
+        if (_tc) _tc.innerHTML = '';
     },
 
     enhanceHtmlBlocks(messageEl) {
@@ -2567,9 +2681,9 @@ const Messages = {
         summary.innerHTML = `
             <div class="task-summary-title">✅ Задача выполнена</div>
             <div class="task-summary-stats">
-                <span class="task-summary-stat">💰 ${Utils.formatCost(evt.cost)}</span>
-                <span class="task-summary-stat">⏱ ${Utils.formatDuration(evt.duration_ms || 0)}</span>
-                <span class="task-summary-stat">🔄 ${evt.iterations || 0} итераций</span>
+                <span class="task-summary-stat">💰 ${Utils.formatCost(evt.cost || state.currentChatCost || 0)}</span>
+                <span class="task-summary-stat">⏱ ${Utils.formatDuration(evt.duration_ms || (state._streamStartTime ? Date.now() - state._streamStartTime : 0))}</span>
+                <span class="task-summary-stat">🔄 ${evt.iterations || state.iterationCount || 0} итераций</span>
             </div>
             ${evt.agents?.length ? `<div class="task-summary-agents">👥 ${evt.agents.map(a => `<span class="agent-badge">${a}</span>`).join('')}</div>` : ''}`;
         body.appendChild(summary);

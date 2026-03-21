@@ -30,7 +30,10 @@ class SSHExecutor:
         """Establish SSH connection."""
         try:
             self.client = paramiko.SSHClient()
-            self.client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            # ══ SECURITY FIX 3: WarningPolicy instead of AutoAddPolicy ══
+            self.client.set_missing_host_key_policy(paramiko.WarningPolicy())
+            import logging
+            logging.getLogger("paramiko").setLevel(logging.WARNING)
 
             connect_kwargs = {
                 "hostname": self.host,

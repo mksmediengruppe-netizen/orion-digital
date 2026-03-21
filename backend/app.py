@@ -20,6 +20,45 @@ import json
 import time
 import uuid
 import hashlib
+import bcrypt
+# ══ SECURITY FIX 7: Fernet encryption for secrets in DB ══
+from cryptography.fernet import Fernet
+
+def _get_fernet():
+    """Get Fernet cipher from ORION_ENCRYPT_KEY env var."""
+    key = os.environ.get("ORION_ENCRYPT_KEY", "")
+    if not key:
+        # Auto-generate and save to .env if missing
+        key = Fernet.generate_key().decode()
+        env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
+        with open(env_path, "a") as ef:
+            ef.write(f"\nORION_ENCRYPT_KEY={key}\n")
+        os.environ["ORION_ENCRYPT_KEY"] = key
+        logger.info("[SECURITY] Generated and saved ORION_ENCRYPT_KEY")
+    return Fernet(key.encode() if isinstance(key, str) else key)
+
+_SECRET_SETTINGS_KEYS = {"ssh_password", "github_token", "n8n_api_key"}
+
+def _encrypt_setting(value: str) -> str:
+    """Encrypt a secret setting value."""
+    if not value or value.startswith("gAAAAA"):
+        return value  # Already encrypted or empty
+    try:
+        return _get_fernet().encrypt(value.encode()).decode()
+    except Exception as e:
+        logger.error(f"[SECURITY] Encryption failed: {e}")
+        return value
+
+def _decrypt_setting(value: str) -> str:
+    """Decrypt a secret setting value."""
+    if not value or not value.startswith("gAAAAA"):
+        return value  # Not encrypted
+    try:
+        return _get_fernet().decrypt(value.encode()).decode()
+    except Exception as e:
+        logger.error(f"[SECURITY] Decryption failed: {e}")
+        return value
+
 import secrets
 import threading
 import zipfile
@@ -132,6 +171,22 @@ _agents_lock = threading.Lock()
 # ══ TASK PERSISTENCE: running tasks buffer for SSE reconnect ══
 # Each entry: {chat_id: {"status": "running"|"done", "events": [...], "started_at": float, "user_id": str}}
 _running_tasks = {}
+
+# ══ TASK CLEANUP: remove completed tasks after delay ══
+import threading as _task_threading
+
+def _cleanup_running_task(chat_id, delay=30):
+    """Remove a completed task from _running_tasks after a delay."""
+    def _do_cleanup():
+        with _tasks_lock:
+            task = _running_tasks.get(chat_id)
+            if task and task.get("status") == "done":
+                _running_tasks.pop(chat_id, None)
+                print(f"[TaskCleanup] Removed completed task for chat {chat_id}")
+    timer = _task_threading.Timer(delay, _do_cleanup)
+    timer.daemon = True
+    timer.start()
+
 _tasks_lock = threading.Lock()
 
 # ══ PATCH 14: Manus-style task interruption / queue / append ══
@@ -142,29 +197,48 @@ _paused_tasks = {}
 _message_queue = {}
 _interrupt_lock = threading.Lock()
 
+# ══ PATCH 14 FIX: Priority order: interrupt > append > queue ══
+# Keywords that INTERRUPT current task (highest priority — always wins)
+_INTERRUPT_KEYWORDS = [
+    "стоп", "stop", "срочно", "прекрати", "отмени", "отмена",
+    "измени", "переделай", "переключись", "брось", "хватит",
+    "не то", "не так", "заново", "сначала", "cancel", "abort"
+]
+# Keywords that APPEND to current task (agent sees on next iteration)
+_APPEND_KEYWORDS = [
+    "добавь к текущей", "также", "ещё", "и ещё", "плюс к этому",
+    "дополнительно", "заодно", "и также", "а ещё", "к этому добавь",
+    "добавь"
+]
 # Keywords that put message INTO QUEUE (agent finishes current first)
 _QUEUE_KEYWORDS = [
     "после текущей", "потом", "когда закончишь", "после того как",
     "когда освободишься", "после завершения", "после этого", "затем",
     "следующей задачей", "следующая задача"
 ]
-# Keywords that APPEND to current task (agent sees on next iteration)
-_APPEND_KEYWORDS = [
-    "добавь к текущей", "также", "ещё", "и ещё", "плюс к этому",
-    "дополнительно", "заодно", "и также", "а ещё", "к этому добавь"
-]
 
 def _classify_interrupt_message(text: str) -> str:
     """Classify incoming message during active task.
-    Returns: 'queue' | 'append' | 'interrupt'
+    Priority: interrupt > append > queue > default(interrupt)
+    Examples:
+      'Стоп, ещё добавь секцию' -> interrupt (стоп wins)
+      'Ещё добавь footer' -> append
+      'Потом сделай сайт' -> queue
     """
     lower = text.lower().strip()
-    for kw in _QUEUE_KEYWORDS:
+    # 1) INTERRUPT keywords have highest priority
+    for kw in _INTERRUPT_KEYWORDS:
         if kw in lower:
-            return "queue"
+            return "interrupt"
+    # 2) APPEND keywords (modify current task)
     for kw in _APPEND_KEYWORDS:
         if kw in lower:
             return "append"
+    # 3) QUEUE keywords (do after current task)
+    for kw in _QUEUE_KEYWORDS:
+        if kw in lower:
+            return "queue"
+    # 4) Default: treat as interrupt (new task replaces current)
     return "interrupt"
 
 # Singletons for new modules
@@ -293,9 +367,9 @@ _DEFAULT_DB = {
         "admin": {
             "id": "admin",
             "email": "ym@mksmedia.ru",
-            "password_hash": hashlib.sha256(
-                os.environ.get("ORION_ADMIN_PASSWORD", secrets.token_hex(16)).encode()
-            ).hexdigest(),  # PATCH 12 fix3: random fallback if env not set (no hardcoded default)
+            "password_hash": bcrypt.hashpw(
+                os.environ.get("ORION_ADMIN_PASSWORD", secrets.token_hex(16)).encode(), bcrypt.gensalt()
+            ).decode(),  # PATCH 12 fix3: random fallback if env not set (no hardcoded default)
             "name": "Администратор",
             "role": "admin",
             "created_at": datetime.now(timezone.utc).isoformat(),
@@ -377,7 +451,10 @@ def require_auth(f):
     """Decorator to require valid session token."""
     @wraps(f)
     def decorated(*args, **kwargs):
-        token = request.headers.get("Authorization", "").replace("Bearer ", "")
+        # ══ SECURITY FIX 2: Check HttpOnly cookie first, then Authorization header ══
+        token = request.cookies.get("orion_token", "")
+        if not token:
+            token = request.headers.get("Authorization", "").replace("Bearer ", "")
         if not token:
             token = request.cookies.get("session_token", "")
         if not token:
@@ -457,16 +534,28 @@ def login():
         return jsonify({"error": lock_msg}), 429
 
     db = db_read()
-    password_hash = hashlib.sha256(password.encode()).hexdigest()
-
+    # ══ SECURITY FIX 1: bcrypt with SHA256 migration ══
     user = None
     user_id = None
     for uid, u in db["users"].items():
-        if u["email"].lower() == email and u["password_hash"] == password_hash:
-            user = u
-            user_id = uid
+        if u["email"].lower() == email:
+            stored_hash = u.get("password_hash", "")
+            if stored_hash.startswith("$2b$") or stored_hash.startswith("$2a$"):
+                # Already bcrypt — use checkpw
+                if bcrypt.checkpw(password.encode(), stored_hash.encode()):
+                    user = u
+                    user_id = uid
+            else:
+                # Legacy SHA256 — check and migrate to bcrypt
+                sha_hash = hashlib.sha256(password.encode()).hexdigest()
+                if stored_hash == sha_hash:
+                    new_hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
+                    u["password_hash"] = new_hash
+                    db_write(db)
+                    logger.info(f"[SECURITY] Migrated password for {email} from SHA256 to bcrypt")
+                    user = u
+                    user_id = uid
             break
-
     if not user:
         _record_failed_login(email)
         return jsonify({"error": "Invalid credentials"}), 401
@@ -483,7 +572,9 @@ def login():
     }
     db_write(db)
 
-    return jsonify({
+    # ══ SECURITY FIX 2: HttpOnly cookie ══
+    from flask import make_response as _make_resp
+    resp_data = {
         "token": token,
         "user": {
             "id": user_id,
@@ -493,9 +584,14 @@ def login():
             "username": user["email"],
             "full_name": user["name"],
             "role": user.get("role", "user"),
-            "settings": user.get("settings", {})
+            "settings": {k: ("***" if k in _SECRET_SETTINGS_KEYS and v else v) for k, v in user.get("settings", {}).items()}
         }
-    })
+    }
+    resp = _make_resp(jsonify(resp_data))
+    resp.set_cookie("orion_token", token,
+        httponly=True, secure=True, samesite="Lax",
+        max_age=86400 * 7, path="/")
+    return resp
 
 
 @app.route("/api/auth/logout", methods=["POST"])
@@ -506,7 +602,11 @@ def logout():
     db = db_read()
     db["sessions"].pop(token, None)
     db_write(db)
-    return jsonify({"ok": True})
+    # ══ SECURITY FIX 2: Clear HttpOnly cookie on logout ══
+    from flask import make_response as _make_resp_logout
+    resp = _make_resp_logout(jsonify({"ok": True}))
+    resp.delete_cookie("orion_token", path="/")
+    return resp
 
 
 @app.route("/api/auth/me", methods=["GET"])
@@ -527,7 +627,7 @@ def get_me():
         "username": _email,
         "full_name": _name,
         "role": user.get("role", "user"),
-        "settings": user.get("settings", {}),
+        "settings": {k: ("***" if k in _SECRET_SETTINGS_KEYS and v else v) for k, v in user.get("settings", {}).items()},
         "total_spent": total_spent,
         "total_spent_rub": round(total_spent * 105, 2),
         "monthly_limit": monthly_limit,
@@ -577,7 +677,11 @@ def update_settings():
     settings = user.get("settings", {})
     for key in allowed_keys:
         if key in data:
-            settings[key] = data[key]
+            # ══ SECURITY FIX 7: Encrypt secret settings ══
+            if key in _SECRET_SETTINGS_KEYS and data[key]:
+                settings[key] = _encrypt_setting(data[key])
+            else:
+                settings[key] = data[key]
 
     user["settings"] = settings
     db["users"][request.user_id] = user
@@ -939,6 +1043,11 @@ def process_uploaded_file(file_storage):
         os.makedirs(extract_dir, exist_ok=True)
         try:
             with zipfile.ZipFile(filepath, 'r') as zf:
+                # ══ SECURITY FIX 5: Zip Slip protection ══
+                for member in zf.namelist():
+                    member_path = os.path.realpath(os.path.join(extract_dir, member))
+                    if not member_path.startswith(os.path.realpath(extract_dir)):
+                        raise ValueError(f"Zip Slip detected: {member}")
                 zf.extractall(extract_dir)
             parts, count = process_directory(extract_dir, filename)
             return f"📦 **Архив: {filename}** ({count} файлов)\n" + "\n".join(parts)
@@ -950,6 +1059,11 @@ def process_uploaded_file(file_storage):
         os.makedirs(extract_dir, exist_ok=True)
         try:
             with tarfile.open(filepath, 'r:*') as tf:
+                # ══ SECURITY FIX 5: Tar Slip protection ══
+                for member in tf.getmembers():
+                    member_path = os.path.realpath(os.path.join(extract_dir, member.name))
+                    if not member_path.startswith(os.path.realpath(extract_dir)):
+                        raise ValueError(f"Tar Slip detected: {member.name}")
                 tf.extractall(extract_dir)
             parts, count = process_directory(extract_dir, filename)
             return f"📦 **Архив: {filename}** ({count} файлов)\n" + "\n".join(parts)
@@ -1385,6 +1499,47 @@ def send_message(chat_id):
     }
     orion_mode = _MODE_NORMALIZE.get(_raw_mode, "turbo_standard")
     
+    # ══ PATCH 14 FIX: Interrupt / Queue / Append for send_message route ══
+    with _tasks_lock:
+        _existing_task = _running_tasks.get(chat_id)
+        _task_is_running = _existing_task and _existing_task.get("status") == "running"
+    if _task_is_running:
+        _msg_type = _classify_interrupt_message(user_message)
+        if _msg_type == "queue":
+            with _interrupt_lock:
+                if chat_id not in _message_queue:
+                    _message_queue[chat_id] = []
+                _message_queue[chat_id].append({
+                    "message": user_message, "mode": orion_mode,
+                    "user_id": request.user_id, "file_content": file_content
+                })
+            logging.info(f"[PATCH14-SEND] chat={chat_id} → QUEUED: {user_message[:60]}")
+            return Response(
+                f"data: {json.dumps({'type': 'queued', 'text': '🕐 В очереди — возьму после текущей задачи'})}\n\n"
+                f"data: {json.dumps({'type': 'done'})}\n\n",
+                mimetype="text/event-stream",
+                headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
+            )
+        elif _msg_type == "append":
+            with _tasks_lock:
+                task_entry = _running_tasks.get(chat_id, {})
+                if "_append_msgs" not in task_entry:
+                    task_entry["_append_msgs"] = []
+                task_entry["_append_msgs"].append(user_message)
+            logging.info(f"[PATCH14-SEND] chat={chat_id} → APPENDED: {user_message[:60]}")
+            return Response(
+                f"data: {json.dumps({'type': 'appended', 'text': '📩 Добавлено к текущей задаче'})}\n\n"
+                f"data: {json.dumps({'type': 'done'})}\n\n",
+                mimetype="text/event-stream",
+                headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
+            )
+        else:  # interrupt
+            with _tasks_lock:
+                if _existing_task:
+                    _existing_task["_interrupt_requested"] = True
+                    _existing_task["_interrupt_msg"] = user_message
+            logging.info(f"[PATCH14-SEND] chat={chat_id} → INTERRUPT: {user_message[:60]}")
+            # Fall through to normal processing — will start new task
     # ═══ АВТОРЕЖИМ: определяем модель по сложности сообщения ═══
     _auto_resolved_mode = None
     if orion_mode == "auto":
@@ -1431,7 +1586,7 @@ def send_message(chat_id):
     ssh_credentials = {
         "host": _ssh_from_request.get("ssh_host") or user_settings.get("ssh_host", ""),
         "username": _ssh_from_request.get("ssh_user") or user_settings.get("ssh_user", "root"),
-        "password": _ssh_from_request.get("ssh_password") or user_settings.get("ssh_password", ""),
+        "password": _ssh_from_request.get("ssh_password") or _decrypt_setting(user_settings.get("ssh_password", "")),
         "port": int(_ssh_from_request.get("ssh_port") or user_settings.get("ssh_port", 22)),
     }
 
@@ -1651,6 +1806,7 @@ def send_message(chat_id):
                 "started_at": time.time(),
                 "user_id": _saved_user_id_pro,
                 "message": user_message[:100],
+                    "events": [],
                 "_queue": _queue_module.Queue(),
             }
         
@@ -1699,6 +1855,9 @@ def send_message(chat_id):
             finally:
                 with _agents_lock:
                     _active_agents.pop(chat_id, None)
+                    # ══ PATCH14-FIX: Cleanup _running_tasks ══
+                    with _tasks_lock:
+                        _running_tasks.pop(chat_id, None)
                 # Save response
                 if full_response:
                     with _tasks_lock:
@@ -1738,6 +1897,7 @@ def send_message(chat_id):
                     task = _running_tasks.get(chat_id)
                     if task:
                         task["status"] = "done"
+                        _cleanup_running_task(chat_id)
                         task["finished_at"] = time.time()
                 if _q:
                     _q.put(None)  # Sentinel: stream ended
@@ -1794,6 +1954,7 @@ def send_message(chat_id):
                 "started_at": time.time(),
                 "user_id": _saved_user_id,
                 "message": user_message[:100],
+                    "events": [],
             }
 
         # Send metadata — show routed model info
@@ -1882,6 +2043,15 @@ def send_message(chat_id):
             with _agents_lock:
                 _active_agents[chat_id] = agent
 
+            # ══ PATCH14-FIX: Register in _running_tasks for lite_agent ══
+            with _tasks_lock:
+                _running_tasks[chat_id] = {
+                    "status": "running",
+                    "started_at": time.time(),
+                    "user_id": _saved_user_id,
+                    "message": user_message[:100],
+                    "events": [],
+                }
             try:
                 for event in agent.run_stream(user_message, history, file_content):
                     # Safety: convert dict events to SSE string format
@@ -1902,6 +2072,9 @@ def send_message(chat_id):
             finally:
                 with _agents_lock:
                     _active_agents.pop(chat_id, None)
+                    # ══ PATCH14-FIX: Cleanup _running_tasks ══
+                    with _tasks_lock:
+                        _running_tasks.pop(chat_id, None)
 
         elif is_agent_task and has_ssh:
             # ═══ AGENT MODE: Real execution with SSH/Browser/Files ═══
@@ -1995,6 +2168,15 @@ def send_message(chat_id):
             with _agents_lock:
                 _active_agents[chat_id] = agent
 
+            # ══ PATCH14-FIX: Register in _running_tasks so queue/append/interrupt works ══
+            with _tasks_lock:
+                _running_tasks[chat_id] = {
+                    "status": "running",
+                    "started_at": time.time(),
+                    "user_id": _saved_user_id,
+                    "message": user_message[:100],
+                    "events": [],
+                }
             try:
                 # ══ PATCH 4: Multi-agent SSE error handling ══
                 if use_parallel:
@@ -2042,6 +2224,9 @@ def send_message(chat_id):
             finally:
                 with _agents_lock:
                     _active_agents.pop(chat_id, None)
+                    # ══ PATCH14-FIX: Cleanup _running_tasks ══
+                    with _tasks_lock:
+                        _running_tasks.pop(chat_id, None)
 
         else:
             # ═══ CHAT MODE: Smart model routing by complexity ═══
@@ -2473,6 +2658,7 @@ def send_message(chat_id):
             task = _running_tasks.get(chat_id)
             if task:
                 task["status"] = "done"
+                _cleanup_running_task(chat_id)
                 task["finished_at"] = time.time()
 
     # ══ TURBO BACKGROUND THREAD: agent runs in background, SSE reads from queue ══
@@ -2492,6 +2678,7 @@ def send_message(chat_id):
                 "started_at": time.time(),
                 "user_id": _saved_user_id,
                 "message": user_message[:100],
+                    "events": [],
                 "_queue": _turbo_q,
             }
 
@@ -2719,6 +2906,47 @@ def direct_chat():
     }
     orion_mode = _MODE_NORMALIZE.get(_raw_mode, "turbo_standard")
     
+    # ══ PATCH 14 FIX: Interrupt / Queue / Append for send_message route ══
+    with _tasks_lock:
+        _existing_task = _running_tasks.get(chat_id)
+        _task_is_running = _existing_task and _existing_task.get("status") == "running"
+    if _task_is_running:
+        _msg_type = _classify_interrupt_message(user_message)
+        if _msg_type == "queue":
+            with _interrupt_lock:
+                if chat_id not in _message_queue:
+                    _message_queue[chat_id] = []
+                _message_queue[chat_id].append({
+                    "message": user_message, "mode": orion_mode,
+                    "user_id": request.user_id, "file_content": file_content
+                })
+            logging.info(f"[PATCH14-SEND] chat={chat_id} → QUEUED: {user_message[:60]}")
+            return Response(
+                f"data: {json.dumps({'type': 'queued', 'text': '🕐 В очереди — возьму после текущей задачи'})}\n\n"
+                f"data: {json.dumps({'type': 'done'})}\n\n",
+                mimetype="text/event-stream",
+                headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
+            )
+        elif _msg_type == "append":
+            with _tasks_lock:
+                task_entry = _running_tasks.get(chat_id, {})
+                if "_append_msgs" not in task_entry:
+                    task_entry["_append_msgs"] = []
+                task_entry["_append_msgs"].append(user_message)
+            logging.info(f"[PATCH14-SEND] chat={chat_id} → APPENDED: {user_message[:60]}")
+            return Response(
+                f"data: {json.dumps({'type': 'appended', 'text': '📩 Добавлено к текущей задаче'})}\n\n"
+                f"data: {json.dumps({'type': 'done'})}\n\n",
+                mimetype="text/event-stream",
+                headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
+            )
+        else:  # interrupt
+            with _tasks_lock:
+                if _existing_task:
+                    _existing_task["_interrupt_requested"] = True
+                    _existing_task["_interrupt_msg"] = user_message
+            logging.info(f"[PATCH14-SEND] chat={chat_id} → INTERRUPT: {user_message[:60]}")
+            # Fall through to normal processing — will start new task
     # ═══ АВТОРЕЖИМ: определяем модель по сложности сообщения ═══
     _auto_resolved_mode = None
     if orion_mode == "auto":
@@ -2891,7 +3119,7 @@ def direct_chat():
     ssh_credentials = {
         "host": _ssh_from_request.get("ssh_host") or user_settings.get("ssh_host", ""),
         "username": _ssh_from_request.get("ssh_user") or user_settings.get("ssh_user", "root"),
-        "password": _ssh_from_request.get("ssh_password") or user_settings.get("ssh_password", ""),
+        "password": _ssh_from_request.get("ssh_password") or _decrypt_setting(user_settings.get("ssh_password", "")),
         "port": int(_ssh_from_request.get("ssh_port") or user_settings.get("ssh_port", 22)),
     }
     # Parse SSH from message text (e.g. "root@1.2.3.4 password123 do something")
@@ -3084,6 +3312,9 @@ def direct_chat():
         finally:
             with _agents_lock:
                 _active_agents.pop(chat_id, None)
+                # ══ PATCH14-FIX: Cleanup _running_tasks ══
+                with _tasks_lock:
+                    _running_tasks.pop(chat_id, None)
 
             # Сохраняем ответ ассистента
             if assistant_content:
@@ -3303,7 +3534,7 @@ def admin_create_user():
     db["users"][user_id] = {
         "id": user_id,
         "email": email,
-        "password_hash": hashlib.sha256(password.encode()).hexdigest(),
+        "password_hash": bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode(),
         "name": name,
         "role": role,
         "created_at": datetime.now(timezone.utc).isoformat(),

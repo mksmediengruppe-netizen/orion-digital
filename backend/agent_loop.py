@@ -948,6 +948,15 @@ AGENT_SYSTEM_PROMPT = """Ты — ORION Digital v1.0, автономный AI-и
 16. Если нужны SSH-данные и не указаны — спроси у пользователя.
 17. Работай пошагово: планируй → выполняй → проверяй → итерируй.
 18. Отвечай на русском языке.
+19. ВСЕГДА форматируй свои мысли и ответы в Markdown:
+    - Разделяй абзацы пустой строкой (двойной перенос)
+    - Используй **жирный** для ключевых терминов
+    - Используй заголовки ## и ### для структуры
+    - Используй `код` для технических терминов
+    - Используй списки для перечислений
+    - Код оборачивай в ```язык блоки
+20. ПЕРЕД каждым действием ОБЯЗАТЕЛЬНО пиши что ты думаешь и планируешь делать. Каждая мысль — отдельный абзац.
+21. Пиши свои рассуждения подробно: что анализируешь, какие варианты рассматриваешь, почему выбрал конкретный подход.
 19. При ошибке — анализируй причину и пробуй исправить (до 3 попыток).
 20. ВСЕГДА давай ссылки на скачивание: [Скачать filename](download_url)
 21. Для ДЛИННЫХ ответов (отчёты, анализ, техзадания, чек-листы) — ВСЕГДА создавай файл через generate_file (.docx или .pdf) И давай краткое резюме в тексте.
@@ -1273,7 +1282,11 @@ ftp_list, store_memory, recall_memory, update_scratchpad, task_complete.
 - Для записи больших файлов используй file_write — он работает через SFTP и не зависит от shell-экранирования.
 - ВАЖНО: file_write имеет ограничение на размер контента в одном вызове (~8000 символов). Если HTML/CSS файл больше — ОБЯЗАТЕЛЬНО используй ssh_execute с Python heredoc: ssh_execute('python3 -c "import base64,os; open(path,\'wb\').write(base64.b64decode(encoded))"') или записывай файл частями через несколько ssh_execute с >> оператором.
 - НИКОГДА не пытайся передать весь большой HTML (>200 строк) в одном вызове file_write — он будет обрезан и вернёт ошибку.
-"""
+
+ФОРМАТИРОВАНИЕ:
+- ВСЕГДА используй Markdown: абзацы через двойной перенос, **жирный**, заголовки ##, `код`, списки
+- ПЕРЕД каждым действием пиши что думаешь и планируешь (отдельным абзацем)
+- Рассуждай подробно: анализ, варианты, выбранный подход"""
 
 # Pro modes use minimal prompt
 PRO_MODES = {"pro_standard", "pro_premium", "architect"}
@@ -3213,12 +3226,20 @@ class AgentLoop:
         os.makedirs(GENERATED_DIR, exist_ok=True)
         
         # Security: check for forbidden/dangerous operations
+        # ══ SECURITY FIX 6: Hardened sandbox patterns ══
         FORBIDDEN_PATTERNS = [
-            'os.system(', 'subprocess.call(', 'subprocess.Popen(',
-            'shutil.rmtree(', '__import__(\'os\').system',
+            'os.system(', 'os.popen(', 'os.exec',
+            'subprocess.call(', 'subprocess.Popen(', 'subprocess.run(',
+            'shutil.rmtree(', 'shutil.rmdir(',
+            '__import__(', 'importlib.import_module(',
             'eval(', 'exec(', 'compile(',
-            'open(\'/etc', 'open(\"/etc',
+            'open("/etc', "open('/etc",
+            'open("/var', "open('/var",
+            'open("/proc', "open('/proc",
+            'open("/sys', "open('/sys",
             'rm -rf', 'chmod 777', 'curl ', 'wget ',
+            ':import', '__builtins__',
+            'socket.socket(', 'ctypes.',
         ]
         for pattern in FORBIDDEN_PATTERNS:
             if pattern in code:
@@ -3305,16 +3326,21 @@ os.chdir("{GENERATED_DIR}")
         os.makedirs(GENERATED_DIR, exist_ok=True)
 
         # Security: block dangerous operations
+        # ══ SECURITY FIX 6: Hardened sandbox patterns ══
         FORBIDDEN_PATTERNS = [
             '__import__("os").system', "__import__('os').system",
-            'os.system(', 'os.popen(',
+            '__import__(', 'importlib.import_module(',
+            'os.system(', 'os.popen(', 'os.exec',
             'subprocess.call(', 'subprocess.Popen(', 'subprocess.run(',
             'shutil.rmtree(', 'shutil.rmdir(',
             'eval(', 'exec(', 'compile(',
             'open("/etc', "open('/etc",
+            'open("/var', "open('/var",
             'open("/proc', "open('/proc",
+            'open("/sys', "open('/sys",
             'rm -rf', 'chmod 777',
             ':import', '__builtins__',
+            'socket.socket(', 'ctypes.',
         ]
         for pattern in FORBIDDEN_PATTERNS:
             if pattern in code:
