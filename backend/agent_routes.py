@@ -1069,7 +1069,9 @@ def send_message(chat_id):
                     model=agent_model,
                     api_key=OPENROUTER_API_KEY,
                     api_url=OPENROUTER_BASE_URL,
-                    ssh_credentials=ssh_credentials
+                    ssh_credentials=ssh_credentials,
+                    orion_mode=orion_mode,
+                    session_id=chat_id
                 )
             elif _orch_plan_send and _orch_plan_send.get("mode") == "multi_sequential":
                 # BUG-8 FIX: Orchestrator requested multi_sequential → use MultiAgentLoop
@@ -1077,7 +1079,9 @@ def send_message(chat_id):
                     model=agent_model,
                     api_key=OPENROUTER_API_KEY,
                     api_url=OPENROUTER_BASE_URL,
-                    ssh_credentials=ssh_credentials
+                    ssh_credentials=ssh_credentials,
+                    orion_mode=orion_mode,
+                    session_id=chat_id
                 )
                 logging.info(f"[send_message] BUG-8 FIX: Using MultiAgentLoop for multi_sequential plan")
             else:

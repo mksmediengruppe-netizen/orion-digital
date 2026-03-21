@@ -1822,5 +1822,21 @@
     "started_at": "2026-03-21T19:18:47.047850+00:00",
     "updated_at": "2026-03-21T19:18:47.047881+00:00",
     "resumed_count": 0
+  },
+  "326a6a59": {
+    "chat_id": "326a6a59",
+    "project_id": "326a6a59",
+    "user_id": "admin",
+    "task": "Создай лендинг для блогера dimydiv. Сервер 45.67.57.175 root 00!DS467PKs0. Деплой в /var/www/html/dimydiv/\n\nДИЗАЙН: тёмный фон #0a0a1a, неоновый синий #00d4ff, фиолет #7b2fff, шрифт Montserrat, glassm",
+    "status": "active",
+    "decisions": [],
+    "files_modified": [],
+    "commands_executed": [],
+    "errors": [],
+    "key_facts": [],
+    "summary": "",
+    "started_at": "2026-03-21T19:28:22.719672+00:00",
+    "updated_at": "2026-03-21T19:28:22.719701+00:00",
+    "resumed_count": 0
   }
 }
