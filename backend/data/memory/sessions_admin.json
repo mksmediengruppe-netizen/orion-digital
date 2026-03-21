@@ -1758,5 +1758,21 @@
     "started_at": "2026-03-21T16:25:20.512667+00:00",
     "updated_at": "2026-03-21T16:34:57.648998+00:00",
     "resumed_count": 0
+  },
+  "c832919f": {
+    "chat_id": "c832919f",
+    "project_id": "c832919f",
+    "user_id": "admin",
+    "task": "Создай лендинг для блогера dimydiv.\n\nДоступы к серверу:\nСервер: 45.67.57.175\nПользователь: root\nПароль: 00!DS467PKs0\n\nДеплой в /var/www/html/dimydiv/\n\nДИЗАЙН: тёмный фон #0a0a1a, неоновый синий #00d4f",
+    "status": "resumed",
+    "decisions": [],
+    "files_modified": [],
+    "commands_executed": [],
+    "errors": [],
+    "key_facts": [],
+    "summary": "",
+    "started_at": "2026-03-21T18:55:16.179948+00:00",
+    "updated_at": "2026-03-21T18:55:36.183188+00:00",
+    "resumed_count": 1
   }
 }

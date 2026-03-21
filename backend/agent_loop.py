@@ -75,7 +75,7 @@ _tool_sandbox = get_tool_sandbox()
 
 # ═══ TASK 7: Extracted modules ═══
 from tools_schema import TOOLS_SCHEMA
-from prompts import AgentState, AGENT_SYSTEM_PROMPT, AGENT_SYSTEM_PROMPT_PRO, get_system_prompt
+from prompts import AgentState, AGENT_SYSTEM_PROMPT, AGENT_SYSTEM_PROMPT_PRO, get_system_prompt, PRO_MODES
 
 try:
     from intent_clarifier import clarify as clarify_intent, format_clarification_for_user
