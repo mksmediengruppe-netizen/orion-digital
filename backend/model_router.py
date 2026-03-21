@@ -98,15 +98,15 @@ MODES = {
         "description": "Два мозга: MiniMax думает и пишет код, MiMo действует (SSH/браузер/деплой).",
         "max_cost_usd": 2.0,
         "agents": {
-            "intent_clarifier": "minimax",   # MiniMax: понимает задачу
-            "orchestrator":     "minimax",   # MiniMax: планирует
-            "designer":         "minimax",   # MiniMax: HTML/CSS/дизайн
+            "intent_clarifier": "gemini_flash",   # MiniMax: понимает задачу
+            "orchestrator":     "gemini_flash",   # MiniMax: планирует
+            "designer":         "gemini_flash",   # MiniMax: HTML/CSS/дизайн
             "developer":        "mimo",      # MiMo: пишет и деплоит код
             "devops":           "mimo",      # MiMo: SSH, сервер, nginx
             "integrator":       "mimo",      # MiMo: API интеграции
-            "tester":           "minimax",   # MiniMax: анализирует тесты
-            "analyst":          "minimax",   # MiniMax: анализ данных
-            "copywriter":       "minimax",   # MiniMax: тексты
+            "tester":           "gemini_flash",   # MiniMax: анализирует тесты
+            "analyst":          "gemini_flash",   # MiniMax: анализ данных
+            "copywriter":       "gemini_flash",   # MiniMax: тексты
             "code_reviewer":    None         # нет в Turbo
         }
     },
@@ -150,15 +150,15 @@ MODES = {
         "description": "Opus планирует, MiniMax кодит, MiMo деплоит. Один вызов Opus $0.10-0.30, остальное дёшево.",
         "max_cost_usd": 3.0,
         "agents": {
-            "intent_clarifier": "minimax",   # MiniMax: понимает задачу
+            "intent_clarifier": "gemini_flash",   # MiniMax: понимает задачу
             "orchestrator":     "opus",      # Opus: планирует ОДИН РАЗ
-            "designer":         "minimax",   # MiniMax: HTML/CSS/дизайн
-            "developer":        "minimax",   # MiniMax: пишет код
+            "designer":         "gemini_flash",   # MiniMax: HTML/CSS/дизайн
+            "developer":        "gemini_flash",   # MiniMax: пишет код
             "devops":           "mimo",      # MiMo: SSH, сервер, nginx
             "integrator":       "mimo",      # MiMo: API интеграции
             "tester":           "mimo",      # MiMo: тестирование
-            "analyst":          "minimax",   # MiniMax: анализ
-            "copywriter":       "minimax",   # MiniMax: тексты
+            "analyst":          "gemini_flash",   # MiniMax: анализ
+            "copywriter":       "gemini_flash",   # MiniMax: тексты
             "code_reviewer":    None         # нет в Smart Turbo
         }
     }
@@ -202,7 +202,7 @@ def get_model_for_agent(agent_role: str, mode: str = DEFAULT_MODE) -> Dict[str, 
     # Если агент не назначен в этом режиме (например code_reviewer в Turbo)
     if model_key is None:
         logger.debug(f"Agent '{agent_role}' not active in mode '{mode}', using minimax fallback")
-        model_key = "minimax"  # PATCH fix: minimax as default fallback
+        model_key = "gemini_flash"  # PATCH fix: minimax as default fallback
 
     model_cfg = MODELS[model_key].copy()
     model_cfg["model_key"] = model_key
@@ -332,9 +332,9 @@ def select_model(query: str, variant: str = "standard",
                 return m
 
     result = get_model_for_agent(agent_role, mode)
-    result["tier"] = result.get("model_key", "minimax")  # PATCH fix
+    result["tier"] = result.get("model_key", "gemini_flash")  # PATCH fix
     result["complexity"] = classify_complexity(query, history)
-    result["fallback_chain"] = _get_fallback_chain(result.get("model_key", "minimax"))  # PATCH fix
+    result["fallback_chain"] = _get_fallback_chain(result.get("model_key", "gemini_flash"))  # PATCH fix
     return result
 
 
@@ -344,13 +344,13 @@ def _get_fallback_chain(model_key: str) -> List[str]:
         "sonnet":   ["anthropic/claude-sonnet-4.6", "google/gemini-2.5-pro", "minimax/minimax-m2.5"],
         "gemini":   ["google/gemini-2.5-pro", "anthropic/claude-sonnet-4.6", "minimax/minimax-m2.5"],
         "minimax_fallback": ["minimax/minimax-m2.5", "xiaomi/mimo-v2-flash", "anthropic/claude-sonnet-4.6"],
-        "minimax":  ["minimax/minimax-m2.5", "minimax/minimax-m2.7", "xiaomi/mimo-v2-flash"],
+        "gemini_flash":  ["minimax/minimax-m2.5", "minimax/minimax-m2.7", "xiaomi/mimo-v2-flash"],
         "mimo":     ["xiaomi/mimo-v2-flash", "xiaomi/mimo-v2-omni", "minimax/minimax-m2.5"],  # PATCH fix
     }
-    return chains.get(model_key, chains["minimax"])  # PATCH fix: minimax as default chain
+    return chains.get(model_key, chains["gemini_flash"])  # PATCH fix: minimax as default chain
 
 
-def get_fallback_model(current_model: str, tier: str = "minimax") -> Optional[str]:
+def get_fallback_model(current_model: str, tier: str = "gemini_flash") -> Optional[str]:
     """Получить следующую fallback модель."""
     chain = _get_fallback_chain(tier)
     try:
@@ -359,7 +359,7 @@ def get_fallback_model(current_model: str, tier: str = "minimax") -> Optional[st
             return chain[idx + 1]
     except ValueError:
         pass
-    return MODELS["minimax"]["id"]  # PATCH fix: minimax as ultimate fallback
+    return MODELS["gemini_flash"]["id"]  # PATCH fix: minimax as ultimate fallback
 
 
 # ══════════════════════════════════════════════════════════════
@@ -398,7 +398,7 @@ def reset_session_cost(session_id: str):
 
 
 def log_cost(user_id: str, model_id: str, tokens_in: int, tokens_out: int,
-             cost_usd: float, tier: str = "minimax", complexity: int = 2,
+             cost_usd: float, tier: str = "gemini_flash", complexity: int = 2,
              tool_name: str = None, success: bool = True,
              session_id: str = None, mode: str = DEFAULT_MODE,
              agent_role: str = None):

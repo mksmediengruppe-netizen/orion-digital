@@ -234,7 +234,7 @@ PROJECT_TEMPLATES = [
             {"name": "Бэкенд", "agents": ["developer"], "model": "mimo", "description": "API, корзина, заказы"},
             {"name": "Деплой", "agents": ["devops"], "model": "mimo", "description": "Деплой на сервер"},
             {"name": "SEO", "agents": ["copywriter"], "model": "sonnet", "description": "Мета-теги, тексты, sitemap"},
-            {"name": "Тест", "agents": ["tester"], "model": "minimax", "description": "Проверка работы"}
+            {"name": "Тест", "agents": ["tester"], "model": "gemini_flash", "description": "Проверка работы"}
         ]
     },
     {
