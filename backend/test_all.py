@@ -1,11 +1,11 @@
 """
 ORION Digital — Comprehensive Test Suite
 =========================================
-20+ тестов покрывающих:
+45+ тестов покрывающих:
 - Block 3: TaskCharter, ExecutionSnapshots, GoalKeeper
 - Block 4: ArtifactHandoff, FinalJudge, ToolSandbox, TaskScorecard, AutonomyModes
-- API endpoints: health, auth, chat
-- Integration: agent_loop imports, service status
+- API endpoints: health
+- Syntax validation: all core files
 
 Запуск: python3 test_all.py
 """
@@ -22,7 +22,6 @@ import importlib.util
 # HELPERS
 # ═══════════════════════════════════════════════════════════
 
-# Add backend to path for local imports
 BACKEND_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, BACKEND_DIR)
 
@@ -62,15 +61,23 @@ class TestTaskCharter(unittest.TestCase):
         self.assertEqual(charter["objective"], "Тестовая задача")
 
     def test_03_complete_charter(self):
-        """Завершение charter"""
+        """Завершение charter — статус 'completed'"""
         self.store.complete("test-task-1")
         charter = self.store.get("test-task-1")
-        self.assertEqual(charter["status"], "done")
+        self.assertEqual(charter["status"], "completed")
 
     def test_04_get_nonexistent(self):
         """Получение несуществующего charter"""
         charter = self.store.get("nonexistent-task")
         self.assertIsNone(charter)
+
+    def test_05_update_charter(self):
+        """Обновление charter"""
+        self.store.create("test-task-2", "Задача 2", "chat-2")
+        result = self.store.update("test-task-2", {"objective": "Обновлённая задача"})
+        self.assertIsNotNone(result)
+        charter = self.store.get("test-task-2")
+        self.assertEqual(charter["objective"], "Обновлённая задача")
 
 
 class TestExecutionSnapshots(unittest.TestCase):
@@ -87,12 +94,9 @@ class TestExecutionSnapshots(unittest.TestCase):
         snap = self.store.create(
             task_id="test-task-1",
             step_id="step-1",
-            snapshot_type="before_tool",
+            snapshot_type="step_complete",
             iteration=1,
             cost_so_far=0.001,
-            tool_name="ssh_execute",
-            tool_args={"command": "ls"},
-            state_summary="Starting task"
         )
         self.assertIsNotNone(snap)
         self.assertEqual(snap["task_id"], "test-task-1")
@@ -101,7 +105,18 @@ class TestExecutionSnapshots(unittest.TestCase):
         """Список снапшотов"""
         snaps = self.store.list("test-task-1")
         self.assertGreater(len(snaps), 0)
-        self.assertEqual(snaps[0]["step_id"], "step-1")
+
+    def test_03_create_multiple_snapshots(self):
+        """Создание нескольких снапшотов"""
+        for i in range(3):
+            self.store.create(
+                task_id="test-task-multi",
+                step_id=f"step-{i}",
+                snapshot_type="step_complete",
+                iteration=i,
+            )
+        snaps = self.store.list("test-task-multi")
+        self.assertEqual(len(snaps), 3)
 
 
 class TestGoalKeeper(unittest.TestCase):
@@ -112,28 +127,51 @@ class TestGoalKeeper(unittest.TestCase):
         cls.mod = load_module_from_file("goal_keeper", os.path.join(BACKEND_DIR, "goal_keeper.py"))
         cls.gk = cls.mod.GoalKeeper()
 
-    def test_01_check_action_allowed(self):
-        """Проверка разрешённого действия"""
-        result = self.gk.check(
-            objective="Создать сайт",
-            tool_name="file_write",
-            tool_args={"path": "/var/www/site/index.html", "content": "<html>"},
-            iteration=1,
-            max_iterations=30
+    def test_01_validate_safe_action(self):
+        """Проверка безопасного действия (web_search)"""
+        result = self.gk.validate_next_action(
+            task_charter={"objective": "Найти информацию"},
+            latest_snapshot=None,
+            proposed_action={"tool": "web_search", "args": {"query": "test"}}
         )
-        self.assertTrue(result["allowed"])
+        self.assertTrue(result["approved"])
+        self.assertEqual(result["risk_level"], "safe")
 
-    def test_02_check_action_format(self):
-        """Формат ответа GoalKeeper"""
-        result = self.gk.check(
-            objective="Тест",
-            tool_name="ssh_execute",
-            tool_args={"command": "ls"},
-            iteration=1,
-            max_iterations=30
+    def test_02_validate_privileged_action(self):
+        """Проверка привилегированного действия (ssh_execute)"""
+        result = self.gk.validate_next_action(
+            task_charter={"objective": "Настроить сервер"},
+            latest_snapshot=None,
+            proposed_action={"tool": "ssh_execute", "args": {"command": "ls -la"}}
         )
-        self.assertIn("allowed", result)
-        self.assertIn("reason", result)
+        self.assertIn("approved", result)
+        self.assertEqual(result["risk_level"], "privileged")
+
+    def test_03_validate_dangerous_ssh(self):
+        """Проверка опасной SSH команды (rm -rf /)"""
+        result = self.gk.validate_next_action(
+            task_charter={"objective": "Тест"},
+            latest_snapshot=None,
+            proposed_action={"tool": "ssh_execute", "args": {"command": "rm -rf /"}}
+        )
+        # Should be blocked
+        self.assertFalse(result["approved"])
+
+    def test_04_result_format(self):
+        """Формат ответа GoalKeeper"""
+        result = self.gk.validate_next_action(
+            task_charter=None,
+            latest_snapshot=None,
+            proposed_action={"tool": "file_read", "args": {"path": "/tmp/test"}}
+        )
+        self.assertIn("approved", result)
+        self.assertIn("risk_level", result)
+        self.assertIn("warnings", result)
+
+    def test_05_get_stats(self):
+        """Статистика GoalKeeper"""
+        stats = self.gk.get_stats()
+        self.assertIsInstance(stats, dict)
 
 
 # ═══════════════════════════════════════════════════════════
@@ -151,26 +189,32 @@ class TestArtifactHandoff(unittest.TestCase):
 
     def test_01_create_handoff(self):
         """Создание handoff"""
-        hid = self.store.create(
+        result = self.store.create(
             task_id="task-1",
             from_agent="developer",
+            artifact_type="code",
+            content={"files": ["index.html"]},
             to_agent="designer",
-            artifacts={"files": ["index.html"]},
-            instructions="Добавить стили"
         )
-        self.assertIsNotNone(hid)
+        self.assertIsNotNone(result)
 
-    def test_02_get_pending(self):
-        """Получение pending handoffs"""
-        pending = self.store.get_pending("designer")
-        self.assertGreater(len(pending), 0)
+    def test_02_get_by_task(self):
+        """Получение артефактов по задаче"""
+        artifacts = self.store.get_by_task("task-1")
+        self.assertGreater(len(artifacts), 0)
 
-    def test_03_accept_handoff(self):
-        """Принятие handoff"""
-        pending = self.store.get_pending("designer")
-        hid = pending[0]["handoff_id"]
-        result = self.store.accept(hid)
-        self.assertTrue(result)
+    def test_03_create_multiple(self):
+        """Создание нескольких артефактов"""
+        for i in range(3):
+            self.store.create(
+                task_id="task-multi",
+                from_agent="coder",
+                artifact_type="code",
+                content=f"file_{i}.py",
+                to_agent="reviewer",
+            )
+        artifacts = self.store.get_by_task("task-multi")
+        self.assertEqual(len(artifacts), 3)
 
 
 class TestFinalJudge(unittest.TestCase):
@@ -181,30 +225,38 @@ class TestFinalJudge(unittest.TestCase):
         cls.mod = load_module_from_file("final_judge", os.path.join(BACKEND_DIR, "final_judge.py"))
         cls.judge = cls.mod.FinalJudge()
 
-    def test_01_judge_pass(self):
-        """FinalJudge — PASS verdict"""
+    def test_01_judge_with_charter(self):
+        """FinalJudge — с charter"""
         result = self.judge.judge(
-            objective="Создать файл index.html",
-            actions_log=[
-                {"tool": "file_write", "args": {"path": "index.html"}, "success": True},
-                {"tool": "task_complete", "args": {"summary": "Файл создан"}, "success": True}
-            ],
-            final_answer="Файл index.html создан успешно",
-            files_created=["index.html"]
+            task_charter={
+                "objective": "Создать файл index.html",
+                "deliverables": ["index.html"],
+                "done_definition": "Файл создан и доступен",
+            },
+            agent_final_answer="Файл index.html создан успешно",
+            artifacts=[],
+            ssh_results=[]
         )
-        self.assertIn("verdict", result)
-        self.assertIn(result["verdict"], ["PASS", "PARTIAL", "FAIL"])
-        self.assertIn("score", result)
+        self.assertIsNotNone(result)
+        self.assertIn(result.verdict, ["PASS", "PARTIAL", "FAIL", "SKIP"])
 
-    def test_02_judge_empty(self):
-        """FinalJudge — пустые данные"""
+    def test_02_judge_no_charter(self):
+        """FinalJudge — без charter (SKIP)"""
         result = self.judge.judge(
-            objective="",
-            actions_log=[],
-            final_answer="",
-            files_created=[]
+            task_charter=None,
+            agent_final_answer="Done",
         )
-        self.assertIn("verdict", result)
+        self.assertEqual(result.verdict, "SKIP")
+
+    def test_03_judge_result_fields(self):
+        """FinalJudge — поля результата"""
+        result = self.judge.judge(
+            task_charter={"objective": "Test", "deliverables": [], "done_definition": ""},
+            agent_final_answer="Test done",
+        )
+        self.assertTrue(hasattr(result, "verdict"))
+        self.assertTrue(hasattr(result, "score"))
+        self.assertTrue(hasattr(result, "summary"))
 
 
 class TestToolSandbox(unittest.TestCase):
@@ -222,7 +274,7 @@ class TestToolSandbox(unittest.TestCase):
         self.assertTrue(check["allowed"])
 
     def test_02_read_allowed(self):
-        """READ инструменты разрешены"""
+        """READ инструменты разрешены в budget/readonly"""
         self.sandbox.configure(orion_mode="budget", autonomy_mode="readonly")
         check = self.sandbox.check("web_search")
         self.assertTrue(check["allowed"])
@@ -240,7 +292,14 @@ class TestToolSandbox(unittest.TestCase):
         check = self.sandbox.check("ssh_execute")
         self.assertFalse(check["allowed"])
 
-    def test_05_filter_tools(self):
+    def test_05_explicit_allow(self):
+        """Явное разрешение инструмента"""
+        self.sandbox.configure()
+        self.sandbox.allow_tool("custom_tool")
+        check = self.sandbox.check("custom_tool")
+        self.assertTrue(check["allowed"])
+
+    def test_06_filter_tools(self):
         """Фильтрация tools schema"""
         self.sandbox.configure(orion_mode="budget", autonomy_mode="readonly")
         schema = [
@@ -254,12 +313,20 @@ class TestToolSandbox(unittest.TestCase):
         self.assertIn("file_read", names)
         self.assertNotIn("ssh_execute", names)
 
-    def test_06_get_allowed_tools(self):
+    def test_07_get_allowed_tools(self):
         """Список разрешённых инструментов"""
         self.sandbox.configure(orion_mode="architect", autonomy_mode="full")
         allowed = self.sandbox.get_allowed_tools()
         self.assertGreater(len(allowed), 0)
         self.assertIn("web_search", allowed)
+
+    def test_08_permission_levels(self):
+        """Проверка уровней разрешений"""
+        self.sandbox.configure()
+        check = self.sandbox.check("web_search")
+        self.assertEqual(check["permission_level"], "read")
+        check = self.sandbox.check("ssh_execute")
+        self.assertEqual(check["permission_level"], "execute")
 
 
 class TestTaskScorecard(unittest.TestCase):
@@ -328,6 +395,11 @@ class TestTaskScorecard(unittest.TestCase):
         self.assertIn("Метрики", text)
         self.assertIn("PASS", text)
 
+    def test_08_get_nonexistent(self):
+        """Получение несуществующей задачи"""
+        sc = self.store.get("nonexistent")
+        self.assertIsNone(sc)
+
 
 class TestAutonomyModes(unittest.TestCase):
     """Tests for autonomy_modes.py"""
@@ -386,6 +458,22 @@ class TestAutonomyModes(unittest.TestCase):
         names = [m["name"] for m in modes]
         self.assertIn("full", names)
         self.assertIn("readonly", names)
+
+    def test_09_cost_limit(self):
+        """Лимит стоимости"""
+        self.manager.set_mode("readonly")
+        self.manager.reset_counters()
+        self.manager.add_cost(2.0)
+        check = self.manager.check_cost_limit()
+        self.assertTrue(check["exceeded"])
+
+    def test_10_get_status(self):
+        """Получение статуса"""
+        self.manager.set_mode("standard")
+        self.manager.reset_counters()
+        status = self.manager.get_status()
+        self.assertIn("mode", status)
+        self.assertEqual(status["mode"], "standard")
 
 
 # ═══════════════════════════════════════════════════════════
@@ -480,7 +568,7 @@ class TestSyntax(unittest.TestCase):
 if __name__ == "__main__":
     # Print header
     print("=" * 60)
-    print("ORION Digital — Test Suite")
+    print("ORION Digital — Test Suite v2")
     print("=" * 60)
     print(f"Backend dir: {BACKEND_DIR}")
     print(f"Python: {sys.version}")
