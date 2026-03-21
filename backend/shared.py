@@ -358,8 +358,6 @@ def _calc_cost(tokens_in, tokens_out, model_name):
         'xiaomi/mimo-v2-omni':  (0.15, 0.75),
         # deepseek kept as fallback for cost calculation
         'deepseek/deepseek-v3.2': (0.27, 1.10),  # fallback 3rd level
-        # removed: openai/gpt-4.1-mini (not used)
-        # removed: openai/gpt-4.1-nano (not used)
     }
     in_price, out_price = PRICING.get(model_name, (3.00, 15.00))
     return round((tokens_in / 1_000_000) * in_price + (tokens_out / 1_000_000) * out_price, 6)
