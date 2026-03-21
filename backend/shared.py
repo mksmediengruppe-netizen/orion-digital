@@ -155,6 +155,7 @@ init_db()
 # DB_FILE removed in TASK 5 — SQLite is the only storage
 # DB_FILE = os.path.join(DATA_DIR, "database.json")  # LEGACY
 _lock = threading.Lock()
+_USE_SQLITE = True  # All storage is SQLite (TASK 5)
 
 # Active agent loops (for stop functionality)
 _active_agents = {}

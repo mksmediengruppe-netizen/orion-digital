@@ -429,3 +429,15 @@ class TaskScorecard:
             if i < len(row):
                 d[c] = row[i]
         return d
+
+
+# ── Singleton factory ──
+_singleton_store = None
+
+def get_scorecard_store() -> TaskScorecard:
+    """Return singleton TaskScorecard instance."""
+    global _singleton_store
+    if _singleton_store is None:
+        _singleton_store = TaskScorecard()
+    return _singleton_store
+
