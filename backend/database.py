@@ -124,11 +124,101 @@ def init_db():
         CREATE INDEX IF NOT EXISTS idx_chats_user ON chats(user_id);
         CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON audit_log(timestamp);
         CREATE INDEX IF NOT EXISTS idx_audit_user ON audit_log(user_id);
+        CREATE TABLE IF NOT EXISTS task_charters (
+            task_id TEXT PRIMARY KEY,
+            chat_id TEXT NOT NULL,
+            project_id TEXT DEFAULT '',
+            version INTEGER DEFAULT 1,
+            status TEXT DEFAULT 'active',
+            primary_objective TEXT NOT NULL,
+            current_objective TEXT NOT NULL,
+            success_criteria_json TEXT DEFAULT '[]',
+            constraints_json TEXT DEFAULT '[]',
+            deliverables_json TEXT DEFAULT '[]',
+            done_definition TEXT DEFAULT '',
+            current_plan_json TEXT DEFAULT '[]',
+            current_step_id TEXT DEFAULT '',
+            completed_steps_json TEXT DEFAULT '[]',
+            failed_steps_json TEXT DEFAULT '[]',
+            amendments_json TEXT DEFAULT '[]',
+            total_iterations INTEGER DEFAULT 0,
+            total_cost REAL DEFAULT 0.0,
+            created_at REAL,
+            updated_at REAL
+        );
+
+        CREATE TABLE IF NOT EXISTS execution_snapshots (
+            id TEXT PRIMARY KEY,
+            task_id TEXT NOT NULL,
+            step_id TEXT DEFAULT '',
+            snapshot_type TEXT DEFAULT 'iteration',
+            iteration INTEGER DEFAULT 0,
+            phase TEXT DEFAULT '',
+            agent_role TEXT DEFAULT '',
+            completed_actions_json TEXT DEFAULT '[]',
+            artifacts_created_json TEXT DEFAULT '[]',
+            pending_actions_json TEXT DEFAULT '[]',
+            blockers_json TEXT DEFAULT '[]',
+            active_constraints_json TEXT DEFAULT '[]',
+            last_user_amendment TEXT DEFAULT '',
+            next_expected_step TEXT DEFAULT '',
+            cost_so_far REAL DEFAULT 0.0,
+            tokens_used INTEGER DEFAULT 0,
+            created_at REAL
+        );
+
+        CREATE TABLE IF NOT EXISTS task_scorecards (
+            task_id TEXT PRIMARY KEY,
+            chat_id TEXT DEFAULT '',
+            user_id TEXT DEFAULT '',
+            objective TEXT DEFAULT '',
+            status TEXT DEFAULT 'running',
+            started_at REAL,
+            finished_at REAL,
+            duration_seconds REAL DEFAULT 0.0,
+            total_iterations INTEGER DEFAULT 0,
+            total_tokens INTEGER DEFAULT 0,
+            total_cost REAL DEFAULT 0.0,
+            tool_calls_json TEXT DEFAULT '{}',
+            errors_json TEXT DEFAULT '[]',
+            final_verdict TEXT DEFAULT '',
+            final_score REAL DEFAULT 0.0,
+            quality_notes TEXT DEFAULT ''
+        );
+
+        CREATE TABLE IF NOT EXISTS artifact_handoffs (
+            artifact_id TEXT PRIMARY KEY,
+            task_id TEXT NOT NULL,
+            chat_id TEXT DEFAULT '',
+            from_agent TEXT DEFAULT '',
+            to_agent TEXT DEFAULT '',
+            artifact_type TEXT DEFAULT 'data',
+            content TEXT DEFAULT '',
+            metadata_json TEXT DEFAULT '{}',
+            status TEXT DEFAULT 'pending',
+            created_at REAL,
+            received_at REAL,
+            processed_at REAL,
+            error_msg TEXT DEFAULT ''
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_charter_chat ON task_charters(chat_id);
+        CREATE INDEX IF NOT EXISTS idx_charter_status ON task_charters(status);
+        CREATE INDEX IF NOT EXISTS idx_snapshot_task ON execution_snapshots(task_id, created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_scorecard_chat ON task_scorecards(chat_id);
+        CREATE INDEX IF NOT EXISTS idx_scorecard_user ON task_scorecards(user_id);
+        CREATE INDEX IF NOT EXISTS idx_scorecard_status ON task_scorecards(status);
+        CREATE INDEX IF NOT EXISTS idx_artifact_task ON artifact_handoffs(task_id);
+        CREATE INDEX IF NOT EXISTS idx_artifact_chat ON artifact_handoffs(chat_id);
+        CREATE INDEX IF NOT EXISTS idx_artifact_status ON artifact_handoffs(status);
     """)
     conn.commit()
 
     # Migrate from JSON if exists and SQLite is empty
     _migrate_from_json(conn)
+    
+    # Migrate from separate .db files into unified database
+    _migrate_separate_dbs()
 
 
 def _migrate_from_json(conn):
@@ -399,6 +489,68 @@ def save_db(db):
             logger.error(f"save_db failed: {e}")
             raise
 
+
+
+
+def _migrate_separate_dbs():
+    """One-time migration from separate .db files into unified database.sqlite."""
+    import glob
+    conn = _get_conn()
+    
+    migrations = {
+        "task_charters.db": ("task_charters", "task_charters"),
+        "execution_snapshots.db": ("execution_snapshots", "execution_snapshots"),
+        "task_scorecards.db": ("task_scorecards", "task_scorecards"),
+        "artifact_handoffs.db": ("artifact_handoffs", "artifact_handoffs"),
+    }
+    
+    for db_file, (table_name, source_table) in migrations.items():
+        db_path = os.path.join(DATA_DIR, db_file)
+        if not os.path.exists(db_path):
+            continue
+        
+        # Check if already migrated (data exists in unified DB)
+        count = conn.execute(f"SELECT COUNT(*) FROM {table_name}").fetchone()[0]
+        if count > 0:
+            logger.info(f"Skipping migration of {db_file}: {count} rows already in unified DB")
+            continue
+        
+        try:
+            src = sqlite3.connect(db_path)
+            src.row_factory = sqlite3.Row
+            rows = src.execute(f"SELECT * FROM {source_table}").fetchall()
+            
+            if not rows:
+                src.close()
+                logger.info(f"Skipping {db_file}: empty")
+                continue
+            
+            # Get column names from source
+            cols = [desc[0] for desc in src.execute(f"SELECT * FROM {source_table} LIMIT 1").description]
+            placeholders = ", ".join(["?"] * len(cols))
+            col_names = ", ".join(cols)
+            
+            for row in rows:
+                values = [row[c] for c in cols]
+                try:
+                    conn.execute(
+                        f"INSERT OR IGNORE INTO {table_name} ({col_names}) VALUES ({placeholders})",
+                        values
+                    )
+                except Exception as e:
+                    logger.warning(f"Row migration error in {db_file}: {e}")
+            
+            conn.commit()
+            src.close()
+            
+            # Rename old file as backup
+            backup_path = db_path + ".migrated.bak"
+            os.rename(db_path, backup_path)
+            logger.info(f"Migrated {len(rows)} rows from {db_file} → database.sqlite, old file renamed to .bak")
+            
+        except Exception as e:
+            logger.error(f"Migration of {db_file} failed: {e}")
+            conn.rollback()
 
 def close_db():
     """Close thread-local connection."""
