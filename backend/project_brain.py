@@ -92,19 +92,16 @@ class ProjectBrain:
         if row is None:
             return None
         d = dict(row)
-        # Parse JSON fields
-        for key in d:
-            if key.endswith("_json") and isinstance(d[key], str):
-                try:
-                    d[key.replace("_json", "")] = json.loads(d[key])
-                except (json.JSONDecodeError, TypeError):
-                    d[key.replace("_json", "")] = []
-                del_key = key  # will clean up below
-        # Clean up _json keys
         clean = {}
-        for k, v in d.items():
-            if not k.endswith("_json"):
-                clean[k] = v
+        for key in list(d.keys()):
+            if key.endswith("_json") and isinstance(d[key], str):
+                clean_key = key[:-5]  # remove _json suffix
+                try:
+                    clean[clean_key] = json.loads(d[key])
+                except (json.JSONDecodeError, TypeError):
+                    clean[clean_key] = [] if clean_key != "tech_stack" else {}
+            else:
+                clean[key] = d[key]
         return clean
 
     # ═══════════════════════════════════════════
