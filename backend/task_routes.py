@@ -85,7 +85,8 @@ def create_chat():
         "variant": user_settings.get("variant", "premium"),
         "model_used": "",
         "files": [],
-        "agent_actions": []
+        "agent_actions": [],
+        "orion_mode": data.get("mode", "turbo-basic")
     }
 
     db["chats"][chat_id] = chat
