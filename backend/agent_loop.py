@@ -5179,18 +5179,20 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);
                     except Exception as _v6_err:
                         logger.debug(f"PATCH6 auto-verify error: {_v6_err}")
 
-                    # ═══ BLOCK 4: FinalJudge — independent verification ═══
+                    # ═══ BLOCK 4: FinalJudge — MANDATORY GATE before task_complete ═══
+                    _fj_gate_passed = True  # default: allow if no judge
                     if hasattr(self, '_final_judge') and self._final_judge:
                         try:
+                            _fj_charter = None
+                            if hasattr(self, '_charter_store') and self._current_task_id:
+                                _fj_charter = self._charter_store.get(self._current_task_id)
                             _fj_verdict = self._final_judge.judge(
-                                objective=str(user_message)[:500],
-                                actions_log=getattr(self, 'actions_log', [])[-10:],
-                                final_answer=summary[:1000],
-                                files_created=[],
+                                charter=_fj_charter,
+                                final_answer=summary,
+                                actions_log=self.actions_log[-30:]
                             )
-                            _fj_v = _fj_verdict.get("verdict", "")
+                            _fj_v = _fj_verdict.get("verdict", "SKIP")
                             _fj_s = float(_fj_verdict.get("score", 0))
-                            # Store on self so scorecard.finish can access them reliably
                             self._last_fj_verdict = _fj_v
                             self._last_fj_score = _fj_s
                             logger.info(f"[BLOCK4] FinalJudge: {_fj_v} score={_fj_s}")
@@ -5200,8 +5202,35 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);
                                 "score": _fj_s,
                                 "details": _fj_verdict.get("details", "")
                             })
+                            # ── GATE: If FAIL and retries left → reject task_complete ──
+                            _fj_retries = getattr(self, '_fj_retry_count', 0)
+                            if _fj_v == "FAIL" and _fj_retries < 2:
+                                self._fj_retry_count = _fj_retries + 1
+                                _fj_failed = _fj_verdict.get("failed_criteria", [])
+                                _fj_details = _fj_verdict.get("details", "Quality check failed")
+                                _correction_msg = (
+                                    f"⚠️ FinalJudge REJECTED task_complete (attempt {_fj_retries + 1}/2).\n"
+                                    f"Verdict: {_fj_v} (score: {_fj_s:.2f})\n"
+                                    f"Failed criteria: {'; '.join(_fj_failed[:5]) if _fj_failed else _fj_details}\n"
+                                    f"Fix the issues and call task_complete again."
+                                )
+                                messages.append({
+                                    "role": "tool",
+                                    "tool_call_id": tool_id,
+                                    "content": json.dumps({"error": _correction_msg})
+                                })
+                                logger.warning(f"[BLOCK4] FinalJudge GATE: FAIL → retry {_fj_retries + 1}")
+                                yield self._sse({
+                                    "type": "final_judge_retry",
+                                    "attempt": _fj_retries + 1,
+                                    "reason": _correction_msg
+                                })
+                                _fj_gate_passed = False
                         except Exception as _fj_err:
-                            logger.debug(f"[BLOCK4] FinalJudge error: {_fj_err}")
+                            logger.warning(f"[BLOCK4] FinalJudge error (non-blocking): {_fj_err}")
+                    # ── If gate failed, skip all post-complete logic and continue loop ──
+                    if not _fj_gate_passed:
+                        continue
                     # ═══ BLOCK 4: TaskScorecard — finish ═══
                     if hasattr(self, '_scorecard_store') and self._scorecard_store:
                         try:
