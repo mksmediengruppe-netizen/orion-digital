@@ -49,7 +49,7 @@ PLANNER_SYSTEM_PROMPT = """Ты — проджект-менеджер AI-ком�
 
 ПРАВИЛА:
 1. Разбивай на фазы. Если агенты независимы — parallel: true.
-2. Designer для дизайна. В режиме smart_turbo/turbo — model: minimax. В режиме pro — model: sonnet.
+2. Designer для дизайна. В режиме smart_turbo/turbo — model: gemini_flash. В режиме pro — model: sonnet.
 3. После деплоя ВСЕГДА ставь Tester.
 4. Если нужны доступы и пользователь ИХ НЕ ДАЛ — укажи в ask_user.
    НО: если пользователь УЖЕ дал логин/пароль/доступы в сообщении — НЕ спрашивай повторно, СРАЗУ запускай агента!
@@ -60,7 +60,7 @@ PLANNER_SYSTEM_PROMPT = """Ты — проджект-менеджер AI-ком�
 КОНТЕКСТ: {project_context}
 
 ОТВЕТ — строго JSON:
-{{"understanding":"что понял","mode":"single|multi_sequential|multi_parallel","ask_user":null,"phases":[{{"name":"Фаза","agents":["designer"],"parallel":false,"description":"Что делать","model":"mimo|minimax|sonnet|opus","requires_ssh":false,"expected_output":"html_file|code_file|deployed_site|report"}}],"primary_model":"minimax","primary_agent":"designer","requires_ssh":false,"requires_api_keys":[],"estimated_time":"2-5 мин","warnings":[]}}"""
+{{"understanding":"что понял","mode":"single|multi_sequential|multi_parallel","ask_user":null,"phases":[{{"name":"Фаза","agents":["designer"],"parallel":false,"description":"Что делать","model":"mimo|gemini_flash|sonnet|opus","requires_ssh":false,"expected_output":"html_file|code_file|deployed_site|report"}}],"primary_model":"gemini_flash","primary_agent":"designer","requires_ssh":false,"requires_api_keys":[],"estimated_time":"2-5 мин","warnings":[]}}"""
 
 AGENT_PROMPTS = {
     "designer": """Ты — ведущий веб-дизайнер ORION Digital.
@@ -317,7 +317,7 @@ class Orchestrator:
 
         if self._is_simple_chat(msg):
             return {"mode":"chat","phases":[{"name":"Ответ","agents":["developer"],"model":"minimax"}],
-                    "primary_model":"minimax","primary_agent":"developer","understanding":"Чат","ask_user":None}
+                    "primary_model":"gemini_flash","primary_agent":"developer","understanding":"Чат","ask_user":None}
 
         # Фича 8: распознаём шаблонные запросы и возвращаем готовый план
         template_plan = self._match_template(msg, message)
@@ -474,7 +474,7 @@ class Orchestrator:
         messages = [{"role":"system","content":system},{"role":"user","content":f"Задача: {message}"}]
 
         try:
-            response = self.call_llm(messages, model="minimax/minimax-m2.5")  # PATCH fix: real model ID
+            response = self.call_llm(messages, model="google/gemini-2.5-flash")  # PATCH fix: real model ID
             logger.info(f"[Orchestrator] LLM raw response: {response[:3000] if response else 'EMPTY'}")
             plan = self._parse_json(response)
             logger.info(f"[Orchestrator] Parsed plan: {plan}")
@@ -600,8 +600,8 @@ def get_model_for_agent(agent_key, orion_mode="turbo_standard", task_hint=""):
         _hands_agents = {"devops", "integrator", "tester"}
         if _ak in _hands_agents:
             return "xiaomi/mimo-v2-flash"
-        # BRAIN agents (дизайн, код) → MiniMax
-        return "minimax/minimax-m2.5"
+        # BRAIN agents (дизайн, код) → Gemini Flash
+        return "google/gemini-2.5-flash"
     # ── DUAL-BRAIN: Turbo режимы используют MiniMax + MiMo ──
     if orion_mode in ("turbo_standard", "turbo_premium"):
         _ak = agent_key.lower().strip()  # normalize to lowercase
@@ -611,7 +611,7 @@ def get_model_for_agent(agent_key, orion_mode="turbo_standard", task_hint=""):
         if _ak in _hands_agents:
             return "xiaomi/mimo-v2-flash"  # MiMo для операций
         else:
-            return "minimax/minimax-m2.5"  # MiniMax для мышления
+            return "google/gemini-2.5-flash"  # Gemini Flash для мышления
     if agent_key=="designer": return MODEL_MAP["sonnet"]  # Sonnet делает красивый HTML/CSS
     if agent_key=="copywriter": return MODEL_MAP["sonnet"]  # ПАТЧ W2-3
     if agent_key=="analyst" and "pro" in orion_mode and "premium" in orion_mode: return MODEL_MAP["sonnet"]
@@ -630,7 +630,7 @@ def format_plan_sse(plan):
     return {"type":"task_plan","understanding":plan.get("understanding",""),"mode":plan.get("mode","single"),
             "steps":[{"name":p.get("name",""),"agents":p.get("agents",[]),"parallel":p.get("parallel",False),
             "status":"pending","model":p.get("model","mimo")} for p in plan.get("phases",[])],
-            "total_phases":len(plan.get("phases",[])),"primary_model":plan.get("primary_model","minimax"),
+            "total_phases":len(plan.get("phases",[])),"primary_model":plan.get("primary_model","gemini_flash"),
             "requires_ssh":plan.get("requires_ssh",False),"ask_user":plan.get("ask_user"),
             "warnings":plan.get("warnings",[])}
 
