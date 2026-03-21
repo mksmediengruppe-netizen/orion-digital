@@ -171,13 +171,13 @@ def select_primary_model(intent: str, message: str = "") -> str:
       design / лендинг / сайт / страница / дизайн / UI / HTML / CSS / вёрстка / макет / баннер
         → gemini
       deploy / деплой / сервер / nginx / docker / SSL / SSH
-        → deepseek
+        → mimo  (hands: SSH, деплой, интеграции)
       code / скрипт / API / бэкенд / парсер / бот / функция
-        → deepseek
-      plan / архитектура / стратегия / план / проектирование
+        → mimo  (hands: пишет и деплоит код)
+      план / архитектура / стратегия / план / проектирование
         → sonnet
       всё остальное
-        → deepseek
+        → minimax  (brain: думает, анализирует)
     """
     import re as _re
     msg_lower = message.lower()
@@ -221,12 +221,12 @@ def select_primary_model(intent: str, message: str = "") -> str:
         return "sonnet"
 
     if intent == "deploy" or any(kw in msg_lower for kw in DEPLOY_KEYWORDS):
-        return "deepseek"
+        return "mimo"  # PATCH fix: hands for deploy/SSH
 
     if intent == "code" or _has_code_kw(msg_lower):
-        return "deepseek"
+        return "mimo"  # PATCH fix: hands for code execution
 
-    return "deepseek"
+    return "minimax"  # PATCH fix: minimax as default brain
 
 
 # ══════════════════════════════════════════════════════════════

@@ -4,9 +4,11 @@ Model Router — ORION Digital v2.0
 3 режима: Turbo (MiniMax+MiMo), Pro (Sonnet), Architect (Opus).
 
 Модели:
-  deepseek → worker  (код, SSH, DevOps, интеграции)
+  minimax  → brain   (думает, пишет код, дизайн, тесты, аналитика)
+  mimo     → hands   (SSH, FTP, браузер, деплой — действия на сервере)
   gemini   → designer (HTML/CSS, UI/UX, SVG)
-  sonnet   → brain   (общение, планирование, code review)
+  sonnet   → brain-pro (общение, планирование, code review)
+  deepseek → fallback (резервная модель, 3-й уровень)
 
 Режимы:
   turbo_standard  — MiniMax думает, MiMo действует (быстро и дёшево)
@@ -114,14 +116,14 @@ MODES = {
         "description": "Профессиональное планирование. Sonnet для оркестрации и code review.",
         "max_cost_usd": 10.0,
         "agents": {
-            "intent_clarifier": "deepseek",
+            "intent_clarifier": "minimax",   # MiniMax: понимает задачу
             "orchestrator":     "sonnet",    # Pro планирование
             "designer":         "gemini",
-            "developer":        "deepseek",
-            "devops":           "deepseek",
-            "integrator":       "deepseek",
-            "tester":           "deepseek",
-            "analyst":          "deepseek",
+            "developer":        "mimo",      # MiMo: пишет и деплоит код
+            "devops":           "mimo",      # MiMo: SSH, сервер, nginx
+            "integrator":       "mimo",      # MiMo: API интеграции
+            "tester":           "minimax",   # MiniMax: анализирует тесты
+            "analyst":          "minimax",   # MiniMax: анализ данных
             "copywriter":       "sonnet",    # SEO копирайтинг
             "code_reviewer":    "sonnet"     # Pro code review
         }
@@ -134,10 +136,10 @@ MODES = {
             "intent_clarifier": "opus",
             "orchestrator":     "opus",
             "designer":         "gemini",
-            "developer":        "deepseek",
-            "devops":           "deepseek",
-            "integrator":       "deepseek",
-            "tester":           "deepseek",
+            "developer":        "mimo",      # MiMo: пишет и деплоит код
+            "devops":           "mimo",      # MiMo: SSH, сервер, nginx
+            "integrator":       "mimo",      # MiMo: API интеграции
+            "tester":           "minimax",   # MiniMax: анализирует тесты
             "analyst":          "opus",
             "copywriter":       "sonnet",
             "code_reviewer":    "opus"
@@ -182,8 +184,8 @@ def get_model_for_agent(agent_role: str, mode: str = DEFAULT_MODE) -> Dict[str, 
 
     # Если агент не назначен в этом режиме (например code_reviewer в Turbo)
     if model_key is None:
-        logger.debug(f"Agent '{agent_role}' not active in mode '{mode}', using deepseek fallback")
-        model_key = "deepseek"
+        logger.debug(f"Agent '{agent_role}' not active in mode '{mode}', using minimax fallback")
+        model_key = "minimax"  # PATCH fix: minimax as default fallback
 
     model_cfg = MODELS[model_key].copy()
     model_cfg["model_key"] = model_key
@@ -313,22 +315,22 @@ def select_model(query: str, variant: str = "standard",
                 return m
 
     result = get_model_for_agent(agent_role, mode)
-    result["tier"] = result.get("model_key", "deepseek")
+    result["tier"] = result.get("model_key", "minimax")  # PATCH fix
     result["complexity"] = classify_complexity(query, history)
-    result["fallback_chain"] = _get_fallback_chain(result.get("model_key", "deepseek"))
+    result["fallback_chain"] = _get_fallback_chain(result.get("model_key", "minimax"))  # PATCH fix
     return result
 
 
 def _get_fallback_chain(model_key: str) -> List[str]:
     """Цепочка fallback моделей."""
     chains = {
-        "sonnet":   ["anthropic/claude-sonnet-4.6", "google/gemini-2.5-pro", "openai/gpt-4.1-mini"],
-        "gemini":   ["google/gemini-2.5-pro", "anthropic/claude-sonnet-4.6", "openai/gpt-4.1-mini"],
-        "deepseek": ["deepseek/deepseek-v3.2", "openai/gpt-4.1-mini", "anthropic/claude-sonnet-4.6"],
-        "minimax":  ["minimax/minimax-m2.5", "minimax/minimax-m2.7", "openai/gpt-4.1-mini"],
-        "mimo":     ["xiaomi/mimo-v2-flash", "xiaomi/mimo-v2-omni", "openai/gpt-4.1-mini"],
+        "sonnet":   ["anthropic/claude-sonnet-4.6", "google/gemini-2.5-pro", "minimax/minimax-m2.5"],
+        "gemini":   ["google/gemini-2.5-pro", "anthropic/claude-sonnet-4.6", "minimax/minimax-m2.5"],
+        "deepseek": ["deepseek/deepseek-v3.2", "minimax/minimax-m2.5", "anthropic/claude-sonnet-4.6"],
+        "minimax":  ["minimax/minimax-m2.5", "minimax/minimax-m2.7", "deepseek/deepseek-v3.2"],
+        "mimo":     ["xiaomi/mimo-v2-flash", "xiaomi/mimo-v2-omni", "minimax/minimax-m2.5"],  # PATCH fix
     }
-    return chains.get(model_key, chains["deepseek"])
+    return chains.get(model_key, chains["minimax"])  # PATCH fix: minimax as default chain
 
 
 def get_fallback_model(current_model: str, tier: str = "deepseek") -> Optional[str]:
@@ -340,7 +342,7 @@ def get_fallback_model(current_model: str, tier: str = "deepseek") -> Optional[s
             return chain[idx + 1]
     except ValueError:
         pass
-    return MODELS["deepseek"]["id"]
+    return MODELS["minimax"]["id"]  # PATCH fix: minimax as ultimate fallback
 
 
 # ══════════════════════════════════════════════════════════════

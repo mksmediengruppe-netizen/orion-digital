@@ -49,7 +49,7 @@ class MemoryConfig:
 
     # ── Embeddings ──
     EMBEDDING_MODEL = "paraphrase-multilingual-MiniLM-L12-v2"
-    EMBEDDING_DIM = 384
+    EMBEDDING_DIM = 384           # paraphrase-multilingual-MiniLM-L12-v2 outputs 384 dims
     EMBEDDING_FALLBACK_DIM = 512  # TF-IDF fallback
     USE_NEURAL_EMBEDDINGS = True  # False = TF-IDF fallback
 

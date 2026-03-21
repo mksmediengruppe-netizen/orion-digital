@@ -63,34 +63,16 @@
         <!-- Mode Selector -->
         <div class="sidebar-section">
             <div class="section-label">Режим</div>
-            <div class="mode-grid">
-                <button class="mode-btn active" data-mode="turbo_basic">
-                    <span class="mode-icon">⚡</span>
-                    <span class="mode-name">Turbo</span>
-                    <span class="mode-tier">Обычный</span>
-                </button>
-                <button class="mode-btn" data-mode="turbo_premium">
-                    <span class="mode-icon">⚡</span>
-                    <span class="mode-name">Turbo</span>
-                    <span class="mode-tier">Премиум</span>
-                </button>
-                <button class="mode-btn" data-mode="pro_basic">
-                    <span class="mode-icon">🚀</span>
-                    <span class="mode-name">Pro</span>
-                    <span class="mode-tier">Обычный</span>
-                </button>
-                <button class="mode-btn" data-mode="pro_premium">
-                    <span class="mode-icon">🚀</span>
-                    <span class="mode-name">Pro</span>
-                    <span class="mode-tier">Премиум</span>
-                </button>
-                <button class="mode-btn" data-mode="architect">
-                    <span class="mode-name">Architect</span>
-                    <span class="mode-badge elite">OPUS</span>
-                </button>
+            <div class="mode-dropdown-wrap" style="position:relative;">
+                <select id="mode-select" class="mode-select-dropdown" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--border,#e5e7eb);background:var(--bg-secondary,#f9fafb);font-size:13px;cursor:pointer;color:var(--text-primary,#111);appearance:none;-webkit-appearance:none;background-image:url('data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%2212%22 height=%2212%22 viewBox=%220 0 24 24%22 fill=%22none%22 stroke=%22%23666%22 stroke-width=%222%22><polyline points=%226 9 12 15 18 9%22/></svg>');background-repeat:no-repeat;background-position:right 10px center;padding-right:28px;">
+                    <option value="turbo_standard" title="MiniMax думает, MiMo действует. Быстро и дёшево. Лимит $3">⚡ Turbo — быстро, $3 лимит</option>
+                    <option value="pro_standard" title="Sonnet для оркестрации и code review. Лимит $5">🚀 Pro Standard — $5 лимит</option>
+                    <option value="pro_premium" title="Gemini Pro для дизайна + Sonnet для копирайтинга. Лимит $5">🚀 Pro Premium — $5 лимит</option>
+                    <option value="architect" title="Claude Opus для сложных задач. Архитектура, аудит, ТЗ. Лимит $15">🏛️ Architect — Opus, $15 лимит</option>
+                </select>
             </div>
-            <div class="mode-description" id="mode-description">
-                Быстрые ответы · DeepSeek V3 · Экономичный
+            <div class="mode-description" id="mode-description" style="font-size:11px;color:var(--text-secondary,#888);margin-top:6px;line-height:1.4;">
+                MiniMax думает, MiMo действует · Лимит $3
             </div>
             <!-- ПАТЧ 8: Тогл верификации -->
             <div class="verification-toggle" style="margin-top: 8px; display: flex; align-items: center; gap: 8px; padding: 4px 0;">
@@ -170,7 +152,7 @@
             </div>
             <div class="topbar-meta">
                 <span class="intent-badge" id="intent-badge">Общение · Быстро</span>
-                <span class="model-badge" id="model-badge">DeepSeek V3</span>
+                <span class="model-badge" id="model-badge" style="display:none;"></span>
             </div>
             <div class="topbar-actions">
                 <button class="btn-icon" id="btn-templates" title="Шаблоны проектов" style="font-size:15px">📋</button>
@@ -180,6 +162,10 @@
             </div>
         </div>
 
+        <!-- Phase Indicator (pipeline phases above chat) -->
+        <div class="pipeline-phases hidden" id="pipeline-phases" style="display:none;padding:8px 16px;background:var(--bg-secondary,#f9fafb);border-bottom:1px solid var(--border,#e5e7eb);overflow-x:auto;white-space:nowrap;">
+            <div class="pipeline-phases-inner" id="pipeline-phases-inner" style="display:inline-flex;align-items:center;gap:8px;font-size:12px;"></div>
+        </div>
         <!-- Messages -->
         <div class="messages-wrap" id="messages-wrap">
             <!-- Messages Container (welcome screen rendered by JS) -->

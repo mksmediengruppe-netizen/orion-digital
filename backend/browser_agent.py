@@ -902,14 +902,33 @@ class BrowserAgent:
                             '[class*="captcha"], [id*="captcha"], iframe[src*="recaptcha"], iframe[src*="hcaptcha"]'
                         )""")
                         if has_captcha:
-                            return {
-                                "success": False,
-                                "error": "Обнаружена CAPTCHA. Требуется ввод пользователя.",
-                                "need_user_takeover": True,
-                                "reason": "captcha",
-                                "screenshot": screenshot,
-                                "url": url_after
-                            }
+                            # PATCH 7: Try auto-solve captcha before asking user
+                            logger.info('[Captcha] Captcha detected in smart_login, attempting auto-solve')
+                            captcha_result = self.solve_captcha(page)
+                            if captcha_result.get('solved'):
+                                logger.info(f'[Captcha] Auto-solved: {captcha_result}')
+                                # Re-submit form after solving
+                                try:
+                                    page.keyboard.press('Enter')
+                                    try:
+                                        page.wait_for_load_state('networkidle', timeout=10000)
+                                    except Exception:
+                                        page.wait_for_timeout(4000)
+                                    url_after = page.url
+                                    login_success = url_after != url_before
+                                    screenshot = _take_screenshot_safe(page)
+                                except Exception:
+                                    pass
+                            if not captcha_result.get('solved') or not login_success:
+                                return {
+                                    "success": False,
+                                    "error": "Обнаружена CAPTCHA. Автоматическое решение не удалось.",
+                                    "need_user_takeover": True,
+                                    "reason": "captcha",
+                                    "captcha_solve_result": captcha_result,
+                                    "screenshot": screenshot,
+                                    "url": url_after
+                                }
                         if has_error:
                             return {
                                 "success": False,
@@ -934,6 +953,156 @@ class BrowserAgent:
 
         except Exception as e:
             return {"success": False, "error": str(e)}
+
+    # ══════════════════════════════════════════════════════════════════
+    # ██ PATCH 7: RUCAPTCHA — автоматическое решение капчи ██
+    # ══════════════════════════════════════════════════════════════════
+
+    def solve_captcha(self, page) -> dict:
+        """
+        PATCH 7: Автоматически определить и решить капчу на странице.
+        Поддерживает: reCAPTCHA v2/v3, hCaptcha, ImageCaptcha.
+        API ключ берётся через get_setting('rucaptcha_api_key').
+        """
+        try:
+            # Получить API ключ из настроек
+            try:
+                from app import get_setting as _get_setting
+                api_key = _get_setting('rucaptcha_api_key')
+            except Exception:
+                api_key = os.environ.get('RUCAPTCHA_API_KEY', '')
+
+            if not api_key:
+                logger.warning('[Captcha] rucaptcha_api_key not set, skipping captcha solve')
+                return {'solved': False, 'reason': 'no_api_key'}
+
+            page_url = page.url
+
+            # 1. Проверить reCAPTCHA v2/v3
+            try:
+                sitekey = page.evaluate(
+                    "document.querySelector('[data-sitekey]')?.getAttribute('data-sitekey')"
+                )
+            except Exception:
+                sitekey = None
+
+            if sitekey:
+                logger.info(f'[Captcha] reCAPTCHA detected, sitekey={sitekey[:20]}...')
+                try:
+                    from python_rucaptcha.re_captcha import ReCaptcha
+                    result = ReCaptcha(
+                        rucaptcha_key=api_key,
+                        websiteURL=page_url,
+                        websiteKey=sitekey,
+                        method='userrecaptcha'
+                    ).captcha_handler()
+                    if result.get('error'):
+                        return {'solved': False, 'reason': result['error']}
+                    token = result.get('captchaSolve', '')
+                    if token:
+                        page.evaluate(f"""
+                            var el = document.querySelector('#g-recaptcha-response');
+                            if (el) el.value = '{token}';
+                            if (typeof ___grecaptcha_cfg !== 'undefined') {{
+                                Object.keys(___grecaptcha_cfg.clients).forEach(k => {{
+                                    var client = ___grecaptcha_cfg.clients[k];
+                                    Object.keys(client).forEach(k2 => {{
+                                        if (client[k2] && client[k2].callback) client[k2].callback('{token}');
+                                    }});
+                                }});
+                            }}
+                        """)
+                        logger.info('[Captcha] reCAPTCHA solved and token injected')
+                        return {'solved': True, 'type': 'recaptcha', 'token': token[:20] + '...'}
+                except ImportError:
+                    logger.warning('[Captcha] python_rucaptcha not installed')
+                    return {'solved': False, 'reason': 'python_rucaptcha not installed'}
+                except Exception as e:
+                    return {'solved': False, 'reason': str(e)}
+
+            # 2. Проверить hCaptcha
+            try:
+                hcaptcha_sitekey = page.evaluate(
+                    "document.querySelector('[data-hcaptcha-sitekey], .h-captcha[data-sitekey]')?.getAttribute('data-sitekey')"
+                )
+            except Exception:
+                hcaptcha_sitekey = None
+
+            if hcaptcha_sitekey:
+                logger.info(f'[Captcha] hCaptcha detected, sitekey={hcaptcha_sitekey[:20]}...')
+                try:
+                    from python_rucaptcha.h_captcha import HCaptcha
+                    result = HCaptcha(
+                        rucaptcha_key=api_key,
+                        websiteURL=page_url,
+                        websiteKey=hcaptcha_sitekey
+                    ).captcha_handler()
+                    if result.get('error'):
+                        return {'solved': False, 'reason': result['error']}
+                    token = result.get('captchaSolve', '')
+                    if token:
+                        page.evaluate(f"""
+                            var el = document.querySelector('[name="h-captcha-response"]');
+                            if (el) el.value = '{token}';
+                        """)
+                        logger.info('[Captcha] hCaptcha solved and token injected')
+                        return {'solved': True, 'type': 'hcaptcha', 'token': token[:20] + '...'}
+                except ImportError:
+                    return {'solved': False, 'reason': 'python_rucaptcha not installed'}
+                except Exception as e:
+                    return {'solved': False, 'reason': str(e)}
+
+            # 3. Проверить обычную картинку-капчу (img с captcha в src/class/id)
+            try:
+                captcha_img_src = page.evaluate("""
+                    (function() {
+                        var imgs = document.querySelectorAll('img');
+                        for (var i = 0; i < imgs.length; i++) {
+                            var src = imgs[i].src || '';
+                            var cls = imgs[i].className || '';
+                            var id = imgs[i].id || '';
+                            if (src.includes('captcha') || cls.includes('captcha') || id.includes('captcha')) {
+                                return src;
+                            }
+                        }
+                        return null;
+                    })()
+                """)
+            except Exception:
+                captcha_img_src = None
+
+            if captcha_img_src:
+                logger.info(f'[Captcha] Image captcha detected: {captcha_img_src[:50]}')
+                try:
+                    from python_rucaptcha.image_captcha import ImageCaptcha
+                    result = ImageCaptcha(
+                        rucaptcha_key=api_key
+                    ).captcha_handler(captcha_link=captcha_img_src)
+                    if result.get('error'):
+                        return {'solved': False, 'reason': result['error']}
+                    text = result.get('captchaSolve', '')
+                    if text:
+                        # Попытаться найти поле ввода капчи
+                        for sel in ['input[name*="captcha"]', 'input[id*="captcha"]', '#captcha', '.captcha-input']:
+                            try:
+                                el = page.query_selector(sel)
+                                if el and el.is_visible():
+                                    page.fill(sel, text)
+                                    break
+                            except Exception:
+                                continue
+                        logger.info(f'[Captcha] Image captcha solved: {text}')
+                        return {'solved': True, 'type': 'image', 'text': text}
+                except ImportError:
+                    return {'solved': False, 'reason': 'python_rucaptcha not installed'}
+                except Exception as e:
+                    return {'solved': False, 'reason': str(e)}
+
+            return {'solved': False, 'reason': 'no_captcha_detected'}
+
+        except Exception as e:
+            logger.error(f'[Captcha] solve_captcha error: {e}')
+            return {'solved': False, 'reason': str(e)}
 
     # ══════════════════════════════════════════════════════════════════
     # ██ ПЕРЕДАЧА УПРАВЛЕНИЯ ПОЛЬЗОВАТЕЛЮ (TAKEOVER) ██

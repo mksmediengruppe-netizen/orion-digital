@@ -5,11 +5,11 @@ Specialized Agents v7.0 — ORION Digital
 
 Модели по MASTER_PROMPT:
   designer   → gemini   (google/gemini-2.5-pro)
-  developer  → deepseek (openai/gpt-4.1-mini)
-  devops     → deepseek (openai/gpt-4.1-mini)
-  tester     → deepseek (openai/gpt-4.1-mini)
-  analyst    → deepseek / sonnet в pro_premium
-  integrator → deepseek (openai/gpt-4.1-mini)
+  developer  → mimo     (xiaomi/mimo-v2-flash)   — hands
+  devops     → mimo     (xiaomi/mimo-v2-flash)   — hands
+  tester     → minimax  (minimax/minimax-m2.5)   — brain
+  analyst    → minimax  / sonnet в pro_premium   — brain
+  integrator → mimo     (xiaomi/mimo-v2-flash)   — hands
 
 preferred_model берётся из model_router по роли и режиму.
 """
@@ -67,9 +67,9 @@ SPECIALIZED_AGENTS = {
         "name": "Разработчик",
         "emoji": "💻",
         "role": "developer",
-        # DeepSeek — код, SSH, DevOps (MASTER_PROMPT)
-        "preferred_model": "openai/gpt-4.1-mini",
-        "model_key": "deepseek",
+        # MiMo — код, SSH, DevOps (hands)
+        "preferred_model": "xiaomi/mimo-v2-flash",  # PATCH fix: mimo hands
+        "model_key": "mimo",
         "priority_tools": [
             "ssh_execute", "file_write", "file_read",
             "code_interpreter", "generate_file"
@@ -103,9 +103,9 @@ SPECIALIZED_AGENTS = {
         "name": "DevOps",
         "emoji": "🔧",
         "role": "devops",
-        # DeepSeek — серверные операции (MASTER_PROMPT)
-        "preferred_model": "openai/gpt-4.1-mini",
-        "model_key": "deepseek",
+        # MiMo — серверные операции (hands)
+        "preferred_model": "xiaomi/mimo-v2-flash",  # PATCH fix: mimo hands
+        "model_key": "mimo",
         "priority_tools": [
             "ssh_execute", "file_write", "file_read",
             "browser_check_site", "browser_check_api"
@@ -141,9 +141,9 @@ SPECIALIZED_AGENTS = {
         "name": "Тестировщик",
         "emoji": "🧪",
         "role": "tester",
-        # DeepSeek — быстрые проверки (MASTER_PROMPT)
-        "preferred_model": "openai/gpt-4.1-mini",
-        "model_key": "deepseek",
+        # MiniMax — быстрые проверки (brain)
+        "preferred_model": "minimax/minimax-m2.5",  # PATCH fix: minimax brain
+        "model_key": "minimax",
         "priority_tools": [
             "browser_navigate", "browser_get_text", "browser_check_site",
             "browser_check_api", "code_interpreter", "ssh_execute"
@@ -179,9 +179,9 @@ SPECIALIZED_AGENTS = {
         "name": "Аналитик",
         "emoji": "📊",
         "role": "analyst",
-        # DeepSeek standard / Sonnet в pro_premium (MASTER_PROMPT)
-        "preferred_model": "openai/gpt-4.1-mini",
-        "model_key": "deepseek",
+        # MiniMax standard / Sonnet в pro_premium (brain)
+        "preferred_model": "minimax/minimax-m2.5",  # PATCH fix: minimax brain
+        "model_key": "minimax",
         "priority_tools": [
             "web_search", "web_fetch", "code_interpreter",
             "generate_chart", "generate_file", "generate_report",
@@ -218,9 +218,9 @@ SPECIALIZED_AGENTS = {
         "name": "Интегратор",
         "emoji": "🔌",
         "role": "integrator",
-        # DeepSeek — интеграции и API (MASTER_PROMPT)
-        "preferred_model": "openai/gpt-4.1-mini",
-        "model_key": "deepseek",
+        # MiMo — интеграции и API (hands)
+        "preferred_model": "xiaomi/mimo-v2-flash",  # PATCH fix: mimo hands
+        "model_key": "mimo",
         "priority_tools": [
             "ssh_execute", "file_write", "file_read",
             "browser_check_api", "code_interpreter", "web_fetch"
@@ -303,7 +303,7 @@ def get_agent_model(agent_key: str, mode: str = DEFAULT_MODE) -> str:
         return cfg.get("id", SPECIALIZED_AGENTS[agent_key]["preferred_model"])
     except Exception:
         return SPECIALIZED_AGENTS.get(agent_key, {}).get(
-            "preferred_model", "openai/gpt-4.1-mini"
+            "preferred_model", "deepseek/deepseek-v3.2"  # PATCH fix
         )
 
 

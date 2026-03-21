@@ -243,6 +243,8 @@ class SSHConnectionPool:
         self._lock = threading.Lock()
 
     def get_connection(self, host, username="root", password=None, port=22, key_path=None):
+        import logging as _log
+        _log.getLogger("ssh_debug").info(f"[SSH_DEBUG] Connecting to {username}@{host} password_len={len(password or '')}...")  # PATCH 12 bug8: removed password_repr from logs
         """Get or create SSH connection."""
         key = f"{username}@{host}:{port}"
         with self._lock:

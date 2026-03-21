@@ -44,9 +44,23 @@ class SemanticMemory:
             else:
                 dim = MemoryConfig.EMBEDDING_FALLBACK_DIM
 
-            # Создать коллекцию если нет
+            # Создать коллекцию если нет; если размер вектора не совпадает — пересоздать
             try:
-                self._client.get_collection(self.COLLECTION)
+                coll_info = self._client.get_collection(self.COLLECTION)
+                # ── FIX: detect existing collection vector size to avoid dimension mismatch ──
+                try:
+                    existing_dim = coll_info.config.params.vectors.size
+                    if existing_dim and existing_dim != dim:
+                        logger.warning(f"[SemanticMemory] Collection dim={existing_dim} != encoder dim={dim}. Recreating collection.")
+                        self._client.delete_collection(self.COLLECTION)
+                        from qdrant_client.models import Distance, VectorParams
+                        self._client.create_collection(
+                            self.COLLECTION,
+                            vectors_config=VectorParams(size=dim, distance=Distance.COSINE)
+                        )
+                        logger.info(f"[SemanticMemory] Collection recreated with dim={dim}")
+                except Exception as _dim_err:
+                    logger.warning(f"[SemanticMemory] dim check failed: {_dim_err}")
             except:
                 from qdrant_client.models import Distance, VectorParams
                 self._client.create_collection(
@@ -121,18 +135,30 @@ class SemanticMemory:
                 if memory_type:
                     conditions.append(FieldCondition(key="type", match=MatchValue(value=memory_type)))
                 filt = Filter(must=conditions) if conditions else None
-                results = self._client.search(
-                    collection_name=self.COLLECTION,
-                    query_vector=vector,
-                    limit=limit,
-                    query_filter=filt
-                )
+                # ── FIX: qdrant-client >=1.10 removed .search(), use .query_points() ──
+                try:
+                    qr = self._client.query_points(
+                        collection_name=self.COLLECTION,
+                        query=vector,
+                        limit=limit,
+                        query_filter=filt,
+                        with_payload=True,
+                        score_threshold=MemoryConfig.MEMORY_MIN_SCORE
+                    )
+                    results = qr.points
+                except AttributeError:
+                    # Fallback for older qdrant-client
+                    results = self._client.search(
+                        collection_name=self.COLLECTION,
+                        query_vector=vector,
+                        limit=limit,
+                        query_filter=filt
+                    )
                 out = []
                 for r in results:
-                    if r.score >= MemoryConfig.MEMORY_MIN_SCORE:
-                        item = dict(r.payload)
-                        item["score"] = r.score
-                        out.append(item)
+                    item = dict(r.payload)
+                    item["score"] = r.score
+                    out.append(item)
                 return out
             else:
                 # In-memory fallback: простой поиск по словам

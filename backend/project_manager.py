@@ -291,7 +291,7 @@ Assistant: {assistant_msg}"""
             api_url or "https://openrouter.ai/api/v1/chat/completions",
             headers=headers,
             json={
-                "model": "openai/gpt-4.1-nano",
+                "model": "minimax/minimax-m2.5",  # PATCH fix: real model ID
                 "messages": [
                     {"role": "user", "content": extraction_prompt.format(
                         user_msg=user_message[:500],
@@ -306,27 +306,37 @@ Assistant: {assistant_msg}"""
 
         if resp.status_code == 200:
             content = resp.json().get("choices", [{}])[0].get("message", {}).get("content", "")
-            # Parse JSON from response
+            # Parse JSON from response - handle malformed LLM output
             import re
-            json_match = re.search(r'\[.*\]', content, re.DOTALL)
-            if json_match:
+            # Strip markdown code fences if present
+            content_clean = re.sub(r'```(?:json)?\s*', '', content).strip()
+            # Try to find a JSON array
+            json_match = re.search(r'\[.*?\]', content_clean, re.DOTALL)
+            if not json_match:
+                # LLM returned something other than array (e.g. just "key") - skip silently
+                return []
+            try:
                 items = json.loads(json_match.group(0))
-                stored = []
-                for item in items:
-                    if not isinstance(item, dict) or "key" not in item or "value" not in item:
-                        continue
-                    if item.get("confidence", 0) >= 0.7:
-                        result = store_memory(
-                            key=item["key"],
-                            value=item["value"],
-                            user_id=user_id,
-                            project_id=project_id,
-                            source="auto",
-                            confidence=item.get("confidence", 0.8)
-                        )
-                        if result.get("success"):
-                            stored.append(result["item"])
-                return stored
+            except (json.JSONDecodeError, ValueError):
+                return []
+            if not isinstance(items, list):
+                return []
+            stored = []
+            for item in items:
+                if not isinstance(item, dict) or "key" not in item or "value" not in item:
+                    continue
+                if item.get("confidence", 0) >= 0.7:
+                    result = store_memory(
+                        key=item["key"],
+                        value=item["value"],
+                        user_id=user_id,
+                        project_id=project_id,
+                        source="auto",
+                        confidence=item.get("confidence", 0.8)
+                    )
+                    if result.get("success"):
+                        stored.append(result["item"])
+            return stored
 
     except Exception as e:
         logger.warning(f"Memory extraction failed: {e}")

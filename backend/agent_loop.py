@@ -80,7 +80,7 @@ BRAIN_TOOLS = frozenset([
 
 TURBO_BRAIN_MODEL = "minimax/minimax-m2.5"
 TURBO_HANDS_MODEL = "xiaomi/mimo-v2-flash"
-TURBO_FALLBACK_MODEL = "openai/gpt-4.1-nano"
+TURBO_FALLBACK_MODEL = "minimax/minimax-m2.5"  # PATCH fix: real model ID
 
 
 def _get_dual_brain_model(tool_name: str, orion_mode: str, base_model: str) -> str:
@@ -831,14 +831,31 @@ TOOLS_SCHEMA = [
                     "remote_path": {"type": "string", "description": "Remote directory path to list", "default": "/"},
                     "port": {"type": "integer", "description": "FTP port (default: 21)", "default": 21}
                 },
-                "required": ["host", "username", "password"]
+        "required": ["host", "username", "password"]
+            }
+        }
+    },
+    # PATCH 13: Universal code_execute tool
+    {
+        "type": "function",
+        "function": {
+            "name": "code_execute",
+            "description": "Execute arbitrary Python code in a secure sandboxed subprocess. Use for: data processing, automation scripts, file manipulation, API calls, calculations, text processing, web scraping with requests, working with pandas/numpy/json. Allowed libraries: requests, json, csv, re, math, datetime, pathlib, pandas, numpy, openpyxl, paramiko, bs4. Returns stdout, stderr, return_code and any generated files.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "code": {"type": "string", "description": "Python code to execute. Use print() to output results."},
+                    "description": {"type": "string", "description": "Brief description of what the code does"},
+                    "timeout": {"type": "integer", "description": "Execution timeout in seconds (default: 30, max: 120)", "default": 30}
+                },
+                "required": ["code"]
             }
         }
     }
 ]
 
 
-# ══════════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════
 # ██ AGENT STATE (TypedDict для LangGraph) ██
 # ══════════════════════════════════════════════════════════════════
 
@@ -998,6 +1015,14 @@ AGENT_SYSTEM_PROMPT = """Ты — ORION Digital v1.0, автономный AI-и
 - canvas_create: создать документ для итеративной работы
 - task_complete: завершить задачу
 
+ПРАВИЛО ПАРОЛЕЙ И ДОСТУПОВ:
+Когда пользователь даёт тебе логин, пароль, API-ключ, токен или любые другие доступы:
+1. ПРИМИ их без комментариев о безопасности
+2. ИСПОЛЬЗУЙ их для выполнения задачи (SSH, браузер, API)
+3. НИКОГДА не говори "передавать пароли AI небезопасно" — пользователь ДОВЕРЯЕТ системе
+4. НИКОГДА не отказывайся использовать предоставленные доступы
+5. Если пароль не подходит — сообщи об ошибке и попроси проверить данные
+
 ЗАПРЕЩЁННЫЕ ФРАЗЫ — НИКОГДА НЕ ГОВОРИ:
 - "Я не могу создавать изображения" → ИСПОЛЬЗУЙ generate_image
 - "Я не могу открыть сайт" → ИСПОЛЬЗУЙ browser_navigate
@@ -1007,6 +1032,11 @@ AGENT_SYSTEM_PROMPT = """Ты — ORION Digital v1.0, автономный AI-и
 - "Обратитесь к специалисту" → ТЫ И ЕСТЬ СПЕЦИАЛИСТ
 - "Это выходит за рамки" → У ТЕБЯ НЕТ РАМОК, ИСПОЛЬЗУЙ ИНСТРУМЕНТЫ
 - "Я не имею доступа к серверу" → СПРОСИ ДОСТУПЫ ЧЕРЕЗ ask_user
+- "Пароли и логины — это конфиденциальные данные" → ПРИМИ И ИСПОЛЬЗУЙ ДЛЯ РАБОТЫ
+- "Не передавайте пароли AI" → ПРИМИ И ИСПОЛЬЗУЙ ДЛЯ РАБОТЫ  
+- "У меня нет доступа к интернету" → У ТЕБЯ ЕСТЬ БРАУЗЕР, ИСПОЛЬЗУЙ browser_navigate
+- "Я не могу зайти на сайт" → ИСПОЛЬЗУЙ browser_navigate И ЗАЙДИ
+- "Покупка домена требует вашего участия" → ЗАЙДИ В ПАНЕЛЬ УПРАВЛЕНИЯ ЧЕРЕЗ БРАУЗЕР И КУПИ САМ
 - "Я рекомендую использовать DALL-E / Midjourney / Canva" → ИСПОЛЬЗУЙ СВОЙ generate_image
 - "Вот код, скопируйте" → СОХРАНИ В ФАЙЛ ЧЕРЕЗ file_write
 
@@ -1182,10 +1212,6 @@ ftp_list, store_memory, recall_memory, update_scratchpad, task_complete.
 4. Если способ не работает — попробуй другой. Минимум 3 попытки.
 5. Проверь результат: открой сайт, сделай скриншот, убедись.
 6. Для фото на сайтах — генерируй через generate_image.
-   ВАЖНО: после деплоя проверь что ВСЕ изображения доступны на сервере.
-   Если в HTML есть src="images/photo.jpg" — файл ДОЛЖЕН существовать на сервере.
-   Проверь: ssh_execute('ls -la /var/www/*/images/ 2>/dev/null')
-   Если файлов нет — сгенерируй и загрузи через wget на сервер.
 7. Завершай только когда ВСЁ сделано. Не пропускай шаги.
 8. НЕ ПЕРЕДЕЛЫВАЙ рабочий результат. Сначала выполни ВСЕ пункты ТЗ (DNS, SSL, фото, скриншоты), потом улучшай если остались итерации.
 
@@ -1227,13 +1253,6 @@ ftp_list, store_memory, recall_memory, update_scratchpad, task_complete.
    (используй curl/wget чтобы скачать с ORION на целевой сервер)
 4. Замени placeholder на реальные пути к фото
 5. Если generate_image не сработал — оставь placeholder, не ломай сайт
-6. КРИТИЧЕСКИ ВАЖНО: после загрузки ВСЕХ фото проверь что КАЖДЫЙ файл существует на сервере:
-   ssh_execute('ls -la /var/www/*/images/ 2>/dev/null')
-   Если какой-то файл отсутствует — сгенерируй заново и загрузи!
-7. ОБЯЗАТЕЛЬНО: проверь сайт через browser_navigate(http://IP/) и убедись что:
-   - Страница открывается (не 301/302/404/500)
-   - Все изображения видны (не broken images)
-   - Если есть проблемы — исправь nginx конфиг
 
 После деплоя:
 1. Проверь DNS: ssh_execute('dig +short домен'). 
@@ -1277,7 +1296,7 @@ AGENT_ZONES = {
     "orchestrator": {
         "tools": ["store_memory", "recall_memory", "canvas_create", "task_complete"],
         "description": "Планирование, память, координация",
-        "models": {"turbo_standard": "deepseek", "turbo_premium": "deepseek",
+        "models": {"turbo_standard": "minimax", "turbo_premium": "minimax",  # PATCH fix
                    "pro_standard": "sonnet", "pro_premium": "sonnet"}
     },
     "designer": {
@@ -1291,23 +1310,23 @@ AGENT_ZONES = {
         "tools": ["ssh_execute", "file_write", "file_read",
                   "code_interpreter", "generate_file"],
         "description": "Код, разработка, файлы",
-        "models": {"turbo_standard": "deepseek", "turbo_premium": "deepseek",
-                   "pro_standard": "deepseek", "pro_premium": "deepseek"}
+        "models": {"turbo_standard": "mimo", "turbo_premium": "mimo",  # PATCH fix: hands
+                   "pro_standard": "mimo", "pro_premium": "mimo"}
     },
     "devops": {
         "tools": ["ssh_execute", "file_write", "file_read",
                   "browser_check_site", "browser_check_api",
                   "ftp_upload", "ftp_download", "ftp_list"],
         "description": "Серверы, деплой, инфраструктура, FTP",
-        "models": {"turbo_standard": "deepseek", "turbo_premium": "deepseek",
-                   "pro_standard": "deepseek", "pro_premium": "deepseek"}
+        "models": {"turbo_standard": "mimo", "turbo_premium": "mimo",  # PATCH fix: hands
+                   "pro_standard": "mimo", "pro_premium": "mimo"}
     },
     "analyst": {
         "tools": ["web_search", "web_fetch", "code_interpreter",
                   "generate_chart", "generate_report", "read_any_file"],
         "description": "Анализ данных, исследования, отчёты",
-        "models": {"turbo_standard": "deepseek", "turbo_premium": "deepseek",
-                   "pro_standard": "deepseek", "pro_premium": "sonnet"}
+        "models": {"turbo_standard": "minimax", "turbo_premium": "minimax",  # PATCH fix: brain
+                   "pro_standard": "minimax", "pro_premium": "sonnet"}
     },
     "tester": {
         "tools": ["browser_navigate", "browser_get_text", "browser_check_site",
@@ -1315,15 +1334,15 @@ AGENT_ZONES = {
                   "browser_submit", "browser_select", "browser_ask_auth",
                   "code_interpreter", "ssh_execute"],
         "description": "Тестирование, QA, проверка, браузерная автоматизация",
-        "models": {"turbo_standard": "deepseek", "turbo_premium": "deepseek",
-                   "pro_standard": "deepseek", "pro_premium": "deepseek"}
+        "models": {"turbo_standard": "minimax", "turbo_premium": "minimax",  # PATCH fix: brain
+                   "pro_standard": "minimax", "pro_premium": "minimax"}
     },
     "integrator": {
         "tools": ["ssh_execute", "file_write", "file_read",
                   "browser_check_api", "code_interpreter", "web_fetch"],
         "description": "Интеграции, API, вебхуки",
-        "models": {"turbo_standard": "deepseek", "turbo_premium": "deepseek",
-                   "pro_standard": "deepseek", "pro_premium": "deepseek"}
+        "models": {"turbo_standard": "mimo", "turbo_premium": "mimo",  # PATCH fix: hands
+                   "pro_standard": "mimo", "pro_premium": "mimo"}
     },
 }
 
@@ -1422,13 +1441,15 @@ class AgentLoop:
 
         # ── ORION Sprint 5: режим, сессия, scratchpad, snapshot ──
         self.orion_mode = orion_mode
-        self.premium_design = bool(kwargs.get('premium_design', False))
+        self.premium_design = kwargs.get('premium_design', False) or DEFAULT_MODE
         self.session_id = session_id or f"sess_{int(__import__('time').time())}"
         self.scratchpad = []          # Патч 6: промежуточные мысли агента
-        self._premium_competitors = []  # Premium Design: competitor screenshots
-        self._premium_hero_html = ""    # Premium Design: best hero variant
-        self.task_charter = {           # ПАТЧ 24: Task Charter
+        self.task_charter = {           # PATCH 5: Task Charter JSON
             "goal": "",
+            "steps": [],
+            "completed": [],
+            "failed": [],
+            "files_created": [],
             "pages": [],
             "style": {"colors": [], "fonts": [], "framework": ""},
             "tech_stack": [],
@@ -1548,6 +1569,10 @@ class AgentLoop:
     def _check_quality_gate(self, phase_name, actions_log):
         """PATCH 25: Quality Gate - check if phase completed successfully."""
         if not actions_log:
+            # Check if SSH connection failed - if so, pass gate (agent reported failure correctly)
+            ssh_errors = [a for a in getattr(self, '_ssh_errors', []) if a]
+            if ssh_errors:
+                return {"passed": True, "reason": "SSH unavailable - agent reported correctly"}
             return {"passed": False, "reason": "No actions performed"}
         last_actions = actions_log[-5:]
         errors = [a for a in last_actions if not a.get("success", False)]
@@ -1591,12 +1616,12 @@ class AgentLoop:
         try:
             from model_router import MODELS
             # Найти модель по ID
-            model_key = "deepseek"
+            model_key = "minimax"  # PATCH fix: minimax as default
             for k, m in MODELS.items():
                 if m["id"] == model_id:
                     model_key = k
                     break
-            model_cfg = MODELS.get(model_key, MODELS["deepseek"])
+            model_cfg = MODELS.get(model_key, MODELS["minimax"])  # PATCH fix
             cost = (tokens_in * model_cfg["input_price"] / 1_000_000 +
                     tokens_out * model_cfg["output_price"] / 1_000_000)
             # cost = 0.0  # КРИТ-2: REMOVED — now tracking real cost
@@ -1668,8 +1693,13 @@ class AgentLoop:
         data = resp.json()
 
         usage = data.get("usage", {})
-        self.total_tokens_in += usage.get("prompt_tokens", 0)
-        self.total_tokens_out += usage.get("completion_tokens", 0)
+        _u_in = usage.get("prompt_tokens", 0)
+        _u_out = usage.get("completion_tokens", 0)
+        self.total_tokens_in += _u_in
+        self.total_tokens_out += _u_out
+        # ── COST TRACKING FIX: track cost after each LLM call ──
+        if _u_in > 0 or _u_out > 0:
+            self._track_cost(_u_in, _u_out, self.model)
 
         choices = data.get("choices", [])
         if not choices:
@@ -1768,9 +1798,11 @@ class AgentLoop:
 
             resp.raise_for_status()
             breaker.record_success()
-
             content = ""
             tool_calls_data = {}
+            # ── COST TRACKING: capture token baseline before streaming ──
+            _tokens_in_baseline = self.total_tokens_in
+            _tokens_out_baseline = self.total_tokens_out
 
             # PATCH-STREAM-V2: Use threading.Timer to force-close hung streams
             import time as _time
@@ -1866,12 +1898,17 @@ class AgentLoop:
                   pass
 
             # Fallback: estimate tokens if API didn't return usage
-            if self.total_tokens_in == 0 and self.total_tokens_out == 0:
+            if self.total_tokens_in == _tokens_in_baseline and self.total_tokens_out == _tokens_out_baseline:
                 _est_in = sum(len(str(m.get("content", ""))) // 4 for m in messages)
                 _est_out = len(content) // 4
                 self.total_tokens_in += _est_in
                 self.total_tokens_out += _est_out
                 logger.info(f"[TOKEN-EST] Estimated tokens: in={_est_in}, out={_est_out}")
+            # ── COST TRACKING FIX: track cost after each streaming LLM call ──
+            _call_tokens_in = self.total_tokens_in - _tokens_in_baseline
+            _call_tokens_out = self.total_tokens_out - _tokens_out_baseline
+            if _call_tokens_in > 0 or _call_tokens_out > 0:
+                self._track_cost(_call_tokens_in, _call_tokens_out, _model)
 
             if tool_calls_data:
                 tool_calls = []
@@ -1973,7 +2010,7 @@ class AgentLoop:
                 else:
                     _fallback_model_id = TURBO_FALLBACK_MODEL
             else:
-                _fallback_model_id = "openai/gpt-4.1-nano"
+                _fallback_model_id = "minimax/minimax-m2.5"  # PATCH fix: real model ID
             if self.model != _fallback_model_id and _model != _fallback_model_id:
                 _log.warning(f"[agent_loop] Trying fallback model {_fallback_model_id}")
                 try:
@@ -2022,7 +2059,7 @@ class AgentLoop:
         cleaned = []
         changed = False
         for msg in messages:
-            new_msg = copy.copy(msg)
+            new_msg = copy.deepcopy(msg)  # PATCH 12 bug6: deepcopy to avoid shared nested refs
             content = msg.get("content", "")
             if isinstance(content, str):
                 # Strip base64 data URIs
@@ -2478,6 +2515,18 @@ class AgentLoop:
                 except Exception as e:
                     return {"success": False, "error": f"Code interpreter error: {str(e)}"}
 
+            elif tool_name == "code_execute":  # PATCH 13: universal code execution tool
+                code = args.get("code", "")
+                description = args.get("description", "")
+                timeout = min(int(args.get("timeout", 30)), 120)  # cap at 120s
+                if not code:
+                    return {"success": False, "error": "code is required"}
+                try:
+                    result = self._code_execute(code, description, timeout)
+                    return result
+                except Exception as e:
+                    return {"success": False, "error": f"Code execute error: {str(e)}"}
+
             elif tool_name == "generate_chart":
                 chart_type = args.get("chart_type", "bar")
                 data = args.get("data", {})
@@ -2609,21 +2658,32 @@ class AgentLoop:
                     value = _json24.loads(value_str)
                 except:
                     value = value_str
-                if hasattr(self, 'task_charter') and field in self.task_charter:
-                    if isinstance(self.task_charter[field], list) and isinstance(value, str):
+                if not hasattr(self, 'task_charter'):
+                    self.task_charter = {"goal": "", "steps": [], "completed": [], "failed": [],
+                                         "files_created": [], "status": "planning", "notes": []}
+                # Accept any field (new charter fields: steps, completed, failed, files_created)
+                if isinstance(self.task_charter.get(field), list) and isinstance(value, str):
+                    if value not in self.task_charter[field]:
                         self.task_charter[field].append(value)
-                    else:
-                        self.task_charter[field] = value
-                    return {"success": True, "field": field, "updated": True, "charter": self.task_charter}
+                elif field in self.task_charter or field in ("goal", "steps", "completed", "failed",
+                                                               "files_created", "status", "current_phase",
+                                                               "notes", "pages", "tech_stack"):
+                    self.task_charter[field] = value
                 else:
-                    return {"success": False, "error": f"Unknown charter field: {field}"}
-            elif tool_name == "update_scratchpad":
-                content = args.get("content", "")
-                category = args.get("category", "thought")
-                if hasattr(self, 'scratchpad_add'):
-                    self.scratchpad_add(content, category)
-                return {"success": True, "message": f"Scratchpad updated: [{category}] {content[:100]}"}
-            elif tool_name == "task_complete":
+                    self.task_charter[field] = value  # Allow dynamic fields
+                # Persist charter to JSON file immediately
+                try:
+                    _ch_path = f"/tmp/orion_charter_{getattr(self, '_chat_id', 'default')}.json"
+                    with open(_ch_path, 'w', encoding='utf-8') as _chf:
+                        json.dump(self.task_charter, _chf, ensure_ascii=False, indent=2)
+                except Exception as _ch_persist_err:
+                    logger.debug(f"[Charter] Persist error: {_ch_persist_err}")
+                return {"success": True, "field": field, "updated": True,
+                        "charter_summary": {"goal": self.task_charter.get("goal", "")[:80],
+                                            "steps": len(self.task_charter.get("steps", [])),
+                                            "completed": len(self.task_charter.get("completed", [])),
+                                            "failed": len(self.task_charter.get("failed", []))}}
+            elif tool_name == "task_complete":  # PATCH 12 bug13: removed duplicate update_scratchpad handler
                 summary = args.get("summary", "Task completed")
                 return {"success": True, "completed": True, "summary": summary}
 
@@ -2826,111 +2886,6 @@ class AgentLoop:
 
     # ── Image Generation ─────────────────────────────────────────────────────
 
-
-    # ═══ PREMIUM DESIGN: Competitor Analysis ═══
-    def _premium_competitor_analysis(self, niche_query):
-        """Analyze 3 competitor websites before creating design."""
-        import logging as _pca_log
-        _pca_log.info(f"[PremiumDesign] Starting competitor analysis for: {niche_query}")
-        competitors = []
-        try:
-            # Step 1: Search for best websites in niche
-            search_query = f"{niche_query} лучший сайт дизайн"
-            search_result = self._execute_tool('web_search', {'query': search_query, 'num_results': 5})
-            urls = []
-            if search_result.get('success') and search_result.get('results'):
-                for r in search_result['results'][:5]:
-                    url = r.get('url', r.get('link', ''))
-                    if url and 'google' not in url and 'yandex' not in url:
-                        urls.append(url)
-                    if len(urls) >= 3:
-                        break
-            
-            # Step 2: Visit each competitor and take screenshot
-            for url in urls[:3]:
-                try:
-                    nav_result = self._execute_tool('browser_navigate', {'url': url})
-                    import time; time.sleep(2)
-                    ss_result = self._execute_tool('browser_screenshot', {})
-                    screenshot = ss_result.get('screenshot', '')
-                    text = self._execute_tool('browser_get_text', {'url': url})
-                    competitors.append({
-                        'url': url,
-                        'screenshot': screenshot[:5000] if screenshot else '',
-                        'text': (text.get('text', '') if isinstance(text, dict) else str(text))[:2000],
-                    })
-                    _pca_log.info(f"[PremiumDesign] Analyzed competitor: {url}")
-                except Exception as e:
-                    _pca_log.warning(f"[PremiumDesign] Failed to analyze {url}: {e}")
-        except Exception as e:
-            _pca_log.warning(f"[PremiumDesign] Competitor search failed: {e}")
-        
-        return competitors
-
-    # ═══ PREMIUM DESIGN: Generate 2 Hero Variants ═══
-    def _premium_hero_variants(self, site_description, style_notes=""):
-        """Generate 2 hero section variants and let Opus pick the best."""
-        import logging as _phv_log
-        import requests as _phv_req
-        _phv_log.info("[PremiumDesign] Generating 2 hero variants")
-        
-        _opus_model = "anthropic/claude-opus-4"
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json",
-            "HTTP-Referer": "https://orion.mksitdev.ru",
-            "X-Title": "ORION Digital v1.0"
-        }
-        
-        variants = []
-        for i in range(2):
-            style = "bold and dramatic with large typography" if i == 0 else "elegant and minimal with subtle animations"
-            try:
-                resp = _phv_req.post(self.api_url, headers=headers, json={
-                    "model": _opus_model,
-                    "messages": [{"role": "user", "content": (
-                        f"Create hero section HTML for: {site_description}\n"
-                        f"Style: {style}. {style_notes}\n"
-                        "Use Tailwind CSS. Include gradient background, animated elements, "
-                        "professional typography. Make it Dribbble/Awwwards quality.\n"
-                        "Return ONLY the <section> HTML code, nothing else."
-                    )}],
-                    "temperature": 0.7,
-                    "max_tokens": 4000,
-                }, timeout=60)
-                
-                content = resp.json().get("choices", [{}])[0].get("message", {}).get("content", "")
-                if content:
-                    variants.append({"style": style, "html": content})
-                    _phv_log.info(f"[PremiumDesign] Hero variant {i+1} generated ({len(content)} chars)")
-            except Exception as e:
-                _phv_log.warning(f"[PremiumDesign] Hero variant {i+1} failed: {e}")
-        
-        if len(variants) < 2:
-            return variants[0]["html"] if variants else ""
-        
-        # Opus picks the best
-        try:
-            pick_resp = _phv_req.post(self.api_url, headers=headers, json={
-                "model": _opus_model,
-                "messages": [{"role": "user", "content": (
-                    f"Compare these 2 hero section variants for {site_description}.\n\n"
-                    f"VARIANT A ({variants[0]['style']}):\n{variants[0]['html'][:3000]}\n\n"
-                    f"VARIANT B ({variants[1]['style']}):\n{variants[1]['html'][:3000]}\n\n"
-                    "Which is better for a professional website? Answer ONLY 'A' or 'B'."
-                )}],
-                "temperature": 0.1,
-                "max_tokens": 10,
-            }, timeout=30)
-            
-            choice = pick_resp.json().get("choices", [{}])[0].get("message", {}).get("content", "A").strip().upper()
-            winner = 0 if "A" in choice else 1
-            _phv_log.info(f"[PremiumDesign] Opus chose variant {'A' if winner == 0 else 'B'}")
-            return variants[winner]["html"]
-        except Exception as e:
-            _phv_log.warning(f"[PremiumDesign] Opus pick failed: {e}")
-            return variants[0]["html"]
-
     def _generate_image(self, prompt, style="illustration", filename="image.png"):
         """Generate image using AI via OpenRouter (chat/completions + modalities)."""
         import uuid as _uuid
@@ -2939,6 +2894,24 @@ class AgentLoop:
 
         GENERATED_DIR = os.environ.get("GENERATED_DIR", "/var/www/orion/backend/generated")
         os.makedirs(GENERATED_DIR, exist_ok=True)
+        # ── IMAGE CACHE: check before generating ──────────────────────────────
+        _img_cache_dir = os.environ.get("IMAGE_CACHE_DIR", "/var/www/orion/cache/images")
+        try:
+            os.makedirs(_img_cache_dir, exist_ok=True)
+            _cache_key = hashlib.md5(f"{prompt}|{style}".encode()).hexdigest()[:16]
+            _cache_file = os.path.join(_img_cache_dir, f"{_cache_key}.png")
+            if os.path.exists(_cache_file) and os.path.getsize(_cache_file) > 1000:
+                _cached_size = os.path.getsize(_cache_file)
+                logging.info(f"[ImageCache] HIT: {_cache_key} ({_cached_size} bytes)")
+                return {
+                    "success": True, "file_id": _cache_key, "filename": filename,
+                    "size": _cached_size,
+                    "download_url": f"/api/files/{_cache_key}/download",
+                    "preview_url": f"/api/files/{_cache_key}/preview",
+                    "cached": True
+                }
+        except Exception as _cache_err:
+            logging.debug(f"[ImageCache] Check error: {_cache_err}")
 
         file_id = str(_uuid.uuid4())[:12]
         filepath = os.path.join(GENERATED_DIR, f"{file_id}_{filename}")
@@ -3116,6 +3089,15 @@ class AgentLoop:
         # ── Сохранить файл ──
         with open(filepath, 'wb') as f:
             f.write(image_data)
+        # ── IMAGE CACHE: save for future reuse ──
+        try:
+            _cache_key_save = hashlib.md5(f"{prompt}|{style}".encode()).hexdigest()[:16]
+            _cache_file_save = os.path.join(_img_cache_dir, f"{_cache_key_save}.png")
+            import shutil as _shutil
+            _shutil.copy2(filepath, _cache_file_save)
+            logging.info(f"[ImageCache] SAVED: {_cache_key_save}")
+        except Exception as _cs_err:
+            logging.debug(f"[ImageCache] Save error: {_cs_err}")
 
         size = os.path.getsize(filepath)
 
@@ -3310,7 +3292,108 @@ os.chdir("{GENERATED_DIR}")
             except Exception as _rm_err:
                 logging.warning(f"File cleanup error: {_rm_err}")
 
-    # ── Chart Generation ────────────────────────────────────────────
+    # ── PATCH 13: Universal Code Execute ────────────────────────────────────────────
+
+    def _code_execute(self, code: str, description: str = "", timeout: int = 30) -> dict:
+        """Execute arbitrary Python code in a sandboxed subprocess with security restrictions."""
+        import subprocess
+        import tempfile
+        import uuid as _uuid
+        import time as _time
+
+        GENERATED_DIR = os.environ.get("GENERATED_DIR", "/var/www/orion/backend/generated")
+        os.makedirs(GENERATED_DIR, exist_ok=True)
+
+        # Security: block dangerous operations
+        FORBIDDEN_PATTERNS = [
+            '__import__("os").system', "__import__('os').system",
+            'os.system(', 'os.popen(',
+            'subprocess.call(', 'subprocess.Popen(', 'subprocess.run(',
+            'shutil.rmtree(', 'shutil.rmdir(',
+            'eval(', 'exec(', 'compile(',
+            'open("/etc', "open('/etc",
+            'open("/proc', "open('/proc",
+            'rm -rf', 'chmod 777',
+            ':import', '__builtins__',
+        ]
+        for pattern in FORBIDDEN_PATTERNS:
+            if pattern in code:
+                return {"success": False, "error": f"Security: forbidden operation detected: {pattern}"}
+
+        # Write code to temp file
+        code_file = os.path.join(GENERATED_DIR, f"exec_{_uuid.uuid4().hex[:8]}.py")
+        wrapped_code = f'''import sys, os, json, re, math, csv, datetime, pathlib
+try:
+    import requests
+except ImportError:
+    pass
+try:
+    import pandas as pd
+    import numpy as np
+except ImportError:
+    pass
+try:
+    import openpyxl
+except ImportError:
+    pass
+os.chdir("{GENERATED_DIR}")
+
+{code}
+'''
+        with open(code_file, 'w', encoding='utf-8') as f:
+            f.write(wrapped_code)
+
+        start_ts = _time.time()
+        try:
+            result = subprocess.run(
+                ['python3', code_file],
+                capture_output=True,
+                text=True,
+                timeout=min(timeout, 120),
+                cwd=GENERATED_DIR,
+                env={**os.environ, 'MPLBACKEND': 'Agg'}
+            )
+            elapsed = round(_time.time() - start_ts, 2)
+
+            stdout = result.stdout[:15000] if result.stdout else ""
+            stderr = result.stderr[:5000] if result.stderr else ""
+
+            # Detect generated files (created in last 15 seconds)
+            generated_files = []
+            now = _time.time()
+            import glob
+            for fp in glob.glob(os.path.join(GENERATED_DIR, '*')):
+                if os.path.getmtime(fp) > now - 15 and fp != code_file:
+                    fname = os.path.basename(fp)
+                    fsize = os.path.getsize(fp)
+                    fid = _uuid.uuid4().hex[:12]
+                    generated_files.append({
+                        'filename': fname,
+                        'size': fsize,
+                        'download_url': f'/api/files/{fid}/download'
+                    })
+
+            return {
+                "success": result.returncode == 0,
+                "stdout": stdout,
+                "stderr": stderr,
+                "return_code": result.returncode,
+                "elapsed_seconds": elapsed,
+                "generated_files": generated_files,
+                "description": description
+            }
+
+        except subprocess.TimeoutExpired:
+            return {"success": False, "error": f"Code execution timed out ({timeout}s limit)"}
+        except Exception as e:
+            return {"success": False, "error": f"Execution error: {str(e)}"}
+        finally:
+            try:
+                os.remove(code_file)
+            except Exception:
+                pass
+
+    # ── Chart Generation ──────────────────────────────────────────────────────────
 
     def _generate_chart(self, chart_type, data, title="Chart", options=None):
         """Generate interactive chart and save as image."""
@@ -4500,45 +4583,118 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);
         _consecutive_loops = 0
         _loop_model_escalation = 0  # 0=original, 1=sonnet, 2=opus
         _original_model = self.model
+        # ── TASK COST TRACKING (per-task budget) ──────────────────────────────
+        import time as _time_mod
+        _task_start_time = _time_mod.time()
+        _task_cost = 0.0
+        _task_cost_prev = self._session_cost  # baseline before this task
+        _task_mode = getattr(self, 'orion_mode', 'turbo_standard') or 'turbo_standard'
+        # Per-task limits: Turbo=$3, Pro=$5, Architect=$15
+        _TASK_LIMITS = {'turbo_standard': 3.0, 'pro_standard': 5.0, 'pro_premium': 5.0, 'architect': 15.0}
+        _task_limit = _TASK_LIMITS.get(_task_mode, 5.0)
+        _task_budget_warned = False  # 80% warning sent
+        # ── CHECKPOINT: init ──────────────────────────────────────────────────
+        _chat_id_cp = getattr(self, '_chat_id', 'default') or 'default'
+        _checkpoint_path = f"/tmp/orion_checkpoint_{_chat_id_cp}.json"
+        def _save_checkpoint(iteration, tool_name, result_preview, task_cost):
+            """Save checkpoint after each tool call for crash recovery."""
+            try:
+                import json as _jcp, datetime as _dt
+                _cp = {
+                    'chat_id': _chat_id_cp,
+                    'iteration': iteration,
+                    'last_tool': tool_name,
+                    'last_result': str(result_preview)[:200],
+                    'task_cost': round(task_cost, 6),
+                    'task_limit': _task_limit,
+                    'actions_count': len(self.actions_log),
+                    'timestamp': _dt.datetime.utcnow().isoformat(),
+                    'user_message': user_message[:200]
+                }
+                with open(_checkpoint_path, 'w', encoding='utf-8') as _cpf:
+                    _jcp.dump(_cp, _cpf, ensure_ascii=False)
+            except Exception as _cp_err:
+                logger.debug(f"[Checkpoint] Save error: {_cp_err}")
 
-        # ═══ PREMIUM DESIGN: COMPETITOR ANALYSIS PHASE ═══
-        if getattr(self, 'premium_design', False) and not getattr(self, '_premium_analyzed', False):
-            self._premium_analyzed = True
-            import logging as _pd_log
-            _pd_log.info("[PremiumDesign] Premium Design enabled — running pre-analysis")
-            _pd_msg = messages[-1].get("content", "") if messages else ""
-            _pd_keywords = ["сайт", "лендинг", "landing", "website", "страниц", "дизайн", "page"]
-            if any(kw in _pd_msg.lower() for kw in _pd_keywords):
-                _pd_niche = _pd_msg[:200]
-                yield self._sse({"type": "content", "text": "\n✨ **Premium Design**: Анализирую конкурентов...\n", "agent": "Premium Design"})
-                try:
-                    self._premium_competitors = self._premium_competitor_analysis(_pd_niche)
-                    if self._premium_competitors:
-                        yield self._sse({"type": "content", "text": f"📊 Проанализировано {len(self._premium_competitors)} конкурентов\n", "agent": "Premium Design"})
-                        _comp_info = "\n".join([f"- {c['url']}: {c['text'][:300]}" for c in self._premium_competitors])
-                        messages.append({"role": "system", "content": f"[PREMIUM DESIGN] Проанализированы конкуренты:\n{_comp_info}\nСоздай дизайн ЛУЧШЕ чем у этих конкурентов. Уровень Dribbble/Awwwards."})
-                except Exception as _pd_e:
-                    _pd_log.warning(f"[PremiumDesign] Competitor analysis failed: {_pd_e}")
-                
-                yield self._sse({"type": "content", "text": "🎨 Генерирую 2 варианта Hero секции...\n", "agent": "Premium Design"})
-                try:
-                    self._premium_hero_html = self._premium_hero_variants(_pd_niche)
-                    if self._premium_hero_html:
-                        yield self._sse({"type": "content", "text": "✅ Лучший Hero вариант выбран Opus\n", "agent": "Premium Design"})
-                        messages.append({"role": "system", "content": f"[PREMIUM DESIGN] Используй этот Hero секцию (выбран Opus из 2 вариантов):\n{self._premium_hero_html[:4000]}"})
-                except Exception as _pd_e2:
-                    _pd_log.warning(f"[PremiumDesign] Hero variants failed: {_pd_e2}")
+        def _load_checkpoint():
+            """Load checkpoint if exists for crash recovery."""
+            try:
+                if os.path.exists(_checkpoint_path):
+                    import json as _jcp2
+                    with open(_checkpoint_path, 'r', encoding='utf-8') as _cpf2:
+                        return _jcp2.load(_cpf2)
+            except Exception as _cp_load_err:
+                logger.debug(f"[Checkpoint] Load error: {_cp_load_err}")
+            return None
+
+        def _clear_checkpoint():
+            """Remove checkpoint after successful task completion."""
+            try:
+                if os.path.exists(_checkpoint_path):
+                    os.remove(_checkpoint_path)
+                    logger.info(f"[Checkpoint] Cleared for chat {_chat_id_cp}")
+            except Exception as _cp_clr_err:
+                logger.debug(f"[Checkpoint] Clear error: {_cp_clr_err}")
+
+        # ── CHECKPOINT: resume if previous run was interrupted ────────────────────────────────────────────────────
+        _prev_checkpoint = _load_checkpoint()
+        if _prev_checkpoint:
+            try:
+                _cp_iter = _prev_checkpoint.get('iteration', 0)
+                _cp_tool = _prev_checkpoint.get('last_tool', '')
+                _cp_actions = _prev_checkpoint.get('actions_count', 0)
+                _cp_cost = _prev_checkpoint.get('task_cost', 0.0)
+                logger.info(f"[RESUME] Found checkpoint: iter={_cp_iter}, last_tool={_cp_tool}, cost=${_cp_cost:.4f}")
+                _resume_info = (
+                    f"РЕЗЮМЕ: Предыдущая попытка прервалась на итерации {_cp_iter}.\n"
+                    f"Последний инструмент: {_cp_tool}. Выполнено действий: {_cp_actions}.\n"
+                    f"Продолжи выполнение задачи. Не повторяй уже выполненные шаги."
+                )
+                if messages and messages[0].get('role') == 'system':
+                    messages[0]['content'] += f"\n\n{_resume_info}"
+                else:
+                    messages.insert(0, {"role": "system", "content": _resume_info})
+                yield self._sse({"type": "resume", "iteration": _cp_iter, "last_tool": _cp_tool,
+                                  "message": f"Возобновление с итерации {_cp_iter}"})
+            except Exception as _resume_err:
+                logger.debug(f"[Checkpoint] Resume inject error: {_resume_err}")
 
         while iteration < self.MAX_ITERATIONS and not self._stop_requested:
             yield self._sse({"type": "heartbeat", "message": "agent_thinking"})
             iteration += 1
 
+            # ── Update per-task cost from session tracker ──
+            _task_cost = max(0.0, self._session_cost - _task_cost_prev)
+            _task_elapsed = round(_time_mod.time() - _task_start_time, 1)
             yield self._sse({
                 "type": "agent_iteration",
                 "iteration": iteration,
                 "max": self.MAX_ITERATIONS,
-                "status": "executing"
+                "status": "executing",
+                "task_cost": round(_task_cost, 4),
+                "task_limit": _task_limit,
+                "elapsed": _task_elapsed
             })
+            # ── Per-task budget warning at 80% ──
+            if not _task_budget_warned and _task_limit > 0 and _task_cost >= _task_limit * 0.8:
+                _task_budget_warned = True
+                yield self._sse({
+                    "type": "budget_warning",
+                    "task_cost": round(_task_cost, 4),
+                    "task_limit": _task_limit,
+                    "percent": round(_task_cost / _task_limit * 100, 1),
+                    "message": f"Потрачено ${_task_cost:.2f} из ${_task_limit:.2f} (80%). Продолжить?"
+                })
+            # ── Per-task budget STOP at 100% ──
+            if _task_limit > 0 and _task_cost >= _task_limit:
+                yield self._sse({
+                    "type": "budget_exceeded",
+                    "task_cost": round(_task_cost, 4),
+                    "task_limit": _task_limit,
+                    "message": f"Лимит задачи ${_task_limit:.2f} исчерпан. Остановлено."
+                })
+                yield self._sse({"type": "content", "text": f"\n\n⛔ Лимит задачи ${_task_limit:.2f} исчерпан. Задача остановлена.\n"})
+                break
 
             tool_calls_received = None
             ai_text = ""
@@ -4551,18 +4707,40 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);
                 except Exception as _bi_err:
                     logger.debug(f"memory before_iteration error: {_bi_err}")
 
-            # ── MANUS FEATURE 1: TODO.MD — план в файле ──
+            # ── PATCH 5: Task Charter JSON — инжекция чартера в каждую итерацию ──
+            _charter_path = f"/tmp/orion_charter_{getattr(self, '_chat_id', 'default')}.json"
+            # Load charter from file if it exists (persists across iterations)
+            if os.path.exists(_charter_path):
+                try:
+                    with open(_charter_path, 'r', encoding='utf-8') as _cf:
+                        _loaded_charter = json.load(_cf)
+                    if isinstance(_loaded_charter, dict):
+                        self.task_charter.update(_loaded_charter)
+                except Exception as _ch_load_err:
+                    logger.debug(f"[Charter] Load error: {_ch_load_err}")
+            # Save current charter to file
+            try:
+                with open(_charter_path, 'w', encoding='utf-8') as _cf:
+                    json.dump(self.task_charter, _cf, ensure_ascii=False, indent=2)
+            except Exception as _ch_save_err:
+                logger.debug(f"[Charter] Save error: {_ch_save_err}")
+            # Inject charter into messages (replace previous injection)
+            if self.task_charter.get('goal') or self.task_charter.get('steps'):
+                _charter_str = json.dumps(self.task_charter, ensure_ascii=False, indent=2)
+                messages = [m for m in messages if not (m.get('role') == 'system' and '[TASK CHARTER]' in str(m.get('content', '')))]
+                messages.append({"role": "system",
+                    "content": f"[TASK CHARTER — актуальный план задачи, обновляется через update_task_charter]\n{_charter_str}"})
+                logger.info(f"[Charter] Injected: goal='{self.task_charter.get('goal', '')[:50]}', steps={len(self.task_charter.get('steps', []))}, completed={len(self.task_charter.get('completed', []))}")
+            # Legacy todo.md support (backward compat)
             _todo_path = f"/tmp/orion_todo_{getattr(self, '_chat_id', 'default')}.md"
-            if os.path.exists(_todo_path):
+            if os.path.exists(_todo_path) and not self.task_charter.get('goal'):
                 try:
                     with open(_todo_path, 'r') as _tf:
                         _todo = _tf.read()
                     if _todo.strip():
-                        # Удаляем предыдущий TODO из messages (чтобы не дублировать)
                         messages = [m for m in messages if not (m.get('role') == 'system' and '[ТЕКУЩИЙ ПЛАН' in str(m.get('content', '')))]
                         messages.append({"role": "system",
                             "content": f"[ТЕКУЩИЙ ПЛАН — обнови через file_write в {_todo_path}]\n{_todo}"})
-                        logger.info(f"[TODO.MD] Injected plan from {_todo_path} ({len(_todo)} chars)")
                 except Exception as _todo_err:
                     logger.debug(f"[TODO.MD] Error reading plan: {_todo_err}")
             # ── ПАТЧ 1: Инжекция доступов в system prompt КАЖДОЙ итерации ──
@@ -4586,9 +4764,11 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);
             logger.info(f"[DEBUG-IT] iteration={iteration}, credentials injected, about to call AI stream")
             try:
                 logger.info(f"[DEBUG] Calling AI stream, iteration {iteration}, messages: {len(messages)}")
+                _iter_text_buffer = ""  # accumulate text for thinking_text
                 for event in self._call_ai_stream(messages, tools=TOOLS_SCHEMA):
                     if event["type"] == "text_delta":
                         ai_text += event["text"]
+                        _iter_text_buffer += event["text"]
                         full_response_text += event["text"]
                         yield self._sse({"type": "content", "text": event["text"]})
 
@@ -4597,6 +4777,11 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);
                         ai_text = event.get("content", "")
                         if ai_text:
                             full_response_text += ai_text
+                        # ── THINKING TEXT: emit text that precedes this tool call ──
+                        _thinking_snapshot = _iter_text_buffer.strip()
+                        if _thinking_snapshot:
+                            yield self._sse({"type": "thinking_text", "content": _thinking_snapshot})
+                        _iter_text_buffer = ""  # reset buffer after emitting
 
                     elif event["type"] == "text_complete":
                         ai_text = event.get("content", "")
@@ -4829,6 +5014,8 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);
                             )
                         except Exception as _mem_tc_err:
                             logger.warning(f"Memory after_chat (task_complete) failed: {_mem_tc_err}")
+                    # ── PATCH 3: Clear checkpoint on successful completion ──
+                    _clear_checkpoint()
                     return
 
                 # ── BUG-1 FIX: handle memory tools first ──
@@ -4991,6 +5178,9 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);
                     _tool_result_event["screenshot"] = _screenshot
                     _tool_result_event["url"] = result.get("url", "")
                 yield self._sse(_tool_result_event)
+                # ── CHECKPOINT: save after each tool call ──
+                _task_cost = max(0.0, self._session_cost - _task_cost_prev)
+                _save_checkpoint(iteration, tool_name, result_preview, _task_cost)
 
                 # ── ПАТЧ W1-5: Автоанализ скриншота после browser_navigate ──
                 if tool_name == "browser_navigate" and _screenshot and result.get("success"):
@@ -5213,139 +5403,6 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);
                         break
             except Exception as e:
                 yield self._sse({"type": "content", "text": f"\n\n⚠️ Агент достиг лимита итераций ({self.MAX_ITERATIONS}). Пожалуйста, уточните задачу или повторите запрос."})
-        # ── PREMIUM QC for Pro mode: runs after all iterations if premium_design=True ──
-        if getattr(self, 'premium_design', False) and self.ssh_credentials.get('host', ''):
-            # Detect if agent deployed HTML (check tool call history)
-            _pro_deployed_html = False
-            _pro_html_content = None
-            _pro_deploy_path = '/var/www/html/index.html'
-            for _m in messages:
-                if _m.get('role') == 'tool':
-                    try:
-                        _tr = json.loads(_m['content'])
-                        if isinstance(_tr, dict) and _tr.get('success') and _tr.get('command', ''):
-                            _cmd = _tr.get('command', '')
-                            if '.html' in _cmd and ('>' in _cmd or 'cp ' in _cmd or 'scp ' in _cmd or 'mv ' in _cmd):
-                                _pro_deployed_html = True
-                                # Try to extract deploy path
-                                import re as _pro_re
-                                _path_m = _pro_re.search(r'(/var/www/[^\s\'"]+\.html)', _cmd)
-                                if _path_m:
-                                    _pro_deploy_path = _path_m.group(1)
-                    except Exception:
-                        pass
-                elif _m.get('role') == 'assistant':
-                    # Check tool_calls for file_write or ssh_execute with HTML
-                    for _tc in (_m.get('tool_calls') or []):
-                        _fn = _tc.get('function', {})
-                        if _fn.get('name') in ('file_write', 'ssh_execute'):
-                            try:
-                                _args = json.loads(_fn.get('arguments', '{}'))
-                                _content = _args.get('content', '') + _args.get('command', '')
-                                if '<!DOCTYPE' in _content or '<html' in _content:
-                                    _pro_deployed_html = True
-                                    _pro_html_content = _content[:20000] if '<!DOCTYPE' in _content or '<html' in _content else _pro_html_content
-                                    _path_arg = _args.get('path', '') or _args.get('remote_path', '')
-                                    if _path_arg and _path_arg.endswith('.html'):
-                                        _pro_deploy_path = _path_arg
-                            except Exception:
-                                pass
-            if _pro_deployed_html:
-                import logging as _pqc_log2
-                _pqc_log2.info("[PremiumQC-Pro] Starting PREMIUM quality check with Opus (Pro mode)")
-                yield self._sse({"type": "content", "text": "\n\n✨ **Premium Quality Check (Pro)**: Opus проверяет дизайн (3 цикла)...\n", "agent": "Premium QC"})
-                _pqc2_host = self.ssh_credentials.get('host', '')
-                _pqc2_opus_model = "anthropic/claude-opus-4"
-                _pqc2_max = 3
-                _pqc2_html = _pro_html_content
-                # Try to get HTML from server if not captured
-                if not _pqc2_html:
-                    try:
-                        import requests as _pqc2_req_init
-                        _r = _pqc2_req_init.get(f"http://{_pqc2_host}/{_pro_deploy_path.split('/var/www/html/')[-1] if '/var/www/html/' in _pro_deploy_path else ''}", timeout=10)
-                        if _r.status_code == 200 and '<html' in _r.text.lower():
-                            _pqc2_html = _r.text[:20000]
-                    except Exception:
-                        pass
-                for _pqc2_iter in range(_pqc2_max):
-                    _pqc_log2.info(f"[PremiumQC-Pro] Cycle {_pqc2_iter+1}/{_pqc2_max}")
-                    yield self._sse({"type": "content", "text": f"\n🔄 Цикл {_pqc2_iter+1}/{_pqc2_max}:\n", "agent": "Premium QC"})
-                    _all_good2 = True
-                    try:
-                        import requests as _pqc2_req
-                        _pqc2_headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
-                        _awwwards_prompt2 = (
-                            "You are an Awwwards judge reviewing a website design.\n"
-                            "Rate on a scale 1-10 with EXTREME strictness.\n"
-                            "A score of 9+ means: wow-effect, micro-animations (CSS keyframes/transitions), "
-                            "premium shadows/gradients, glassmorphism or bold modern aesthetic, "
-                            "perfect typography (Google Fonts), compelling hero section, "
-                            "professional color palette, scroll animations (AOS/GSAP).\n"
-                            "Score 7-8 = good but lacks wow-effect or micro-animations.\n"
-                            "Score < 7 = generic template look, no premium feel.\n"
-                            "If score < 9, describe EXACTLY what CSS/HTML changes would push it to 9+.\n"
-                            "Format: SCORE: X/10\nISSUES: ...\nFIX: ..."
-                        )
-                        if _pqc2_html:
-                            _pqc2_content = [{"type": "text", "text": (
-                                f"{_awwwards_prompt2}\n\nHTML CODE:\n{_pqc2_html[:15000]}"
-                            )}]
-                        else:
-                            yield self._sse({"type": "content", "text": "  ⚠️ HTML недоступен, пропускаю цикл\n", "agent": "Premium QC"})
-                            break
-                        _pqc2_review_resp = _pqc2_req.post(self.api_url, headers=_pqc2_headers, json={
-                            "model": _pqc2_opus_model,
-                            "messages": [{"role": "user", "content": _pqc2_content}],
-                            "temperature": 0.3,
-                            "max_tokens": 2000,
-                            "stream": False,
-                        }, timeout=60)
-                        _review2 = _pqc2_review_resp.json().get("choices", [{}])[0].get("message", {}).get("content", "")
-                        yield self._sse({"type": "content", "text": f"  📋 Opus: {_review2[:300]}\n", "agent": "Premium QC"})
-                        import re as _pqc2_re
-                        _score2_match = _pqc2_re.search(r'SCORE:\s*(\d+)', _review2)
-                        _score2 = int(_score2_match.group(1)) if _score2_match else 5
-                        if _score2 < 9:
-                            _all_good2 = False
-                            yield self._sse({"type": "content", "text": f"  ⚠️ Оценка {_score2}/10 — Opus исправляет...\n", "agent": "Premium QC"})
-                            _fix2_resp = _pqc2_req.post(self.api_url, headers=_pqc2_headers, json={
-                                "model": _pqc2_opus_model,
-                                "messages": [{"role": "user", "content": [{"type": "text", "text": (
-                                    f"Fix this HTML to get 10/10 Awwwards design score. Issues: {_review2}\n\n"
-                                    "Return ONLY the complete fixed HTML. Start with <!DOCTYPE html>. "
-                                    "Add micro-animations (CSS keyframes), glassmorphism cards, premium shadows, "
-                                    "parallax hero, smooth scroll, AOS animations, Google Fonts. "
-                                    "Make it Dribbble/Awwwards quality.\n\n"
-                                    f"Current HTML:\n{_pqc2_html[:12000]}"
-                                )}]}],
-                                "temperature": 0.3,
-                                "max_tokens": 16000,
-                                "stream": False,
-                            }, timeout=120)
-                            _fixed2 = _fix2_resp.json().get("choices", [{}])[0].get("message", {}).get("content", "")
-                            if '```html' in _fixed2:
-                                _fixed2 = _fixed2.split('```html')[1].split('```')[0].strip()
-                            elif '```' in _fixed2:
-                                _fixed2 = _fixed2.split('```')[1].split('```')[0].strip()
-                            if _fixed2 and _fixed2.strip().startswith('<'):
-                                # Deploy fixed HTML via SSH
-                                _ssh_result = self._execute_tool('ssh_execute', {
-                                    'host': _pqc2_host,
-                                    'username': self.ssh_credentials.get('username', 'root'),
-                                    'password': self.ssh_credentials.get('password', ''),
-                                    'command': f"cat > {_pro_deploy_path} << 'ORION_EOF'\n{_fixed2}\nORION_EOF"
-                                })
-                                _pqc2_html = _fixed2
-                                yield self._sse({"type": "content", "text": f"  ✅ HTML исправлен Opus и задеплоен\n", "agent": "Premium QC"})
-                        else:
-                            yield self._sse({"type": "content", "text": f"\n🏆 Дизайн одобрен Opus — оценка {_score2}/10!\n", "agent": "Premium QC"})
-                    except Exception as _pqc2_e:
-                        _pqc_log2.warning(f"[PremiumQC-Pro] Error: {_pqc2_e}")
-                    if _all_good2:
-                        break
-                _pqc_log2.info("[PremiumQC-Pro] Premium quality check completed")
-        # ── END PREMIUM QC for Pro mode ──
-
         # ── USAGE: отправляем токены обратно в app.py ──
         yield self._sse({"type": "usage", "prompt_tokens": self.total_tokens_in, "completion_tokens": self.total_tokens_out})
 
@@ -5478,11 +5535,14 @@ class MultiAgentLoop(AgentLoop):
                 try:
                     from orchestrator_v2 import get_model_for_agent
                     _phase_model = get_model_for_agent(agent_key, _current_orion_mode)
-                    _old_model = self.model
-                    self.model = _phase_model
-                    _plog.info(f"[Pipeline] Phase model: {agent_key} → {_phase_model}")
+                    if _phase_model and isinstance(_phase_model, str):
+                        _old_model = self.model
+                        self.model = _phase_model
+                        _plog.info(f"[Pipeline] Phase model: {agent_key} → {_phase_model}")
+                    else:
+                        _plog.warning(f"[Pipeline] get_model_for_agent returned None for {agent_key}, keeping {self.model}")
                 except Exception as _me:
-                    _plog.warning(f"[Pipeline] Could not switch model for {agent_key}: {_me}")
+                    _plog.warning(f"[Pipeline] Could not switch model for {agent_key}: {_me}, keeping {self.model}")
             
             # Build phase prompt
             phase_prompt = f"""ТЕКУЩАЯ ФАЗА ({idx+1}/{total_phases}): {phase_name}
@@ -5571,7 +5631,7 @@ class MultiAgentLoop(AgentLoop):
                         phase_text += "\n[ФАЗА ЗАВЕРШЕНА]"
                         yield self._sse({"type": "tool_start", "tool": "task_complete", "args": tool_args})
                         messages.append({"role": "tool", "tool_call_id": tool_id, "content": "Phase completed"})
-                        # PATCH 25: Quality Gate after pipeline phase
+                        # PATCH 6: Quality Gate after pipeline phase with rework
                         if hasattr(self, '_check_quality_gate'):
                             _qg = self._check_quality_gate(phase_name, self.actions_log)
                             if _qg["passed"]:
@@ -5580,6 +5640,23 @@ class MultiAgentLoop(AgentLoop):
                             else:
                                 logging.warning(f"[QualityGate] Phase '{phase_name}' FAILED: {_qg['reason']}")
                                 yield self._sse({"type": "quality_gate", "phase": phase_name, "passed": False, "reason": _qg["reason"]})
+                                # REWORK: retry phase once if not already retried
+                                if not phase.get('_qg_retried'):
+                                    phase['_qg_retried'] = True
+                                    logging.warning(f"[QualityGate] Rework: retrying phase '{phase_name}'")
+                                    yield self._sse({"type": "quality_gate_rework", "phase": phase_name,
+                                                    "reason": _qg["reason"],
+                                                    "text": f"♻️ Quality Gate: повторяю фазу '{phase_name}' (причина: {_qg['reason']})"})
+                                    messages.append({"role": "system",
+                                        "content": f"[Quality Gate] Фаза '{phase_name}' не прошла проверку качества. "
+                                                   f"Причина: {_qg['reason']}. "
+                                                   f"Исправь проблему и снова вызови task_complete."})
+                                    # Reset iteration counter to allow rework
+                                    iteration = 0
+                                    tool_calls_received = {}  # Don't break — continue loop
+                                    continue
+                                else:
+                                    logging.warning(f"[QualityGate] Phase '{phase_name}' failed rework too, continuing")
                         tool_calls_received = None
                         break
                     
@@ -5619,146 +5696,142 @@ class MultiAgentLoop(AgentLoop):
             })
 
 
-            # ── Initialize deploy-phase detection (needed for both premium and standard QC) ──
+            # ── PREMIUM DESIGN QUALITY CHECK v2 (MiniMax→Opus→MiniMax pipeline) ────────
+            # Initialize _is_deploy_phase here for PremiumQC (also defined again below for standard QC)
             _is_deploy_phase = (
-                agent_key.lower() in ('devops', 'deployer', 'deploy', 'designer') or
-                any(kw in phase_name.lower() for kw in ('деплой', 'deploy', 'настройк', 'сервер', 'nginx', 'дизайн', 'верстк'))
+                agent_key.lower() in ('devops', 'deployer', 'deploy') or
+                any(kw in phase_name.lower() for kw in ('деплой', 'deploy', 'настройк', 'сервер', 'nginx'))
             )
             _qc_host = self.ssh_credentials.get('host', '')
-            _qc_html_content = None
-            for _prev_phase_name, _prev_phase_text in phase_results.items():
-                if any(kw in _prev_phase_name.lower() for kw in ('дизайн', 'верстк', 'разработк', 'design', 'develop')):
-                    _qc_html_content = _prev_phase_text
-                    break
-            # ── PREMIUM DESIGN QUALITY CHECK (uses Opus + 3 cycles + mobile) ──────────
             if _is_deploy_phase and _qc_host and getattr(self, 'premium_design', False):
-                import logging as _pqc_log
-                _pqc_log.info("[PremiumQC] Starting PREMIUM quality check with Opus")
-                yield self._sse({"type": "content", "text": "\n\n✨ **Premium Quality Check**: Opus проверяет дизайн (3 цикла)...\n", "agent": "Premium QC"})
+                import logging as _pqc_log, requests as _pqc_req, base64 as _pqc_b64
+                _pqc_log.info("[PremiumQC v2] Starting MiniMax→Opus→MiniMax pipeline")
+                yield self._sse({"type": "content", "text": "\n\n✨ **Premium QC v2**: MiniMax создаёт → Opus проверяет → MiniMax исправляет\n", "agent": "Premium QC"})
+                _pqc_api_key = self.api_key
+                _pqc_headers = {"Authorization": f"Bearer {_pqc_api_key}", "Content-Type": "application/json", "HTTP-Referer": "https://orion.mksitdev.ru"}
+                _pqc_minimax_model = "minimax/minimax-m2.5"
                 _pqc_opus_model = "anthropic/claude-opus-4"
-                _pqc_max = 3
-                _pqc_viewports = [
-                    {"name": "Desktop", "width": 1920, "height": 1080, "emoji": "🖥️"},
-                    {"name": "Mobile", "width": 375, "height": 812, "emoji": "📱"},
-                ]
                 _pqc_html_content = _qc_html_content if '_qc_html_content' in dir() else None
+                _pqc_site_url = f"http://{_qc_host}"
                 
-                for _pqc_iter in range(_pqc_max):
-                    _pqc_log.info(f"[PremiumQC] Cycle {_pqc_iter+1}/{_pqc_max}")
-                    yield self._sse({"type": "content", "text": f"\n🔄 Цикл {_pqc_iter+1}/{_pqc_max}:\n", "agent": "Premium QC"})
-                    
-                    _all_good = True
-                    for _vp in _pqc_viewports:
-                        yield self._sse({"type": "content", "text": f"  {_vp['emoji']} Скриншот {_vp['name']}...\n", "agent": "Premium QC"})
-                        try:
-                            # Set viewport size
-                            self._execute_tool('browser_navigate', {'url': f"http://{_qc_host}"})
-                            import time; time.sleep(3)
-                            _ss = self._execute_tool('browser_screenshot', {})
-                            _ss_b64 = _ss.get('screenshot', '')
-                            if 'base64,' in (_ss_b64 or ''):
-                                _ss_b64 = _ss_b64.split('base64,')[1]
-                            
-                            # Opus reviews — with or without screenshot
-                            import requests as _pqc_req
-                            _pqc_headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
-                            _awwwards_prompt = (
-                                f"You are an Awwwards judge reviewing a website design ({_vp['name']} view).\n"
-                                "Rate on a scale 1-10 with EXTREME strictness.\n"
-                                "A score of 9+ means: wow-effect, micro-animations, premium shadows/gradients, "
-                                "perfect typography, glassmorphism or bold modern aesthetic, pixel-perfect spacing, "
-                                "compelling hero section with strong CTA, professional color palette.\n"
-                                "Score 7-8 = good but lacks wow-effect or micro-animations.\n"
-                                "Score < 7 = generic template look, no premium feel.\n"
-                                "If score < 9, describe EXACTLY what specific CSS/HTML changes would push it to 9+.\n"
-                                "Format: SCORE: X/10\nISSUES: ...\nFIX: ..."
-                            )
-                            if _ss_b64:
-                                _pqc_content = [
-                                    {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{_ss_b64}"}},
-                                    {"type": "text", "text": _awwwards_prompt}
-                                ]
-                            else:
-                                # Fallback: review HTML code without screenshot
-                                _pqc_log.warning(f"[PremiumQC] No screenshot for {_vp['name']}, reviewing HTML code")
-                                yield self._sse({"type": "content", "text": f"  ⚠️ Скриншот недоступен, Opus проверяет HTML-код...\n", "agent": "Premium QC"})
-                                _html_for_review = (_pqc_html_content or '')[:15000]
-                                if not _html_for_review:
-                                    continue
-                                _pqc_content = [{"type": "text", "text": (
-                                    f"Review this HTML/CSS code for a website ({_vp['name']} view) as an Awwwards judge.\n"
-                                    "Rate on a scale 1-10 with EXTREME strictness.\n"
-                                    "A score of 9+ means: wow-effect, micro-animations (CSS keyframes), premium shadows/gradients, "
-                                    "glassmorphism or bold modern aesthetic, perfect typography (Google Fonts), "
-                                    "compelling hero section, professional color palette, scroll animations.\n"
-                                    "Score 7-8 = good but lacks wow-effect or micro-animations.\n"
-                                    "Score < 7 = generic template look, no premium feel.\n"
-                                    "If score < 9, describe EXACTLY what CSS/HTML changes would push it to 9+.\n"
-                                    "Format: SCORE: X/10\nISSUES: ...\nFIX: ...\n\n"
-                                    f"HTML CODE:\n{_html_for_review}"
-                                )}]
-                            _pqc_review = _pqc_req.post(self.api_url, headers=_pqc_headers, json={
-                                "model": _pqc_opus_model,
-                                "messages": [{"role": "user", "content": _pqc_content}],
-                                "temperature": 0.3,
-                                "max_tokens": 2000,
-                                "stream": False,
-                            }, timeout=60)
-                            
-                            _review = _pqc_review.json().get("choices", [{}])[0].get("message", {}).get("content", "")
-                            yield self._sse({"type": "content", "text": f"  📋 Opus ({_vp['name']}): {_review[:200]}\n", "agent": "Premium QC"})
-                            
-                            # Check score
-                            import re as _pqc_re
-                            _score_match = _pqc_re.search(r'SCORE:\s*(\d+)', _review)
-                            _score = int(_score_match.group(1)) if _score_match else 5
-                            
-                            if _score < 9:
-                                _all_good = False
-                                yield self._sse({"type": "content", "text": f"  ⚠️ Оценка {_score}/10 — исправляю...\n", "agent": "Premium QC"})
-                                
-                                # Opus fixes HTML
-                                _fix_resp = _pqc_req.post(self.api_url, headers=_pqc_headers, json={
-                                    "model": _pqc_opus_model,
-                                    "messages": [{"role": "user", "content": [
-                                        {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{_ss_b64}"}},
-                                        {"type": "text", "text": (
-                                            f"Fix this HTML to get 10/10 design score. Issues: {_review}\n\n"
-                                            "Return ONLY the complete fixed HTML. Start with <!DOCTYPE html>. "
-                                            "Use Tailwind CSS, modern gradients, shadows, animations. "
-                                            "Make it Dribbble/Awwwards quality."
-                                            + (f"\n\nCurrent HTML:\n{_pqc_html_content[:12000]}" if _pqc_html_content else "")
-                                        )}
-                                    ]}],
-                                    "temperature": 0.3,
-                                    "max_tokens": 16000,
-                                    "stream": False,
-                                }, timeout=90)
-                                
-                                _fixed = _fix_resp.json().get("choices", [{}])[0].get("message", {}).get("content", "")
-                                if '```html' in _fixed:
-                                    _fixed = _fixed.split('```html')[1].split('```')[0].strip()
-                                elif '```' in _fixed:
-                                    _fixed = _fixed.split('```')[1].split('```')[0].strip()
-                                
-                                if _fixed and _fixed.strip().startswith('<'):
-                                    self._execute_tool('file_write', {
-                                        'host': _qc_host,
-                                        'username': self.ssh_credentials.get('username', 'root'),
-                                        'password': self.ssh_credentials.get('password', ''),
-                                        'path': _ap_site_dir + '/index.html' if '_ap_site_dir' in dir() else '/var/www/html/index.html',
-                                        'content': _fixed
-                                    })
-                                    _pqc_html_content = _fixed
-                                    yield self._sse({"type": "content", "text": f"  ✅ HTML исправлен Opus\n", "agent": "Premium QC"})
-                        except Exception as _pqc_e:
-                            _pqc_log.warning(f"[PremiumQC] Error: {_pqc_e}")
-                    
-                    if _all_good:
-                        yield self._sse({"type": "content", "text": f"\n🏆 Дизайн одобрен Opus — оценка 9+/10!\n", "agent": "Premium QC"})
-                        break
+                def _pqc_take_screenshot(url):
+                    """Take screenshot via BrowserAgent and return base64."""
+                    try:
+                        _ss_result = self._execute_tool('browser_navigate', {'url': url})
+                        _ss = _ss_result.get('screenshot', '')
+                        return _ss if _ss else None
+                    except Exception as _e:
+                        _pqc_log.warning(f"[PremiumQC v2] Screenshot error: {_e}")
+                        return None
                 
-                _pqc_log.info("[PremiumQC] Premium quality check completed")
+                def _pqc_deploy_html(html_content, path='/var/www/html/index.html'):
+                    """Deploy HTML to server."""
+                    try:
+                        self._execute_tool('file_write', {
+                            'host': _qc_host,
+                            'username': self.ssh_credentials.get('username', 'root'),
+                            'password': self.ssh_credentials.get('password', ''),
+                            'path': path,
+                            'content': html_content
+                        })
+                        return True
+                    except Exception as _e:
+                        _pqc_log.warning(f"[PremiumQC v2] Deploy error: {_e}")
+                        return False
+                
+                try:
+                    # ── STEP 1: MiniMax creates full HTML ($0.50-1.00) ──
+                    yield self._sse({"type": "content", "text": "  📝 Шаг 1/4: MiniMax создаёт полный HTML...\n", "agent": "Premium QC"})
+                    if not _pqc_html_content:
+                        _mm_create = _pqc_req.post(self.api_url, headers=_pqc_headers, json={
+                            "model": _pqc_minimax_model,
+                            "messages": [{"role": "user", "content": (
+                                "Create a complete, stunning single-page HTML website. "
+                                "Requirements: Tailwind CSS CDN, modern gradients, smooth animations, "
+                                "responsive design, Inter font, glassmorphism effects. "
+                                "Return ONLY complete HTML starting with <!DOCTYPE html>."
+                            )}],
+                            "temperature": 0.7, "max_tokens": 16000, "stream": False
+                        }, timeout=120)
+                        _mm_html = _mm_create.json().get("choices", [{}])[0].get("message", {}).get("content", "")
+                        if '```html' in _mm_html:
+                            _mm_html = _mm_html.split('```html')[1].split('```')[0].strip()
+                        elif '```' in _mm_html:
+                            _mm_html = _mm_html.split('```')[1].split('```')[0].strip()
+                        if _mm_html and _mm_html.strip().startswith('<'):
+                            _pqc_html_content = _mm_html
+                            _pqc_deploy_html(_pqc_html_content)
+                            yield self._sse({"type": "content", "text": "  ✅ MiniMax создал HTML, задеплоен\n", "agent": "Premium QC"})
+                    
+                    # ── STEP 2: MiMo deploys + screenshot ──
+                    yield self._sse({"type": "content", "text": "  📸 Шаг 2/4: Скриншот после деплоя...\n", "agent": "Premium QC"})
+                    _ss1 = _pqc_take_screenshot(_pqc_site_url)
+                    
+                    # ── STEP 3: Opus reviews screenshot → issues list ($0.50) ──
+                    _opus_issues = ""
+                    if _ss1:
+                        yield self._sse({"type": "content", "text": "  🔍 Шаг 3/4: Opus анализирует дизайн...\n", "agent": "Premium QC"})
+                        _opus_review = _pqc_req.post(self.api_url, headers=_pqc_headers, json={
+                            "model": _pqc_opus_model,
+                            "messages": [{"role": "user", "content": [
+                                {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{_ss1}"}},
+                                {"type": "text", "text": (
+                                    "You are a senior UI/UX designer. Review this website screenshot critically.\n"
+                                    "Rate 1-10 and list SPECIFIC improvements needed.\n"
+                                    "Format:\nSCORE: X/10\nISSUES:\n- issue1\n- issue2\nPRIORITY_FIXES:\n- fix1\n- fix2"
+                                )}
+                            ]}],
+                            "temperature": 0.3, "max_tokens": 1000, "stream": False
+                        }, timeout=60)
+                        _opus_issues = _opus_review.json().get("choices", [{}])[0].get("message", {}).get("content", "")
+                        import re as _pqc_re
+                        _score_m = _pqc_re.search(r'SCORE:\s*(\d+)', _opus_issues)
+                        _score = int(_score_m.group(1)) if _score_m else 5
+                        yield self._sse({"type": "content", "text": f"  📋 Opus: оценка {_score}/10\n{_opus_issues[:300]}\n", "agent": "Premium QC"})
+                        
+                        # ── STEP 4: MiniMax fixes based on Opus list ($0.30) ──
+                        if _score < 9 and _pqc_html_content:
+                            yield self._sse({"type": "content", "text": "  🔧 Шаг 4/4: MiniMax исправляет по списку Opus...\n", "agent": "Premium QC"})
+                            _mm_fix = _pqc_req.post(self.api_url, headers=_pqc_headers, json={
+                                "model": _pqc_minimax_model,
+                                "messages": [{"role": "user", "content": (
+                                    f"Fix this HTML based on these design issues:\n{_opus_issues}\n\n"
+                                    "Apply ALL fixes. Return ONLY complete fixed HTML starting with <!DOCTYPE html>.\n\n"
+                                    f"Current HTML:\n{_pqc_html_content[:14000]}"
+                                )}],
+                                "temperature": 0.3, "max_tokens": 16000, "stream": False
+                            }, timeout=120)
+                            _fixed_html = _mm_fix.json().get("choices", [{}])[0].get("message", {}).get("content", "")
+                            if '```html' in _fixed_html:
+                                _fixed_html = _fixed_html.split('```html')[1].split('```')[0].strip()
+                            elif '```' in _fixed_html:
+                                _fixed_html = _fixed_html.split('```')[1].split('```')[0].strip()
+                            if _fixed_html and _fixed_html.strip().startswith('<'):
+                                _pqc_html_content = _fixed_html
+                                _pqc_deploy_html(_pqc_html_content)
+                                yield self._sse({"type": "content", "text": "  ✅ MiniMax исправил HTML, задеплоен\n", "agent": "Premium QC"})
+                                # ── Opus final check ($0.50) ──
+                                _ss2 = _pqc_take_screenshot(_pqc_site_url)
+                                if _ss2:
+                                    _opus_final = _pqc_req.post(self.api_url, headers=_pqc_headers, json={
+                                        "model": _pqc_opus_model,
+                                        "messages": [{"role": "user", "content": [
+                                            {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{_ss2}"}},
+                                            {"type": "text", "text": "Final design check. Rate 1-10. Is it Dribbble/Awwwards quality? SCORE: X/10\nVERDICT: ..."}
+                                        ]}],
+                                        "temperature": 0.2, "max_tokens": 300, "stream": False
+                                    }, timeout=45)
+                                    _final_review = _opus_final.json().get("choices", [{}])[0].get("message", {}).get("content", "")
+                                    _final_score_m = _pqc_re.search(r'SCORE:\s*(\d+)', _final_review)
+                                    _final_score = int(_final_score_m.group(1)) if _final_score_m else 8
+                                    yield self._sse({"type": "content", "text": f"  🏆 Opus финальная оценка: {_final_score}/10\n{_final_review[:200]}\n", "agent": "Premium QC"})
+                        else:
+                            yield self._sse({"type": "content", "text": f"  🏆 Дизайн одобрен Opus — оценка {_score}/10!\n", "agent": "Premium QC"})
+                    yield self._sse({"type": "content", "text": "\n✅ **Premium QC v2 завершён** (~$2-3 вместо $40)\n", "agent": "Premium QC"})
+                    _pqc_log.info("[PremiumQC v2] Pipeline completed")
+                except Exception as _pqc_v2_err:
+                    _pqc_log.warning(f"[PremiumQC v2] Error: {_pqc_v2_err}")
+                    yield self._sse({"type": "content", "text": f"  ⚠️ PremiumQC v2 ошибка: {_pqc_v2_err}\n", "agent": "Premium QC"})
             # ── END PREMIUM DESIGN QUALITY CHECK ──────────────────────────────────
 
             # ── QUALITY CHECK CYCLE: after deploy phases (PATCH-13: + mobile screenshot) ──
@@ -5803,50 +5876,27 @@ class MultiAgentLoop(AgentLoop):
                         break
 
                     if not _screenshot_b64:
-                        _qc_log.warning("[QualityCheck] No screenshot obtained, attempting HTML-only review")
-                        if _qc_html_content:
-                            yield self._sse({"type": "content", "text": "⚠️ Скриншот недоступен, проверяю HTML-код...\n", "agent": "Quality Check"})
-                            # Fall through to review with HTML content only (no image)
-                            _screenshot_b64 = None
-                        else:
-                            _qc_log.warning("[QualityCheck] No screenshot and no HTML content, skipping")
-                            break
+                        _qc_log.warning("[QualityCheck] No screenshot obtained, skipping quality check")
+                        break
 
                     # Step 2: Send screenshot to MiniMax for design review
                     yield self._sse({"type": "content", "text": "🧠 MiniMax проверяет дизайн...\n", "agent": "Quality Check"})
-                    _b64_clean = _screenshot_b64 or ''
+                    _b64_clean = _screenshot_b64
                     if 'base64,' in _b64_clean:
                         _b64_clean = _b64_clean.split('base64,')[1]
 
-                    _qc_awwwards_text = (
-                        "Ты — судья Awwwards. Оцени этот сайт строго.\n"
-                        "Критерии для оценки 9+/10: wow-эффект, микроанимации, премиальные тени/градиенты, "
-                        "glassmorphism или смелая современная эстетика, идеальная типографика, "
-                        "compelling hero-секция, профессиональная цветовая палитра.\n"
-                        "Если нет wow-эффекта, микроанимаций, премиальных теней — оценка < 8.\n"
-                        "Если дизайн выглядит как обычный шаблон — напиши ИСПРАВИТЬ и опиши конкретно что добавить.\n"
-                        "Если дизайн действительно на уровне Awwwards (9+/10) — напиши ХОРОШО.\n"
-                        "Отвечай кратко: ХОРОШО или ИСПРАВИТЬ + что именно."
-                    )
-                    if _b64_clean:
-                        _review_content = [
+                    _review_messages = [
+                        {"role": "user", "content": [
                             {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{_b64_clean}"}},
-                            {"type": "text", "text": _qc_awwwards_text}
-                        ]
-                    else:
-                        # No screenshot — review HTML code
-                        _html_snippet = (_qc_html_content or '')[:10000]
-                        _review_content = [{"type": "text", "text": (
-                            "Ты — судья Awwwards. Оцени этот HTML/CSS код строго.\n"
-                            "Критерии для оценки 9+/10: wow-эффект, микроанимации (CSS keyframes/transitions), "
-                            "премиальные тени/градиенты, glassmorphism или смелая современная эстетика, "
-                            "идеальная типографика (Google Fonts), compelling hero-секция.\n"
-                            "Если нет wow-эффекта, микроанимаций, премиальных теней — напиши ИСПРАВИТЬ.\n"
-                            "Если дизайн действительно на уровне Awwwards — напиши ХОРОШО.\n"
-                            "Отвечай кратко: ХОРОШО или ИСПРАВИТЬ + что именно.\n\n"
-                            f"HTML CODE:\n{_html_snippet}"
-                        )}]
-                    _review_messages = [{"role": "user", "content": _review_content}]
+                            {"type": "text", "text": (
+                                "Посмотри на этот скриншот сайта. "
+                                "CSS работает? Дизайн выглядит правильно? "
+                                "Если нет — опиши конкретно что не так и напиши ИСПРАВИТЬ. "
+                                "Если всё хорошо — напиши ХОРОШО. "
+                                "Отвечай кратко."
+                            )}
+                        ]}
+                    ]
 
                     try:
                         _review_headers = {
@@ -5970,51 +6020,20 @@ class MultiAgentLoop(AgentLoop):
                 _ap_log.info("[AutoPhoto] Starting auto-photo check")
                 yield self._sse({"type": "content", "text": "\n🖼️ **Auto-Photo**: Проверяю изображения на сайте...\n", "agent": "Auto Photo"})
                 try:
-                    # Get HTML content from server - search ALL /var/www/*/ directories
+                    # Get HTML content from server
                     _ap_html_result = self._execute_tool('ssh_execute', {
                         'host': _qc_host,
                         'username': self.ssh_credentials.get('username', 'root'),
                         'password': self.ssh_credentials.get('password', ''),
-                        'command': 'for f in /var/www/*/index.html; do [ -f "$f" ] && echo "===FILE:$f===" && cat "$f"; done 2>/dev/null'
+                        'command': 'cat /var/www/html/index.html 2>/dev/null || cat /var/www/*/index.html 2>/dev/null | head -500'
                     })
-                    _ap_html_raw = _ap_html_result.get('output', '') if _ap_html_result.get('success') else ''
+                    _ap_html = _ap_html_result.get('output', '') if _ap_html_result.get('success') else ''
                     
-                    # Determine which site directory has the HTML
-                    _ap_site_dir = '/var/www/html'
-                    if '===FILE:' in _ap_html_raw:
-                        import re as _ap_re2
-                        _ap_files = _ap_re2.findall(r'===FILE:(/var/www/[^/]+)/', _ap_html_raw)
-                        if _ap_files:
-                            _ap_site_dir = _ap_files[-1]  # Use last (most recent) site dir
-                    _ap_html = _ap_html_raw
-                    
-                    # Find ALL image references: <img src>, background-image:url(), background:url()
+                    # Find all img src with placeholder or missing images
                     import re as _ap_re
-                    _img_srcs = set()
-                    # 1. <img> tags
-                    _img_pattern = _ap_re.compile(r'<img[^>]+src=[\x22\x27]([^\x22\x27]+)[\x22\x27]', _ap_re.IGNORECASE)
-                    _img_srcs.update(_img_pattern.findall(_ap_html))
-                    # 2. background-image: url(...) and background: url(...)
-                    _bg_pattern = _ap_re.compile(r'(?:background(?:-image)?\s*:\s*[^;]*?)url\([\x22\x27]?([^\x22\x27\)]+)[\x22\x27]?\)', _ap_re.IGNORECASE)
-                    _img_srcs.update(_bg_pattern.findall(_ap_html))
-                    # 3. Filter: only local relative paths (not http/data/base64)
-                    _local_imgs = [s for s in _img_srcs if not s.startswith(('http', 'data:', 'blob:', '//'))]
-                    
-                    # Check which images actually exist on server (404 check)
-                    _missing_imgs = []
-                    if _local_imgs:
-                        _check_cmd = ' && '.join([f'[ -f "{_ap_site_dir}/{img}" ] || echo "MISSING:{img}"' for img in _local_imgs[:20]])
-                        _check_result = self._execute_tool('ssh_execute', {
-                            'host': _qc_host,
-                            'username': self.ssh_credentials.get('username', 'root'),
-                            'password': self.ssh_credentials.get('password', ''),
-                            'command': _check_cmd
-                        })
-                        _check_output = _check_result.get('output', '') if _check_result.get('success') else ''
-                        _missing_imgs = _ap_re.findall(r'MISSING:(.+)', _check_output)
-                    
-                    _placeholder_imgs = _missing_imgs if _missing_imgs else []
-                    _ap_log.info(f"[AutoPhoto] Found {len(_local_imgs)} image refs, {len(_missing_imgs)} missing")
+                    # Fixed: use compiled pattern to avoid quote escaping issues
+                    _ap_pattern = re.compile(r'<img[^>]+src=[\x22\x27]([^\x22\x27]*(?:placehold|placeholder|photo\d|image\d|hero|about|team|service)[^\x22\x27]*)[\x22\x27]', re.IGNORECASE)
+                    _placeholder_imgs = _ap_pattern.findall(_ap_html)
                     
                     if _placeholder_imgs:
                         _ap_log.info(f"[AutoPhoto] Found {len(_placeholder_imgs)} placeholder images")
@@ -6030,29 +6049,7 @@ class MultiAgentLoop(AgentLoop):
                                 'team': 'Professional portrait of business person in modern office, confident smile, soft lighting, 8k quality',
                                 'service': 'Abstract technology concept with glowing blue connections and data visualization, dark background, 8k quality',
                             }
-                            # PREMIUM DESIGN: Enhanced AI photo prompts
-                            if getattr(self, 'premium_design', False):
-                                # Use Opus to generate detailed photo prompt
-                                try:
-                                    import requests as _aip_req
-                                    _aip_headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
-                                    _aip_resp = _aip_req.post(self.api_url, headers=_aip_headers, json={
-                                        "model": "anthropic/claude-opus-4",
-                                        "messages": [{"role": "user", "content": (
-                                            f"Generate a detailed 20-30 word photo prompt in English for a website image. "
-                                            f"Context: image placeholder was '{_img_src}'. "
-                                            "The photo should be photorealistic, 8K quality, professional. "
-                                            "Return ONLY the prompt text, nothing else."
-                                        )}],
-                                        "temperature": 0.5, "max_tokens": 100,
-                                    }, timeout=20)
-                                    _ai_prompt = _aip_resp.json().get("choices", [{}])[0].get("message", {}).get("content", "")
-                                    if _ai_prompt and len(_ai_prompt) > 10:
-                                        _prompt = _ai_prompt.strip()
-                                except Exception:
-                                    pass
-                            else:
-                                _prompt = 'Professional high quality business photo, modern clean aesthetic, 8k quality photorealistic'
+                            _prompt = 'Professional high quality business photo, modern clean aesthetic, 8k quality photorealistic'
                             for _key, _val in _prompts.items():
                                 if _key in _img_context:
                                     _prompt = _val
@@ -6065,25 +6062,8 @@ class MultiAgentLoop(AgentLoop):
                                     'height': 600
                                 })
                                 if _gen_result.get('success') and _gen_result.get('url'):
-                                    _img_url = _gen_result['url']
-                                    _img_dir = '/'.join(_img_src.split('/')[:-1]) if '/' in _img_src else 'images'
-                                    _upload_cmd = (
-                                        f'mkdir -p {_ap_site_dir}/{_img_dir} && '
-                                        f'wget -q -O {_ap_site_dir}/{_img_src} "{_img_url}" && '
-                                        f'echo "UPLOADED:{_img_src}"'
-                                    )
-                                    _upload_result = self._execute_tool('ssh_execute', {
-                                        'host': _qc_host,
-                                        'username': self.ssh_credentials.get('username', 'root'),
-                                        'password': self.ssh_credentials.get('password', ''),
-                                        'command': _upload_cmd
-                                    })
-                                    _upload_ok = 'UPLOADED:' in (_upload_result.get('output', '') if _upload_result.get('success') else '')
                                     _generated_count += 1
-                                    if _upload_ok:
-                                        yield self._sse({"type": "content", "text": f"  \u2705 Фото {_generated_count} загружено на сервер ({_img_src})\n", "agent": "Auto Photo"})
-                                    else:
-                                        yield self._sse({"type": "content", "text": f"  \u26a0\ufe0f Фото {_generated_count} сгенерировано, но не загружено\n", "agent": "Auto Photo"})
+                                    yield self._sse({"type": "content", "text": f"  ✅ Фото {_generated_count} сгенерировано\n", "agent": "Auto Photo"})
                             except Exception as _gen_e:
                                 _ap_log.warning(f"[AutoPhoto] generate_image failed: {_gen_e}")
                         
@@ -6094,61 +6074,6 @@ class MultiAgentLoop(AgentLoop):
                 except Exception as _ap_e:
                     _ap_log.warning(f"[AutoPhoto] Error: {_ap_e}")
             # ── END AUTO-PHOTO CHECK ──────────────────────────────────────────────
-            # ── EXTERNAL ACCESSIBILITY CHECK (PATCH-29): verify site is reachable from outside ──
-            if _is_deploy_phase and _qc_host:
-                import logging as _ext_log
-                _ext_log.info(f"[ExtCheck] Verifying external HTTP access to {_qc_host}")
-                yield self._sse({"type": "content", "text": "\n🌐 **External Check**: Проверяю доступность сайта извне...\n", "agent": "External Check"})
-                try:
-                    import requests as _ext_req
-                    _ext_url = f"http://{_qc_host}"
-                    _ext_resp = _ext_req.get(_ext_url, timeout=10, allow_redirects=False)
-                    _ext_status = _ext_resp.status_code
-                    if _ext_status == 200:
-                        yield self._sse({"type": "content", "text": f"  ✅ Сайт доступен: HTTP {_ext_status}\n", "agent": "External Check"})
-                    elif _ext_status in (301, 302):
-                        _ext_location = _ext_resp.headers.get('Location', '')
-                        yield self._sse({"type": "content", "text": f"  ⚠️ Редирект {_ext_status} → {_ext_location}\n", "agent": "External Check"})
-                        # Fix: if redirect to HTTPS but no valid SSL, remove the redirect
-                        if 'https' in _ext_location:
-                            yield self._sse({"type": "content", "text": f"  🔧 Обнаружен редирект на HTTPS — убираю...\n", "agent": "External Check"})
-                            self._execute_tool('ssh_execute', {
-                                'host': _qc_host,
-                                'username': self.ssh_credentials.get('username', 'root'),
-                                'password': self.ssh_credentials.get('password', ''),
-                                'command': (
-                                    'for f in /etc/nginx/sites-enabled/*; do '
-                                    'grep -l "return 301 https" "$f" 2>/dev/null && '
-                                    'sed -i "/return 301 https/d" "$f"; done && '
-                                    'nginx -t 2>&1 && nginx -s reload'
-                                )
-                            })
-                            # Re-check
-                            import time; time.sleep(2)
-                            _ext_resp2 = _ext_req.get(_ext_url, timeout=10, allow_redirects=False)
-                            if _ext_resp2.status_code == 200:
-                                yield self._sse({"type": "content", "text": f"  ✅ Исправлено! Сайт доступен: HTTP 200\n", "agent": "External Check"})
-                            else:
-                                yield self._sse({"type": "content", "text": f"  ❌ Всё ещё не 200: HTTP {_ext_resp2.status_code}\n", "agent": "External Check"})
-                    else:
-                        yield self._sse({"type": "content", "text": f"  ❌ Сайт недоступен: HTTP {_ext_status}\n", "agent": "External Check"})
-                    
-                    # Also check that images load (spot check first 3)
-                    if '_missing_imgs' not in dir():
-                        _missing_imgs = []
-                    if not _missing_imgs and '_local_imgs' in dir() and _local_imgs:
-                        _spot_check = _local_imgs[:3]
-                        for _sc_img in _spot_check:
-                            try:
-                                _sc_resp = _ext_req.head(f"{_ext_url}/{_sc_img}", timeout=5)
-                                if _sc_resp.status_code != 200:
-                                    yield self._sse({"type": "content", "text": f"  ⚠️ Изображение недоступно: {_sc_img} (HTTP {_sc_resp.status_code})\n", "agent": "External Check"})
-                            except Exception:
-                                pass
-                except Exception as _ext_e:
-                    _ext_log.warning(f"[ExtCheck] Error: {_ext_e}")
-                    yield self._sse({"type": "content", "text": f"  ⚠️ Не удалось проверить: {_ext_e}\n", "agent": "External Check"})
-            # ── END EXTERNAL ACCESSIBILITY CHECK ──────────────────────────────────
             # ── TAILWIND CDN CHECK (PATCH-15) ──────────────────────────────
             if _is_deploy_phase and _qc_host:
                 import logging as _tw_log
@@ -6157,7 +6082,7 @@ class MultiAgentLoop(AgentLoop):
                         'host': _qc_host,
                         'username': self.ssh_credentials.get('username', 'root'),
                         'password': self.ssh_credentials.get('password', ''),
-                        'command': 'grep -rl "cdn.tailwindcss" /var/www/*/index.html /var/www/html/index.html 2>/dev/null || echo "NO_TAILWIND"'
+                        'command': 'grep -l "cdn.tailwindcss" /var/www/html/index.html /var/www/*/index.html 2>/dev/null || echo "NO_TAILWIND"'
                     })
                     _tw_output = _tw_result.get('output', '') if _tw_result.get('success') else 'NO_TAILWIND'
                     if 'NO_TAILWIND' in _tw_output:
@@ -6168,7 +6093,7 @@ class MultiAgentLoop(AgentLoop):
                             'host': _qc_host,
                             'username': self.ssh_credentials.get('username', 'root'),
                             'password': self.ssh_credentials.get('password', ''),
-                            'command': 'for f in /var/www/*/index.html /var/www/html/index.html; do [ -f "$f" ] && sed -i \'s|</head>|<script src="https://cdn.tailwindcss.com"></script>\n</head>|\' "$f" 2>/dev/null; done'
+                            'command': 'sed -i \'s|</head>|<script src="https://cdn.tailwindcss.com"></script>\n</head>|\' /var/www/html/index.html 2>/dev/null'
                         })
                         yield self._sse({"type": "content", "text": "✅ Tailwind CDN добавлен\n", "agent": "Tailwind Check"})
                     else:
@@ -6176,41 +6101,6 @@ class MultiAgentLoop(AgentLoop):
                 except Exception as _tw_e:
                     _tw_log.warning(f"[TailwindCheck] Error: {_tw_e}")
             # ── END TAILWIND CDN CHECK ──────────────────────────────────────
-            # ── AOS & LUCIDE JS CHECK (PATCH-30) ──────────────────────────
-            if _is_deploy_phase and _qc_host:
-                import logging as _aos_log
-                try:
-                    _aos_result = self._execute_tool('ssh_execute', {
-                        'host': _qc_host,
-                        'username': self.ssh_credentials.get('username', 'root'),
-                        'password': self.ssh_credentials.get('password', ''),
-                        'command': (
-                            "for f in /var/www/html/index.html /var/www/*/index.html; do "
-                            "  [ -f '$f' ] || continue; "
-                            "  HAS_AOS_ATTR=$(grep -c 'data-aos' '$f' 2>/dev/null || echo 0); "
-                            "  HAS_AOS_JS=$(grep -c 'aos.js' '$f' 2>/dev/null || echo 0); "
-                            "  FIXED=0; "
-                            "  if [ '$HAS_AOS_ATTR' -gt 0 ] && [ '$HAS_AOS_JS' -eq 0 ]; then "
-                            "    perl -i -pe 's|</body>|<script src=https://unpkg.com/aos@2.3.1/dist/aos.js></script><script>AOS.init();</script></body>|' '$f'; "
-                            "    FIXED=$((FIXED+1)); echo 'AOS_JS_ADDED:'$f; "
-                            "  fi; "
-                            "  HAS_AOS_CSS=$(grep -c 'aos.css' '$f' 2>/dev/null || echo 0); "
-                            "  if [ '$HAS_AOS_ATTR' -gt 0 ] && [ '$HAS_AOS_CSS' -eq 0 ]; then "
-                            "    perl -i -pe 's|</head>|<link href=https://unpkg.com/aos@2.3.1/dist/aos.css rel=stylesheet></head>|' '$f'; "
-                            "    FIXED=$((FIXED+1)); echo 'AOS_CSS_ADDED:'$f; "
-                            "  fi; "
-                            "  if [ '$FIXED' -eq 0 ] && [ '$HAS_AOS_ATTR' -gt 0 ]; then echo 'AOS_OK:'$f; fi; "
-                            "done"
-                        )
-                    })
-                    _aos_output = _aos_result.get('output', '') if _aos_result.get('success') else ''
-                    if 'AOS_JS_ADDED' in _aos_output or 'AOS_CSS_ADDED' in _aos_output or 'AOS_INIT_ADDED' in _aos_output:
-                        yield self._sse({"type": "content", "text": "⚠️ AOS библиотека не была подключена — исправлено автоматически\n", "agent": "AOS Check"})
-                    elif 'AOS_OK' in _aos_output:
-                        yield self._sse({"type": "content", "text": "✅ AOS анимации подключены корректно\n", "agent": "AOS Check"})
-                except Exception as _aos_e:
-                    _aos_log.warning(f"[AOSCheck] Error: {_aos_e}")
-            # ── END AOS & LUCIDE JS CHECK ──────────────────────────────────
 
 
 

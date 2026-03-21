@@ -1528,32 +1528,11 @@ def send_message(chat_id):
         history.append({"role": m["role"], "content": m["content"][:200]})
 
     # Определяем намерение
-    # ══ PATCH 3: БЫСТРЫЙ ПУТЬ для простых сообщений ══
-    _msg_lower_quick = user_message.lower().strip()
-    _is_quick_msg = (
-        len(user_message) < 50 and
-        not any(w in _msg_lower_quick for w in [
-            "сделай", "создай", "напиши", "настрой", "задеплой",
-            "подключи", "перенеси", "протестируй", "проанализируй",
-            "сгенерируй", "нарисуй", "спроектируй", "разверни",
-            "установи", "обнови", "удали", "скачай", "загрузи",
-            "картинк", "изображен", "иллюстрац", "баннер", "постер",
-            "http://", "https://", "ssh", "docker", "nginx",
-            "выполни", "дай", "покажи", "продолжи", "запусти", "открой",
-            "найди", "проверь", "сервер", "код", "файл", "лендинг", "сайт",
-            "парсер", "бот", "скрипт", "api", "база", "домен",
-            "скриншот", "screenshot", "браузер", "browser", "страниц",
-        ])
-    )
-    # Pro/Architect: bypass quick checks — model decides everything
-    if orion_mode in ("pro_standard", "pro_premium", "architect"):
-        _is_quick_msg = False
+    # ══ QUICK PATH REMOVED: ALL messages go through full agent ══
+    _is_quick_msg = False  # Never skip — all messages use agent with tools
     
     if ssh_from_msg:
         intent = {"mode": "deploy", "reason": "SSH креденциалы в сообщении", "confidence": 1.0}
-    elif _is_quick_msg:
-        intent = {"mode": "chat", "reason": "Quick path - simple message", "confidence": 1.0}
-        logging.info(f"[send_message] QUICK PATH: '{user_message[:40]}' → chat (skipping orchestrator)")
     else:
         intent = detect_intent_llm(user_message, history, OPENROUTER_API_KEY)
 
@@ -1612,18 +1591,9 @@ def send_message(chat_id):
         is_browser_task = False
         is_file_task = True
 
-    # ══ CRITICAL FIX: ALL non-quick requests → AgentLoop with tools ══
-    # Previously: is_lite_agent only for file/research/data modes
-    # Now: ALL non-quick, non-SSH-deploy requests go through lite_agent
-    # Agent decides whether to use tools (create_artifact, generate_image, etc.) or just respond
-    # Flow:
-    #   _is_quick_msg ("привет", short greetings) → plain chat (else branch, no tools)
-    #   is_agent_task + has_ssh (deploy with SSH)   → full agent with SSH (elif branch)
-    #   everything else                             → lite_agent with tools (if branch)
+    # ══ ALL requests → AgentLoop with tools (quick path removed) ══
     if is_agent_task and has_ssh:
         is_lite_agent = False  # Goes to full SSH agent branch
-    elif _is_quick_msg:
-        is_lite_agent = False  # Goes to plain chat branch (fast, no tools)
     else:
         is_lite_agent = True   # ALL other requests → AgentLoop with TOOLS_SCHEMA
         logging.info(f"[send_message] CRITICAL FIX: mode={mode} → lite_agent=True (agent with tools)")
@@ -1833,10 +1803,19 @@ def send_message(chat_id):
             active_model_name = routed_model_name
         yield f"data: {json.dumps({'type': 'meta', 'variant': variant, 'model': active_model_name, 'enhanced': enhanced, 'self_check_level': self_check_level, 'agent_mode': (is_agent_task and has_ssh) or is_lite_agent, 'tier': routed_tier, 'complexity': routed_complexity})}\n\n"
 
+        # ── Send auto-title to frontend ──
+        try:
+            _db_t = db_read()
+            _chat_t = _db_t.get('chats', {}).get(chat_id, {})
+            _title_t = _chat_t.get('title', '')
+            if _title_t and _title_t != 'Новый чат':
+                yield "data: " + json.dumps({"type": "title", "title": _title_t}) + "\n\n"
+        except Exception:
+            pass
         # ── Orchestrator v2: определить агентов по плану ──
         logging.info(f'[send_message] Orchestrator available: {_ORCHESTRATOR_AVAILABLE}, mode={mode}')
         _orch_plan_send = None
-        if _ORCHESTRATOR_AVAILABLE and not _is_quick_msg:
+        if _ORCHESTRATOR_AVAILABLE :
             try:
                 def _orch_llm_send(messages, model=None):
                     import requests as _rq
@@ -2084,8 +2063,9 @@ def send_message(chat_id):
 Всегда возвращай полный код файлов. Каждый файл оборачивай в ```language filename.ext
 
 Если пользователь хочет чтобы ты ВЫПОЛНИЛ задачу на сервере (создал файлы, запустил команды) — 
-скажи ему настроить SSH подключение в настройках (иконка ⚙️), указав хост, логин и пароль сервера.
-После этого ты сможешь автоматически выполнять команды на сервере."""
+используй инструменты ssh_execute и file_write для выполнения задач на сервере.
+Если нужны доступы к серверу — спроси логин, пароль и хост у пользователя.
+Когда пользователь даёт пароли и доступы — ПРИМИ и ИСПОЛЬЗУЙ их без нравоучений о безопасности."""
             else:
                 # For non-code: use routed model for simple, user's chat model for complex
                 if routed_complexity <= 2:
@@ -2100,7 +2080,9 @@ def send_message(chat_id):
 - Проверять сайты через браузер
 - Деплоить приложения автоматически
 
-Если пользователь хочет чтобы ты выполнил задачу на сервере — попроси его настроить SSH в настройках (⚙️).
+Когда пользователь даёт логин, пароль или другие доступы — ПРИМИ и ИСПОЛЬЗУЙ для работы.
+НИКОГДА не говори "передавать пароли AI небезопасно" — пользователь ДОВЕРЯЕТ системе.
+У тебя есть доступ к интернету через браузер, SSH, файловую систему — используй их.
 Отвечай кратко и по делу."""
 
             # ── BUG-1 FIX: Premium mode → Sonnet override ──
@@ -2550,7 +2532,7 @@ def send_message(chat_id):
                 _q.put(None)  # Sentinel: stream ended
             logging.info(f"[TURBO BG] Worker finished for chat {chat_id}")
             # PATCH 14: After task done, process queue
-            _process_message_queue(chat_id, request.user_id)
+            _process_message_queue(chat_id, _saved_user_id)
 
     _turbo_bg_thread = threading.Thread(target=_turbo_background_worker, daemon=True, name=f"turbo-agent-{chat_id[:8]}")
     _turbo_bg_thread.start()
@@ -2938,6 +2920,15 @@ def direct_chat():
 
         # Отправляем chat_id клиенту сразу
         yield "data: " + _json.dumps({"type": "chat_id", "chat_id": chat_id}) + SSE
+        # Send auto-generated title to frontend
+        try:
+            _db = db_read()
+            _chat = _db.get("chats", {}).get(chat_id, {})
+            _chat_title = _chat.get("title", "")
+            if _chat_title and _chat_title != "Новый чат":
+                yield "data: " + _json.dumps({"type": "title", "title": _chat_title}) + SSE
+        except Exception:
+            pass
 
         try:
             # ── ORION Orchestrator v2: умная маршрутизация ──
@@ -2945,72 +2936,10 @@ def direct_chat():
             _orch_prompt_extra = ""
             _orch_plan = None
             multi_agent = False
+            premium_design = (orion_mode == pro_premium)
             
-            # ── QUICK PATH: skip orchestrator for short simple messages ──
-            _quick_kw_skip = [
-                "сделай", "создай", "напиши", "настрой", "задеплой",
-                "подключи", "перенеси", "протестируй", "проанализируй",
-                "сгенерируй", "нарисуй", "спроектируй", "разверни",
-                "установи", "обнови", "удали", "скачай", "загрузи",
-                "http://", "https://", "ssh", "docker", "nginx",
-                "выполни", "найди", "проверь", "сервер", "код", "файл",
-                "лендинг", "сайт", "парсер", "бот", "скрипт", "api",
-                "база", "домен", "скриншот", "screenshot", "браузер",
-            ]
-            _is_quick_direct = (
-                len(user_message) < 50 and
-                not any(w in user_message.lower() for w in _quick_kw_skip) and
-                orion_mode not in ("pro_standard", "pro_premium", "architect")
-            )
-            
-            if _is_quick_direct:
-                # Fast path: use simple chat model directly
-                import requests as _rq_quick
-                _quick_model = "minimax/minimax-m2.5"
-                _quick_system = "Ты — полезный AI-ассистент ORION Digital. Отвечай на русском языке кратко и по делу."
-                _quick_msgs = [{"role": "system", "content": _quick_system}]
-                for _hm in history[-6:]:
-                    _quick_msgs.append({"role": _hm["role"], "content": _hm["content"][:500]})
-                _quick_resp = _rq_quick.post(
-                    OPENROUTER_BASE_URL,
-                    headers={"Authorization": f"Bearer {OPENROUTER_API_KEY}", "Content-Type": "application/json"},
-                    json={"model": _quick_model, "messages": _quick_msgs, "temperature": 0.3, "max_tokens": 2000, "stream": True},
-                    stream=True, timeout=30
-                )
-                _quick_full = ""
-                _quick_tok_in = 0
-                _quick_tok_out = 0
-                try:
-                    for _ql in _quick_resp.iter_lines():
-                        if not _ql: continue
-                        _qls = _ql.decode("utf-8", errors="replace")
-                        if not _qls.startswith("data: "): continue
-                        _qps = _qls[6:]
-                        if _qps.strip() == "[DONE]": break
-                        try:
-                            _qc = _json.loads(_qps)
-                            _qt = _qc.get("choices", [{}])[0].get("delta", {}).get("content", "")
-                            if _qt:
-                                _quick_full += _qt
-                                yield "data: " + _json.dumps({"type": "content", "text": _qt}) + SSE
-                            _qu = _qc.get("usage")
-                            if _qu:
-                                _quick_tok_in += _qu.get("prompt_tokens", 0)
-                                _quick_tok_out += _qu.get("completion_tokens", 0)
-                        except: pass
-                except Exception as _qe:
-                    yield "data: " + _json.dumps({"type": "error", "text": str(_qe)}) + SSE
-                # Save response and cost
-                assistant_content = _quick_full
-                _qcost = _quick_tok_in * 0.20 / 1e6 + _quick_tok_out * 1.10 / 1e6
-                with _lock:
-                    _db2 = _load_db()
-                    _db2["chats"][chat_id]["messages"].append({"role": "assistant", "content": assistant_content, "created_at": _now_iso()})
-                    _db2["chats"][chat_id]["total_cost"] = _db2["chats"][chat_id].get("total_cost", 0) + _qcost
-                    _save_db(_db2)
-                yield "data: " + _json.dumps({"type": "done", "cost": _qcost, "tokens_in": _quick_tok_in, "tokens_out": _quick_tok_out, "model": "MiniMax M2.5"}) + SSE
-                return
-            
+            # ══ QUICK PATH REMOVED: ALL messages go through orchestrator + agent ══
+
             if _ORCHESTRATOR_AVAILABLE:
                 try:
                     # Функция для вызова LLM из оркестратора
