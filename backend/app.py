@@ -99,7 +99,11 @@ os.makedirs(GENERATED_DIR, exist_ok=True)
 try:
     from database import load_db as _sqlite_load, save_db as _sqlite_save, init_db
     _USE_SQLITE = True
+    init_db()  # PATCH 12 bug9: initialize SQLite with WAL mode at startup
 except ImportError:
+    _USE_SQLITE = False
+except Exception as _db_init_err:
+    logging.warning(f"SQLite init failed: {_db_init_err}")
     _USE_SQLITE = False
 
 DB_FILE = os.path.join(DATA_DIR, "database.json")
@@ -113,6 +117,39 @@ _agents_lock = threading.Lock()
 # Each entry: {chat_id: {"status": "running"|"done", "events": [...], "started_at": float, "user_id": str}}
 _running_tasks = {}
 _tasks_lock = threading.Lock()
+
+# ══ PATCH 14: Manus-style task interruption / queue / append ══
+# _paused_tasks: {chat_id: {"messages": [...], "iteration": int, "charter": str,
+#                           "actions_log": [...], "user_id": str, "task": str}}
+_paused_tasks = {}
+# _message_queue: {chat_id: [{"message": str, "mode": str, "user_id": str, "file_content": str}]}
+_message_queue = {}
+_interrupt_lock = threading.Lock()
+
+# Keywords that put message INTO QUEUE (agent finishes current first)
+_QUEUE_KEYWORDS = [
+    "после текущей", "потом", "когда закончишь", "после того как",
+    "когда освободишься", "после завершения", "после этого", "затем",
+    "следующей задачей", "следующая задача"
+]
+# Keywords that APPEND to current task (agent sees on next iteration)
+_APPEND_KEYWORDS = [
+    "добавь к текущей", "также", "ещё", "и ещё", "плюс к этому",
+    "дополнительно", "заодно", "и также", "а ещё", "к этому добавь"
+]
+
+def _classify_interrupt_message(text: str) -> str:
+    """Classify incoming message during active task.
+    Returns: 'queue' | 'append' | 'interrupt'
+    """
+    lower = text.lower().strip()
+    for kw in _QUEUE_KEYWORDS:
+        if kw in lower:
+            return "queue"
+    for kw in _APPEND_KEYWORDS:
+        if kw in lower:
+            return "append"
+    return "interrupt"
 
 # Singletons for new modules
 _vector_memory = None
@@ -138,41 +175,43 @@ def _get_rate_limiter():
     return _rate_limiter
 
 # ── Model Configurations ──────────────────────────────────────
+# MODEL_CONFIGS: реальные ID моделей из model_router.py (PATCH 12 fix2)
 MODEL_CONFIGS = {
     "original": {
         "name": "Оригинал",
         "emoji": "🔴",
-        "coding": {"model": "openai/gpt-4.1-mini", "name": "Grok Code Fast 1", "input_price": 0.20, "output_price": 1.50},
+        "coding": {"model": "xiaomi/mimo-v2-flash", "name": "MiMo-V2-Flash", "input_price": 0.09, "output_price": 0.29},
         "planner": {"model": "anthropic/claude-sonnet-4.6", "name": "Claude Sonnet 4.6", "input_price": 3.00, "output_price": 15.00},
-        "tools": {"model": "openai/gpt-4.1-mini", "name": "GPT-4.1 Mini", "input_price": 0.26, "output_price": 0.38},
+        "tools": {"model": "xiaomi/mimo-v2-flash", "name": "MiMo-V2-Flash", "input_price": 0.09, "output_price": 0.29},
         "quality": 72.1,
         "monthly_cost": "$2,200"
     },
     "premium": {
         "name": "Премиум",
         "emoji": "🟢",
-        "coding": {"model": "openai/gpt-4.1-mini", "name": "MiniMax M2.5", "input_price": 0.27, "output_price": 0.95},
+        "coding": {"model": "minimax/minimax-m2.5", "name": "MiniMax M2.5", "input_price": 0.20, "output_price": 1.10},
         "planner": {"model": "anthropic/claude-sonnet-4.6", "name": "Claude Sonnet 4.6", "input_price": 3.00, "output_price": 15.00},
-        "tools": {"model": "openai/gpt-4.1-mini", "name": "GPT-4.1 Mini", "input_price": 0.26, "output_price": 0.38},
+        "tools": {"model": "xiaomi/mimo-v2-flash", "name": "MiMo-V2-Flash", "input_price": 0.09, "output_price": 0.29},
         "quality": 80.2,
         "monthly_cost": "$1,750"
     },
     "budget": {
         "name": "Бюджет",
         "emoji": "🔵",
-        "coding": {"model": "openai/gpt-4.1-mini", "name": "GPT-4.1 Mini", "input_price": 0.26, "output_price": 0.38},
-        "planner": {"model": "openai/gpt-4.1-mini", "name": "GPT-4.1 Mini", "input_price": 0.40, "output_price": 1.75},
-        "tools": {"model": "openai/gpt-4.1-mini", "name": "GPT-4.1 Mini", "input_price": 0.26, "output_price": 0.38},
+        "coding": {"model": "xiaomi/mimo-v2-flash", "name": "MiMo-V2-Flash", "input_price": 0.09, "output_price": 0.29},
+        "planner": {"model": "minimax/minimax-m2.5", "name": "MiniMax M2.5", "input_price": 0.20, "output_price": 1.10},
+        "tools": {"model": "xiaomi/mimo-v2-flash", "name": "MiMo-V2-Flash", "input_price": 0.09, "output_price": 0.29},
         "quality": 75.8,
         "monthly_cost": "$750"
     }
-}
+}  # PATCH fix: replaced deepseek with mimo/minimax
 
+# CHAT_MODELS: реальные ID моделей (PATCH 12 fix2)
 CHAT_MODELS = {
-    "qwen3": {"model": "openai/gpt-4.1-mini", "name": "GPT-4.1 Mini", "lang": "RU ⭐⭐⭐⭐⭐", "input_price": 0.10, "output_price": 0.60},
-    "deepseek": {"model": "openai/gpt-4.1-nano", "name": "GPT-4.1 Mini", "lang": "RU ⭐⭐⭐⭐⭐", "input_price": 0.26, "output_price": 0.38},
-    "gpt5nano": {"model": "openai/gpt-4.1-nano", "name": "GPT-5 Nano", "lang": "RU ⭐⭐⭐⭐", "input_price": 0.05, "output_price": 0.40},
-}
+    "qwen3":    {"model": "minimax/minimax-m2.5",   "name": "MiniMax M2.5",    "lang": "RU ⭐⭐⭐⭐⭐", "input_price": 0.20, "output_price": 1.10},
+    "mimo":     {"model": "xiaomi/mimo-v2-flash",   "name": "MiMo-V2-Flash",  "lang": "RU ⭐⭐⭐⭐",  "input_price": 0.09, "output_price": 0.29},
+    "gpt5nano": {"model": "minimax/minimax-m2.5",   "name": "MiniMax M2.5",   "lang": "RU ⭐⭐⭐⭐",  "input_price": 0.20, "output_price": 1.10},
+}  # PATCH fix: replaced deepseek with mimo
 
 # ── File processing constants ─────────────────────────────────
 TEXT_EXTENSIONS = {
@@ -219,8 +258,14 @@ def _calc_cost(tokens_in, tokens_out, model_name):
         'anthropic/claude-opus-4': (15.00, 75.00),
         'anthropic/claude-sonnet-4.6': (3.00, 15.00),
         'anthropic/claude-sonnet-4': (3.00, 15.00),
-        'openai/gpt-4.1-mini': (0.26, 0.38),
-        'openai/gpt-4.1-nano': (0.10, 0.40),
+        'minimax/minimax-m2.5': (0.20, 1.10),
+        'minimax/minimax-m2.7': (0.20, 1.10),
+        'xiaomi/mimo-v2-flash': (0.09, 0.29),
+        'xiaomi/mimo-v2-omni':  (0.15, 0.75),
+        # legacy/fallback keys kept for compatibility
+        'deepseek/deepseek-v3.2': (0.27, 1.10),  # fallback 3rd level
+        'openai/gpt-4.1-mini': (0.27, 0.95),
+        'openai/gpt-4.1-nano': (0.27, 0.95),
     }
     in_price, out_price = PRICING.get(model_name, (3.00, 15.00))
     return round((tokens_in / 1_000_000) * in_price + (tokens_out / 1_000_000) * out_price, 6)
@@ -233,8 +278,8 @@ _DEFAULT_DB = {
             "id": "admin",
             "email": "ym@mksmedia.ru",
             "password_hash": hashlib.sha256(
-                os.environ.get("ORION_ADMIN_PASSWORD", "qwerty1985").encode()
-            ).hexdigest(),  # BUG-4 FIX: пароль из env ORION_ADMIN_PASSWORD
+                os.environ.get("ORION_ADMIN_PASSWORD", secrets.token_hex(16)).encode()
+            ).hexdigest(),  # PATCH 12 fix3: random fallback if env not set (no hardcoded default)
             "name": "Администратор",
             "role": "admin",
             "created_at": datetime.now(timezone.utc).isoformat(),
@@ -907,12 +952,29 @@ def process_uploaded_file(file_storage):
     return f"📎 **Файл: {filename}** ({ext or 'unknown'} — бинарный файл, сохранён для анализа)\n[Путь: {filepath}]"
 
 
-# ── Uploaded files metadata store ──
-_uploaded_files = {}  # file_id -> file_meta
+# ── Uploaded files metadata store ── PATCH 12 bug10: disk persistence ──
+_UPLOAD_REGISTRY = os.path.join(UPLOAD_DIR, "_upload_registry.json")
+
+def _load_upload_registry():
+    """Load uploaded files registry from disk."""
+    try:
+        if os.path.exists(_UPLOAD_REGISTRY):
+            with open(_UPLOAD_REGISTRY, 'r', encoding='utf-8') as f:
+                return json.load(f)
+    except Exception:
+        pass
+    return {}
+
+_uploaded_files = _load_upload_registry()  # file_id -> file_meta, persisted to disk
 
 def _save_uploaded_file_meta(meta):
-    """Save uploaded file metadata for agent tool access."""
+    """Save uploaded file metadata for agent tool access (in-memory + disk)."""
     _uploaded_files[meta['id']] = meta
+    try:
+        with open(_UPLOAD_REGISTRY, 'w', encoding='utf-8') as f:
+            json.dump(_uploaded_files, f, ensure_ascii=False)
+    except Exception as _e:
+        logging.warning(f"Upload registry save failed: {_e}")
 
 def _get_uploaded_file_path(file_id):
     """Get filepath by file_id."""
@@ -921,6 +983,7 @@ def _get_uploaded_file_path(file_id):
 
 
 @app.route("/api/upload", methods=["POST"])
+@app.route("/api/files/upload", methods=["POST"])  # PATCH 12 bug4: alias for frontend compatibility
 @require_auth
 def upload_file():
     """Upload file(s) and return processed content with file paths for agent."""
@@ -1294,7 +1357,6 @@ def send_message(chat_id):
     data = request.get_json() or {}
     user_message = data.get("message", "").strip()
     file_content = data.get("file_content", "")
-    premium_design = data.get("premium_design", False)
     # ── BUG-1 FIX: Extract and normalize orion_mode ──
     _raw_mode = data.get("mode", "turbo-basic")
     _MODE_NORMALIZE = {
@@ -1423,14 +1485,23 @@ def send_message(chat_id):
     agent_model = config["tools"]["model"]
     agent_model_name = config["tools"]["name"]
 
-    # ── ПАТЧ 5: Sonnet для серверных задач в Pro режимах ──
-    _server_kw = ["сервер", "деплой", "ftp", "ssh", "загрузи", "настрой",
-                  "админк", "nginx", "битрикс", "bitrix", "на сайт",
-                  "создай страниц", "добавь в меню", "перенеси"]
-    if variant == "premium" and any(w in user_message.lower() for w in _server_kw):
-        agent_model = "anthropic/claude-sonnet-4.6"
-        agent_model_name = "Claude Sonnet 4.6"
-        logging.info(f"[PATCH5] Server task detected, upgrading to Sonnet")
+    # ── PATCH 4: Single model selection path via model_router ──
+    # Model is selected ONLY by orion_mode via model_router, no keyword overrides
+    _TURBO_MODES = ("turbo_standard", "turbo_premium")
+    try:
+        from model_router import MODELS as _MR_MODELS
+        _mode_to_model = {
+            "turbo_standard": ("minimax/minimax-m2.5", "MiniMax M2.5"),
+            "turbo_premium":  ("minimax/minimax-m2.5", "MiniMax M2.5"),
+            "pro_standard":   (_MR_MODELS["sonnet"]["id"], _MR_MODELS["sonnet"]["name"]),
+            "pro_premium":    (_MR_MODELS["sonnet"]["id"], _MR_MODELS["sonnet"]["name"]),
+            "architect":      (_MR_MODELS["opus"]["id"], _MR_MODELS["opus"]["name"]),
+        }
+        if orion_mode in _mode_to_model:
+            agent_model, agent_model_name = _mode_to_model[orion_mode]
+            logging.info(f"[MODEL_ROUTER] orion_mode={orion_mode} -> model={agent_model}")
+    except Exception as _mr_err:
+        logging.warning(f"[MODEL_ROUTER] Fallback to config model: {_mr_err}")
 
     # Detect if this is an agent task (needs SSH/files/browser) or simple chat
     # ══ LLM ORCHESTRATOR: определяем намерение через AI, а не ключевые слова ══
@@ -1570,7 +1641,6 @@ def send_message(chat_id):
             api_url=OPENROUTER_BASE_URL,
             ssh_credentials=ssh_credentials,
             user_id=request.user_id,
-            premium_design=premium_design,
         )
         _pro_loop._chat_id = chat_id
         _pro_loop._verify_enabled = data.get("verify", False)
@@ -1754,7 +1824,7 @@ def send_message(chat_id):
             try:
                 def _orch_llm_send(messages, model=None):
                     import requests as _rq
-                    _llm_model = model or "openai/gpt-4.1-nano"
+                    _llm_model = model or "minimax/minimax-m2.5"  # PATCH fix2: real model ID
                     logging.info(f"[_orch_llm_send] Calling {_llm_model} with {len(messages)} messages")
                     resp = _rq.post(
                         OPENROUTER_BASE_URL,
@@ -2035,7 +2105,7 @@ def send_message(chat_id):
                         _r = http_requests.post(
                             OPENROUTER_BASE_URL,
                             headers={"Authorization": f"Bearer {OPENROUTER_API_KEY}", "Content-Type": "application/json"},
-                            json={"model": "openai/gpt-4.1-nano", "messages": msgs, "temperature": 0.1, "max_tokens": 512},
+                            json={"model": "minimax/minimax-m2.5", "messages": msgs, "temperature": 0.1, "max_tokens": 512},  # PATCH fix2
                             timeout=15
                         )
                         return _r.json()["choices"][0]["message"]["content"]
@@ -2144,7 +2214,7 @@ def send_message(chat_id):
             # ═══ SELF-CHECK: проверка ответа вторым AI ═══
             if self_check_level != "none" and full_response and "❌" not in full_response[:10]:
                 SELF_CHECK_MODELS = {
-                    "light":  {"model": "openai/gpt-4.1-nano", "name": "GPT-4.1 Nano", "input_price": 0.10, "output_price": 0.40},
+                    "light":  {"model": "minimax/minimax-m2.5", "name": "MiniMax M2.5", "input_price": 0.27, "output_price": 0.95},  # PATCH fix2
                     "medium": None,  # same model as main
                     "deep":   {"model": "anthropic/claude-sonnet-4.6", "name": "Claude Sonnet 4", "input_price": 3.00, "output_price": 15.00},
                 }
@@ -2364,7 +2434,7 @@ def send_message(chat_id):
                             _r = http_requests.post(
                                 OPENROUTER_BASE_URL,
                                 headers={"Authorization": f"Bearer {OPENROUTER_API_KEY}", "Content-Type": "application/json"},
-                                json={"model": "openai/gpt-4.1-nano", "messages": msgs, "temperature": 0.1, "max_tokens": 512},
+                                json={"model": "minimax/minimax-m2.5", "messages": msgs, "temperature": 0.1, "max_tokens": 512},  # PATCH fix2
                                 timeout=15
                             )
                             return _r.json()["choices"][0]["message"]["content"]
@@ -2436,6 +2506,20 @@ def send_message(chat_id):
         logging.info(f"[TURBO BG] Worker started for chat {chat_id}")
         try:
             for event in generate():
+                # PATCH 14: Check if interrupt was requested
+                with _interrupt_lock:
+                    task_entry = _running_tasks.get(chat_id, {})
+                    if task_entry.get("_interrupt_requested"):
+                        logging.info(f"[PATCH14] Interrupt detected for chat {chat_id}, stopping agent")
+                        _intr_evt = json.dumps({'type': 'interrupted', 'text': '⚡ Прервано — переключаюсь на новую задачу'})
+                        _q.put("data: " + _intr_evt + "\n\n")
+                        break
+                    # PATCH 14: Inject appended messages into next iteration
+                    _appended = task_entry.pop("_append_msgs", [])
+                    if _appended:
+                        for _amsg in _appended:
+                            _append_evt = json.dumps({'type': 'content', 'text': '📩 Добавлено: ' + _amsg[:80]})
+                            _q.put("data: " + _append_evt + "\n\n")
                 # Buffer event for reconnect
                 with _tasks_lock:
                     task = _running_tasks.get(chat_id)
@@ -2449,6 +2533,8 @@ def send_message(chat_id):
             if _q:
                 _q.put(None)  # Sentinel: stream ended
             logging.info(f"[TURBO BG] Worker finished for chat {chat_id}")
+            # PATCH 14: After task done, process queue
+            _process_message_queue(chat_id, request.user_id)
 
     _turbo_bg_thread = threading.Thread(target=_turbo_background_worker, daemon=True, name=f"turbo-agent-{chat_id[:8]}")
     _turbo_bg_thread.start()
@@ -2488,7 +2574,49 @@ def send_message(chat_id):
     )
 
 
-# ── Stop Agent ─────────────────────────────────────────────────
+# ══ PATCH 14: Process queued messages after task completes ══
+def _process_message_queue(chat_id: str, user_id: str):
+    """Called after a task finishes. Processes next queued message if any."""
+    with _interrupt_lock:
+        queue = _message_queue.get(chat_id, [])
+        if not queue:
+            # Also check if there's a paused task to resume
+            paused = _paused_tasks.pop(chat_id, None)
+            if paused:
+                logging.info(f"[PATCH14] Resuming paused task for chat {chat_id}: {paused.get('task', '')[:60]}")
+                # Inject resume message into queue
+                _message_queue[chat_id] = [{
+                    "message": f"Продолжи прерванную задачу: {paused.get('task', '')}",
+                    "mode": paused.get("mode", "turbo_standard"),
+                    "user_id": user_id,
+                    "file_content": ""
+                }]
+                queue = _message_queue[chat_id]
+            else:
+                return
+        next_msg = queue.pop(0)
+        if not queue:
+            _message_queue.pop(chat_id, None)
+
+    logging.info(f"[PATCH14] Processing queued message for chat {chat_id}: {next_msg.get('message', '')[:60]}")
+    try:
+        import requests as _req
+        _req.post(
+            f"http://127.0.0.1:{os.environ.get('PORT', 3510)}/api/chat",
+            json={
+                "chat_id": chat_id,
+                "message": next_msg["message"],
+                "mode": next_msg.get("mode", "turbo_standard"),
+                "file_content": next_msg.get("file_content", ""),
+            },
+            headers={"X-Internal-Queue": "1", "X-User-Id": next_msg.get("user_id", user_id)},
+            timeout=5
+        )
+    except Exception as _qe:
+        logging.warning(f"[PATCH14] Queue processing failed: {_qe}")
+
+
+# ── Stop Agent ──────────────────────────────────────────────
 @app.route("/api/chats/<chat_id>/stop", methods=["POST"])
 @require_auth
 def stop_agent(chat_id):
@@ -2581,7 +2709,6 @@ def direct_chat():
     data = request.get_json() or {}
     user_message = data.get("message", "").strip()
     file_content = data.get("file_content", "")
-    premium_design = data.get("premium_design", False)
     # ── BUG-1 FIX: Extract and normalize orion_mode ──
     _raw_mode = data.get("mode", "turbo-basic")
     _MODE_NORMALIZE = {
@@ -2664,6 +2791,85 @@ def direct_chat():
     if _monthly_limit and _monthly_limit < 999999 and _total_spent >= _monthly_limit:
         return jsonify({"error": "spending_limit_exceeded", "message": "Лимит исчерпан."}), 402
 
+    # ══ PATCH 14: Interrupt / Queue / Append logic ══
+    with _interrupt_lock:
+        _existing_task = _running_tasks.get(chat_id)
+        _task_is_running = _existing_task and _existing_task.get("status") == "running"
+
+    if _task_is_running:
+        _msg_type = _classify_interrupt_message(user_message)
+
+        if _msg_type == "queue":
+            # Add to queue — agent will process after current task
+            with _interrupt_lock:
+                if chat_id not in _message_queue:
+                    _message_queue[chat_id] = []
+                _message_queue[chat_id].append({
+                    "message": user_message, "mode": orion_mode,
+                    "user_id": request.user_id, "file_content": file_content
+                })
+            logging.info(f"[PATCH14] chat={chat_id} → QUEUED: {user_message[:60]}")
+            return Response(
+                f"data: {json.dumps({'type': 'queued', 'text': '🕐 В очереди — возьму после текущей задачи'})}\n\n"
+                f"data: {json.dumps({'type': 'done'})}\n\n",
+                mimetype="text/event-stream",
+                headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
+            )
+
+        elif _msg_type == "append":
+            # Append to current task — inject into running agent's next iteration
+            with _interrupt_lock:
+                task_entry = _running_tasks.get(chat_id, {})
+                if "_append_msgs" not in task_entry:
+                    task_entry["_append_msgs"] = []
+                task_entry["_append_msgs"].append(user_message)
+            logging.info(f"[PATCH14] chat={chat_id} → APPENDED: {user_message[:60]}")
+            return Response(
+                f"data: {json.dumps({'type': 'appended', 'text': '📩 Добавлено к текущей задаче'})}\n\n"
+                f"data: {json.dumps({'type': 'done'})}\n\n",
+                mimetype="text/event-stream",
+                headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
+            )
+
+        else:  # interrupt
+            # Pause current task, save state, start new task
+            logging.info(f"[PATCH14] chat={chat_id} → INTERRUPT: pausing current task")
+            with _interrupt_lock:
+                task_entry = _running_tasks.get(chat_id, {})
+                # Signal the running agent to stop
+                task_entry["_interrupt_requested"] = True
+                # Also call agent.stop() to set _stop_requested flag in AgentLoop
+                with _agents_lock:
+                    _agent_to_stop = _active_agents.get(chat_id)
+                    if _agent_to_stop:
+                        try:
+                            _agent_to_stop.stop()
+                        except Exception:
+                            pass
+                # Save paused state
+                _paused_tasks[chat_id] = {
+                    "user_id": request.user_id,
+                    "task": task_entry.get("message", ""),
+                    "mode": task_entry.get("mode", orion_mode),
+                    "paused_at": time.time(),
+                    "events_count": len(task_entry.get("events", [])),
+                }
+            # Save to persistent storage
+            try:
+                from memory_v9.session import SessionMemory
+                SessionMemory.save_interrupted(
+                    chat_id=chat_id,
+                    user_id=request.user_id,
+                    task=task_entry.get("message", ""),
+                    progress=f"Прервано пользователем на итерации {task_entry.get('iteration', 0)}",
+                    reason="user_interrupt"
+                )
+            except Exception as _si_err:
+                logging.warning(f"[PATCH14] save_interrupted failed: {_si_err}")
+            # Notify frontend about interrupt
+            # (new task will start below in the normal flow)
+            logging.info(f"[PATCH14] chat={chat_id} → starting new task: {user_message[:60]}")
+
     # Сохраняем сообщение пользователя
     msg_id = str(_uuid.uuid4())
     user_msg = {
@@ -2703,7 +2909,7 @@ def direct_chat():
     # Выбираем модель по режиму
     from model_router import get_model_for_agent
     _agent_cfg = get_model_for_agent("orchestrator", orion_mode)
-    model = _agent_cfg.get("model_id", "openai/gpt-4.1-mini")
+    model = _agent_cfg.get("model_id", "minimax/minimax-m2.5")  # PATCH fix2: real model ID
     api_key = OPENROUTER_API_KEY
 
     def generate():
@@ -2728,7 +2934,7 @@ def direct_chat():
                     # Функция для вызова LLM из оркестратора
                     def _orch_call_llm(messages, model=None):
                         import requests as _req
-                        _model = model or "openai/gpt-4.1-nano"
+                        _model = model or "minimax/minimax-m2.5"  # PATCH fix2: real model ID
                         resp = _req.post(
                             OPENROUTER_BASE_URL,
                             headers={"Authorization": f"Bearer {OPENROUTER_API_KEY}",
@@ -2756,12 +2962,23 @@ def direct_chat():
                     if _orch_plan and _orch_plan.get("mode") != "chat":
                         yield "data: " + _json.dumps(format_plan_sse(_orch_plan)) + SSE
                     
-                    # Если оркестратор хочет спросить пользователя
+                    # Если оркестратор хочет спросить пользователя — остановить выполнение
                     if _orch_plan and _orch_plan.get("ask_user"):
+                        _question = _orch_plan["ask_user"]
+                        # Отправить вопрос как контент сообщения (видно в чате)
+                        yield "data: " + _json.dumps({
+                            "type": "content",
+                            "text": "❓ " + _question
+                        }) + SSE
+                        # Также отправить ask_user для фронтенда
                         yield "data: " + _json.dumps({
                             "type": "ask_user",
-                            "question": _orch_plan["ask_user"]
+                            "question": _question
                         }) + SSE
+                        # Сохранить вопрос как ответ ассистента и завершить стрим
+                        assistant_content = "❓ " + _question
+                        yield "data: " + _json.dumps({"type": "done", "content": assistant_content}) + SSE
+                        return
                     
                     # Определить модель и промпт из плана
                     if _orch_plan:
@@ -3926,6 +4143,102 @@ def admin_clear_session_memory():
 
 
 # ══════════════════════════════════════════════════════════════════
+# ██ PATCH 8: ADMIN API KEYS MANAGEMENT ██
+# ══════════════════════════════════════════════════════════════════
+
+# Keys stored in .env file on server — read/write with masking
+_API_KEY_MAP = {
+    "openrouter": "OPENROUTER_API_KEY",
+    "minimax": "MINIMAX_API_KEY",
+    "rucaptcha": "RUCAPTCHA_API_KEY",
+    "anthropic": "ANTHROPIC_API_KEY",
+    "openai": "OPENAI_API_KEY",
+}
+_ENV_FILE = "/var/www/orion/backend/.env"
+
+def _read_env_file():
+    """Read .env file as dict."""
+    env = {}
+    if os.path.exists(_ENV_FILE):
+        with open(_ENV_FILE, "r") as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    k, _, v = line.partition("=")
+                    env[k.strip()] = v.strip().strip('"').strip("'")
+    return env
+
+def _write_env_file(env: dict):
+    """Write dict back to .env file."""
+    lines = []
+    existing = {}
+    if os.path.exists(_ENV_FILE):
+        with open(_ENV_FILE, "r") as f:
+            raw_lines = f.readlines()
+        for line in raw_lines:
+            stripped = line.strip()
+            if stripped and not stripped.startswith("#") and "=" in stripped:
+                k, _, _ = stripped.partition("=")
+                existing[k.strip()] = line
+            else:
+                lines.append(line)
+    # Update or add keys
+    for k, v in env.items():
+        existing[k] = f"{k}={v}\n"
+    # Rebuild file: comments first, then key=value lines
+    result = lines + list(existing.values())
+    with open(_ENV_FILE, "w") as f:
+        f.writelines(result)
+
+def _mask_key(val: str) -> str:
+    """Return masked key showing only first 8 chars."""
+    if not val:
+        return ""
+    if len(val) <= 8:
+        return "*" * len(val)
+    return val[:8] + "*" * (len(val) - 8)
+
+
+@app.route("/api/admin/apikeys", methods=["GET"])
+@require_auth
+@require_admin
+def admin_get_apikeys():
+    """Get current API keys (masked) for admin panel."""
+    try:
+        env = _read_env_file()
+        result = {}
+        for short_name, env_var in _API_KEY_MAP.items():
+            val = env.get(env_var, os.environ.get(env_var, ""))
+            result[short_name] = _mask_key(val)
+        return jsonify({"success": True, "keys": result})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/admin/apikeys", methods=["PUT"])
+@require_auth
+@require_admin
+def admin_set_apikeys():
+    """Update API keys — write to .env and reload into os.environ."""
+    try:
+        data = request.get_json() or {}
+        env = _read_env_file()
+        updated = []
+        for short_name, env_var in _API_KEY_MAP.items():
+            val = data.get(short_name, "").strip()
+            if val and not set(val) <= {"*"}:  # skip masked placeholders
+                env[env_var] = val
+                os.environ[env_var] = val  # hot-reload without restart
+                updated.append(short_name)
+        _write_env_file(env)
+        logger.info(f"[AdminAPIKeys] Updated keys: {updated} by {request.user_id}")
+        return jsonify({"success": True, "updated": updated})
+    except Exception as e:
+        logger.error(f"[AdminAPIKeys] Error: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+# ══════════════════════════════════════════════════════════════════
 # ██ CUSTOM AGENTS API ██
 # ══════════════════════════════════════════════════════════════════
 
@@ -4748,7 +5061,7 @@ def estimate_task():
                     "Content-Type": "application/json"
                 },
                 json={
-                    "model": "openai/gpt-4.1-mini",
+                    "model": "minimax/minimax-m2.5",  # PATCH fix2: real model ID
                     "messages": [
                         {"role": "system", "content": (
                             "Ты — менеджер проектов. Оцени задачу клиента и дай краткий комментарий к смете. "
