@@ -616,12 +616,12 @@ def send_message(chat_id):
     try:
         from model_router import MODELS as _MR_MODELS
         _mode_to_model = {
-            "turbo_standard": ("minimax/minimax-m2.5", "MiniMax M2.5"),
-            "turbo_premium":  ("minimax/minimax-m2.5", "MiniMax M2.5"),
+            "turbo_standard": ("google/gemini-2.5-flash", "Gemini 2.5 Flash"),
+            "turbo_premium":  ("google/gemini-2.5-flash", "Gemini 2.5 Flash"),
             "pro_standard":   (_MR_MODELS["sonnet"]["id"], _MR_MODELS["sonnet"]["name"]),
             "pro_premium":    (_MR_MODELS["sonnet"]["id"], _MR_MODELS["sonnet"]["name"]),
             "architect":      (_MR_MODELS["opus"]["id"], _MR_MODELS["opus"]["name"]),
-            "smart_turbo":    ("minimax/minimax-m2.5", "MiniMax M2.5"),
+            "smart_turbo":    ("google/gemini-2.5-flash", "Gemini 2.5 Flash"),
         }
         if orion_mode in _mode_to_model:
             agent_model, agent_model_name = _mode_to_model[orion_mode]

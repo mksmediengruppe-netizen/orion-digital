@@ -214,6 +214,7 @@ MODEL_MAP = {
     "mimo":     "xiaomi/mimo-v2-flash",       # hands: SSH, деплой, интеграции
     "sonnet":   "anthropic/claude-sonnet-4.6",
     "opus":     "anthropic/claude-opus-4",
+    "gemini_flash": "google/gemini-2.5-flash",  # fast worker: function calling
 }
 
 # ── PROJECT TEMPLATES (Фича 8) ────────────────────────────────
