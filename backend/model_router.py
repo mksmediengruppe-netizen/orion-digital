@@ -85,7 +85,7 @@ MODELS = {
         "role": "hands",
         "description": "Turbo Hands: SSH, FTP, браузер, деплой — действия на сервере",
         "max_tokens": 32768
-    }
+    },
     "gemini_flash": {
         "id": "google/gemini-2.5-flash",
         "name": "Gemini 2.5 Flash",
