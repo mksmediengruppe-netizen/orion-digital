@@ -1,6 +1,6 @@
 {
   "user_id": "admin",
-  "chat_count": 890,
+  "chat_count": 908,
   "facts": [
     "Пользователя зовут Тестер5",
     "Работает с Elixir и Phoenix",
@@ -118,7 +118,7 @@
     "ssl": "certbot",
     "color_background": "белый",
     "color_base": "#ffffff",
-    "framework": "FastAPI",
+    "framework": "aiogram",
     "deployment": "SSH деплой на Linux сервер",
     "server_user": "root",
     "api_port": "8000",
@@ -235,7 +235,12 @@
     "php_version": "8.3.6",
     "mysql_version": "8.0.45",
     "database": "MySQL 8.0.45",
-    "web_server": "Nginx"
+    "web_server": "Nginx",
+    "server_monitoring": "использует стандартные Linux команды для мониторинга",
+    "access_method": "SSH",
+    "programming_language": "Python",
+    "project_type": "Telegram bot",
+    "learning_style": "step-by-step"
   },
   "expertise_level": "unknown"
 }

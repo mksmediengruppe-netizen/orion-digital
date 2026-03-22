@@ -516,7 +516,6 @@ class AgentLoop:
             model_cfg = MODELS.get(model_key, MODELS["gpt54_mini"])  # PATCH fix
             cost = (tokens_in * model_cfg["input_price"] / 1_000_000 +
                     tokens_out * model_cfg["output_price"] / 1_000_000)
-            # cost = 0.0  # КРИТ-2: REMOVED — now tracking real cost
             self._session_cost += cost
             add_session_cost(self.session_id, cost)
             log_cost(
@@ -528,8 +527,9 @@ class AgentLoop:
                 session_id=self.session_id,
                 mode=self.orion_mode
             )
+            logger.info(f"[COST] model={model_id} in={tokens_in} out={tokens_out} cost=${cost:.6f} session_total=${self._session_cost:.6f}")
         except Exception as e:
-            logger.debug(f"Cost tracking error: {e}")
+            logger.warning(f"Cost tracking error: {e}")
 
 
 
@@ -663,6 +663,7 @@ class AgentLoop:
             "temperature": 0.2,
             "max_tokens": 16000,
             "stream": True,
+            "stream_options": {"include_usage": True},
         }
 
         if tools:
@@ -792,10 +793,10 @@ class AgentLoop:
             # Fallback: estimate tokens if API didn't return usage
             if self.total_tokens_in == _tokens_in_baseline and self.total_tokens_out == _tokens_out_baseline:
                 _est_in = sum(len(str(m.get("content", ""))) // 4 for m in messages)
-                _est_out = len(content) // 4
+                _est_out = max(len(content) // 4, 1)
                 self.total_tokens_in += _est_in
                 self.total_tokens_out += _est_out
-                logger.info(f"[TOKEN-EST] Estimated tokens: in={_est_in}, out={_est_out}")
+                logger.info(f"[TOKEN-EST] Estimated tokens: in={_est_in}, out={_est_out}, model={_model}")
             # ── COST TRACKING FIX: track cost after each streaming LLM call ──
             _call_tokens_in = self.total_tokens_in - _tokens_in_baseline
             _call_tokens_out = self.total_tokens_out - _tokens_out_baseline

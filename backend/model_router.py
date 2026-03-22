@@ -190,9 +190,6 @@ PRICING = {
     "anthropic/claude-sonnet-4.6": (3.00, 15.00),
     "anthropic/claude-opus-4":     (15.00, 75.00),
     "xiaomi/mimo-v2-flash":        (0.09, 0.29),
-    # Legacy fallbacks
-    "openai/gpt-5.4-mini":        (0.20, 1.20),
-    "openai/gpt-5.4-mini":      (0.27, 1.10),
 }
 
 # ══════════════════════════════════════════════════════════════

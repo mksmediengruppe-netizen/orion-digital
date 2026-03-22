@@ -819,7 +819,7 @@ def send_message(chat_id):
                     with _tasks_lock:
                         pass  # db access outside lock
                     chat["messages"].append({"role": "assistant", "content": full_response, "created_at": _now_iso()})
-                    _save_db(_saved_db_pro)
+                    db_write(_saved_db_pro)
                 # Cost tracking
                 _cost = _calc_cost(tokens_in, tokens_out, _pro_agent_model)
                 chat["total_cost"] = chat.get("total_cost", 0) + _cost
@@ -831,7 +831,7 @@ def send_message(chat_id):
                 _analytics["total_tokens_out"] = _analytics.get("total_tokens_out", 0) + tokens_out
                 _analytics["total_cost"] = _analytics.get("total_cost", 0) + _cost
                 _analytics["total_requests"] = _analytics.get("total_requests", 0) + 1
-                _save_db(_saved_db_pro)
+                db_write(_saved_db_pro)
                 try:
                     log_cost(
                         user_id=_saved_user_id_pro,
@@ -1813,22 +1813,22 @@ def direct_chat():
     data = request.get_json() or {}
     user_message = data.get("message", "").strip()
     file_content = data.get("file_content", "")
+    # ── Extract chat_id early (needed for interrupt check) ──
+    chat_id = data.get("chat_id")
     # ── BUG-1 FIX: Extract and normalize orion_mode ──
-    # FIX: Load mode from chat if not in send payload
-    _raw_mode = data.get("mode") or (chat.get("orion_mode") if chat else None) or "turbo-basic"
+    _raw_mode = data.get("mode") or "fast"
     _MODE_NORMALIZE = {
         "auto": "auto", 
         "turbo-basic": "fast", "turbo_basic": "fast", "fast": "fast",
-        "turbo-premium": "fast", "fast": "fast",
+        "turbo-premium": "fast",
         "pro-basic": "standard", "pro_basic": "standard", "standard": "standard",
         "pro-premium": "premium", "premium": "premium",
-        "premium": "premium",
     }
     orion_mode = _MODE_NORMALIZE.get(_raw_mode, "fast")
     
     # ══ PATCH 14 FIX: Interrupt / Queue / Append for send_message route ══
     with _tasks_lock:
-        _existing_task = _running_tasks.get(chat_id)
+        _existing_task = _running_tasks.get(chat_id) if chat_id else None
         _task_is_running = _existing_task and _existing_task.get("status") == "running"
     if _task_is_running:
         _msg_type = _classify_interrupt_message(user_message)
@@ -2024,10 +2024,10 @@ def direct_chat():
         "timestamp": time.time()
     }
     with _lock:
-        db2 = _load_db()
+        db2 = db_read()
         db2["chats"][chat_id]["messages"].append(user_msg)
         db2["chats"][chat_id]["updated_at"] = time.time()
-        _save_db(db2)
+        db_write(db2)
 
     # Получаем историю (BUG-4 FIX: ограничиваем до 10 сообщений чтобы не переполнять контекст)
     _ctx_limit_v2 = 50 if orion_mode in ("standard", "premium", "premium") else 10
@@ -2244,11 +2244,11 @@ def direct_chat():
                     "content": assistant_content, "timestamp": time.time()
                 }
                 with _lock:
-                    db3 = _load_db()
+                    db3 = db_read()
                     if chat_id in db3["chats"]:
                         db3["chats"][chat_id]["messages"].append(asst_msg)
                         db3["chats"][chat_id]["updated_at"] = time.time()
-                        _save_db(db3)
+                        db_write(db3)
 
             # НЕ делаем yield в finally — это вызывает RuntimeError: generator ignored GeneratorExit
 

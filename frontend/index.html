@@ -65,15 +65,13 @@
             <div class="section-label">Режим</div>
             <div class="mode-dropdown-wrap" style="position:relative;">
                 <select id="mode-select" class="mode-select-dropdown" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--border,#e5e7eb);background:var(--bg-secondary,#f9fafb);font-size:13px;cursor:pointer;color:var(--text-primary,#111);appearance:none;-webkit-appearance:none;background-image:url('data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%2212%22 height=%2212%22 viewBox=%220 0 24 24%22 fill=%22none%22 stroke=%22%23666%22 stroke-width=%222%22><polyline points=%226 9 12 15 18 9%22/></svg>');background-repeat:no-repeat;background-position:right 10px center;padding-right:28px;">
-                    <option value="turbo_standard" title="MiniMax думает, MiMo действует. Быстро и дёшево. Лимит $3">⚡ Turbo — быстро, $3 лимит</option>
-                    <option value="smart_turbo" title="Opus планирует один раз, MiniMax кодит, MiMo деплоит. Лимит $3">🧠⚡ Smart Turbo — Opus план + дёшево, $3</option>
-                    <option value="pro_standard" title="Sonnet для оркестрации и code review. Лимит $5">🚀 Pro Standard — $5 лимит</option>
-                    <option value="pro_premium" title="Gemini Pro для дизайна + Sonnet для копирайтинга. Лимит $5">🚀 Pro Premium — $5 лимит</option>
-                    <option value="architect" title="Claude Opus для сложных задач. Архитектура, аудит, ТЗ. Лимит $15">🏛️ Architect — Opus, $15 лимит</option>
+                    <option value="fast" title="GPT-5.4 Mini · Простые задачи, тесты, MVP. Лимит $2">⚡ Быстрый — GPT-5.4 Mini, $2</option>
+                    <option value="standard" title="GPT-5.4 · Клиентские сайты, качественный код. Лимит $5">⭐ Стандарт — GPT-5.4, $5</option>
+                    <option value="premium" title="GPT-5.4 + Sonnet · Сложные проекты, code review, аудит. Лимит $15">💎 Премиум — GPT-5.4 + Sonnet, $15</option>
                 </select>
             </div>
             <div class="mode-description" id="mode-description" style="font-size:11px;color:var(--text-secondary,#888);margin-top:6px;line-height:1.4;">
-                MiniMax думает, MiMo действует · Лимит $3
+                GPT-5.4 · Оптимальное качество · Лимит $5
             </div>
             <!-- ПАТЧ 8: Тогл верификации -->
             <div class="verification-toggle" style="margin-top: 8px; display: flex; align-items: center; gap: 8px; padding: 4px 0;">
