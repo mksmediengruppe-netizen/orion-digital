@@ -113,9 +113,9 @@ BRAIN_TOOLS = frozenset([
     "search_web", "read_url", "python_exec",
 ])
 
-TURBO_BRAIN_MODEL = "minimax/minimax-m2.5"
+TURBO_BRAIN_MODEL = "gpt54_mini/gpt54_mini-m2.5"
 TURBO_HANDS_MODEL = "xiaomi/mimo-v2-flash"
-TURBO_FALLBACK_MODEL = "minimax/minimax-m2.5"  # PATCH fix: real model ID
+TURBO_FALLBACK_MODEL = "gpt54_mini/gpt54_mini-m2.5"  # PATCH fix: real model ID
 
 
 def _get_dual_brain_model(tool_name: str, orion_mode: str, base_model: str) -> str:
@@ -126,7 +126,7 @@ def _get_dual_brain_model(tool_name: str, orion_mode: str, base_model: str) -> s
     - Остальные → MiniMax M2.5 (по умолчанию думает)
     Для Pro/Architect — возвращает base_model без изменений.
     """
-    if orion_mode not in ("turbo_standard", "turbo_premium", "smart_turbo"):
+    if orion_mode not in ("fast", "fast", "standard"):
         return base_model
     if tool_name in HANDS_TOOLS:
         return TURBO_HANDS_MODEL
@@ -170,37 +170,37 @@ AGENT_ZONES = {
     "orchestrator": {
         "tools": ["store_memory", "recall_memory", "canvas_create", "task_complete"],
         "description": "Планирование, память, координация",
-        "models": {"turbo_standard": "minimax", "turbo_premium": "minimax",  # PATCH fix
-                   "pro_standard": "sonnet", "pro_premium": "sonnet"}
+        "models": {"fast": "gpt54_mini", "fast": "gpt54_mini",  # PATCH fix
+                   "standard": "sonnet", "premium": "sonnet"}
     },
     "designer": {
         "tools": ["generate_design", "generate_image", "edit_image",
                   "create_artifact", "browser_navigate", "browser_get_text"],
         "description": "UI/UX, дизайн, визуальный контент",
-        "models": {"turbo_standard": "gemini", "turbo_premium": "gemini",
-                   "pro_standard": "gemini", "pro_premium": "gemini"}
+        "models": {"fast": "gemini", "fast": "gemini",
+                   "standard": "gemini", "premium": "gemini"}
     },
     "developer": {
         "tools": ["ssh_execute", "file_write", "file_read",
                   "code_interpreter", "generate_file"],
         "description": "Код, разработка, файлы",
-        "models": {"turbo_standard": "mimo", "turbo_premium": "mimo",  # PATCH fix: hands
-                   "pro_standard": "mimo", "pro_premium": "mimo"}
+        "models": {"fast": "mimo", "fast": "mimo",  # PATCH fix: hands
+                   "standard": "mimo", "premium": "mimo"}
     },
     "devops": {
         "tools": ["ssh_execute", "file_write", "file_read",
                   "browser_check_site", "browser_check_api",
                   "ftp_upload", "ftp_download", "ftp_list"],
         "description": "Серверы, деплой, инфраструктура, FTP",
-        "models": {"turbo_standard": "mimo", "turbo_premium": "mimo",  # PATCH fix: hands
-                   "pro_standard": "mimo", "pro_premium": "mimo"}
+        "models": {"fast": "mimo", "fast": "mimo",  # PATCH fix: hands
+                   "standard": "mimo", "premium": "mimo"}
     },
     "analyst": {
         "tools": ["web_search", "web_fetch", "code_interpreter",
                   "generate_chart", "generate_report", "read_any_file"],
         "description": "Анализ данных, исследования, отчёты",
-        "models": {"turbo_standard": "minimax", "turbo_premium": "minimax",  # PATCH fix: brain
-                   "pro_standard": "minimax", "pro_premium": "sonnet"}
+        "models": {"fast": "gpt54_mini", "fast": "gpt54_mini",  # PATCH fix: brain
+                   "standard": "gpt54_mini", "premium": "sonnet"}
     },
     "tester": {
         "tools": ["browser_navigate", "browser_get_text", "browser_check_site",
@@ -208,15 +208,15 @@ AGENT_ZONES = {
                   "browser_submit", "browser_select", "browser_ask_auth",
                   "code_interpreter", "ssh_execute"],
         "description": "Тестирование, QA, проверка, браузерная автоматизация",
-        "models": {"turbo_standard": "minimax", "turbo_premium": "minimax",  # PATCH fix: brain
-                   "pro_standard": "minimax", "pro_premium": "minimax"}
+        "models": {"fast": "gpt54_mini", "fast": "gpt54_mini",  # PATCH fix: brain
+                   "standard": "gpt54_mini", "premium": "gpt54_mini"}
     },
     "integrator": {
         "tools": ["ssh_execute", "file_write", "file_read",
                   "browser_check_api", "code_interpreter", "web_fetch"],
         "description": "Интеграции, API, вебхуки",
-        "models": {"turbo_standard": "mimo", "turbo_premium": "mimo",  # PATCH fix: hands
-                   "pro_standard": "mimo", "pro_premium": "mimo"}
+        "models": {"fast": "mimo", "fast": "mimo",  # PATCH fix: hands
+                   "standard": "mimo", "premium": "mimo"}
     },
 }
 
@@ -508,15 +508,14 @@ class AgentLoop:
         try:
             from model_router import MODELS
             # Найти модель по ID
-            model_key = "minimax"  # PATCH fix: minimax as default
+            model_key = "gpt54_mini"  # PATCH fix: gpt54_mini as default
             for k, m in MODELS.items():
                 if m["id"] == model_id:
                     model_key = k
                     break
-            model_cfg = MODELS.get(model_key, MODELS["minimax"])  # PATCH fix
+            model_cfg = MODELS.get(model_key, MODELS["gpt54_mini"])  # PATCH fix
             cost = (tokens_in * model_cfg["input_price"] / 1_000_000 +
                     tokens_out * model_cfg["output_price"] / 1_000_000)
-            # cost = 0.0  # КРИТ-2: REMOVED — now tracking real cost
             self._session_cost += cost
             add_session_cost(self.session_id, cost)
             log_cost(
@@ -528,8 +527,9 @@ class AgentLoop:
                 session_id=self.session_id,
                 mode=self.orion_mode
             )
+            logger.info(f"[COST] model={model_id} in={tokens_in} out={tokens_out} cost=${cost:.6f} session_total=${self._session_cost:.6f}")
         except Exception as e:
-            logger.debug(f"Cost tracking error: {e}")
+            logger.warning(f"Cost tracking error: {e}")
 
 
 
@@ -639,8 +639,8 @@ class AgentLoop:
         # ПАТЧ A2: model_override — использовать переопределённую модель если задана
         _model = self.model_override if self.model_override else self.model
         # DUAL-BRAIN: для Turbo режима выбираем модель по следующему tool call
-        _orion_mode = getattr(self, 'orion_mode', 'turbo_standard')
-        if _orion_mode in ("turbo_standard", "turbo_premium") and not self.model_override:
+        _orion_mode = getattr(self, 'orion_mode', 'fast')
+        if _orion_mode in ("fast", "fast") and not self.model_override:
             # Определяем следующий tool call из последнего assistant сообщения
             _next_tool = None
             for _msg in reversed(messages):
@@ -654,7 +654,7 @@ class AgentLoop:
                 logging.debug(f"[DUAL-BRAIN] tool={_next_tool} → model={_model}")
             else:
                 # Нет tool call → думаем → MiniMax
-                if _orion_mode in ("turbo_standard", "turbo_premium"):
+                if _orion_mode in ("fast", "fast"):
                     _model = TURBO_BRAIN_MODEL
 
         payload = {
@@ -663,6 +663,7 @@ class AgentLoop:
             "temperature": 0.2,
             "max_tokens": 16000,
             "stream": True,
+            "stream_options": {"include_usage": True},
         }
 
         if tools:
@@ -792,10 +793,10 @@ class AgentLoop:
             # Fallback: estimate tokens if API didn't return usage
             if self.total_tokens_in == _tokens_in_baseline and self.total_tokens_out == _tokens_out_baseline:
                 _est_in = sum(len(str(m.get("content", ""))) // 4 for m in messages)
-                _est_out = len(content) // 4
+                _est_out = max(len(content) // 4, 1)
                 self.total_tokens_in += _est_in
                 self.total_tokens_out += _est_out
-                logger.info(f"[TOKEN-EST] Estimated tokens: in={_est_in}, out={_est_out}")
+                logger.info(f"[TOKEN-EST] Estimated tokens: in={_est_in}, out={_est_out}, model={_model}")
             # ── COST TRACKING FIX: track cost after each streaming LLM call ──
             _call_tokens_in = self.total_tokens_in - _tokens_in_baseline
             _call_tokens_out = self.total_tokens_out - _tokens_out_baseline
@@ -892,8 +893,8 @@ class AgentLoop:
                     _log.warning(f"[agent_loop] Retry with cleaned messages also failed: {_cl_e}")
             
             # ── FALLBACK 2: try different model ──
-            _orion_mode_fb = getattr(self, 'orion_mode', 'turbo_standard')
-            if _orion_mode_fb in ("turbo_standard", "turbo_premium"):
+            _orion_mode_fb = getattr(self, 'orion_mode', 'fast')
+            if _orion_mode_fb in ("fast", "fast"):
                 # Dual-brain fallback: если HANDS упал → BRAIN, если BRAIN упал → FALLBACK
                 if _model == TURBO_HANDS_MODEL:
                     _fallback_model_id = TURBO_BRAIN_MODEL
@@ -902,7 +903,7 @@ class AgentLoop:
                 else:
                     _fallback_model_id = TURBO_FALLBACK_MODEL
             else:
-                _fallback_model_id = "minimax/minimax-m2.5"  # PATCH fix: real model ID
+                _fallback_model_id = "gpt54_mini/gpt54_mini-m2.5"  # PATCH fix: real model ID
             if self.model != _fallback_model_id and _model != _fallback_model_id:
                 _log.warning(f"[agent_loop] Trying fallback model {_fallback_model_id}")
                 try:
@@ -1611,7 +1612,13 @@ class AgentLoop:
            context="ssh_execute")
     def _ssh_execute_with_retry(self, host, username, password, command):
         ssh = ssh_pool.get_connection(host=host, username=username, password=password)
-        return ssh.execute_command(command, timeout=90)
+        # ══ PATCH: Smart timeout — 300s for downloads, 90s for normal commands ══
+        _download_patterns = ('wget ', 'curl -o', 'curl -sL -o', 'curl -O', 'tar ', 'unzip ', 'apt-get install', 'apt install', 'pip install', 'npm install', 'composer install')
+        _is_download = any(p in command for p in _download_patterns)
+        _timeout = 600 if _is_download else 90
+        if _is_download:
+            logger.info(f"[SSH] Download detected, using extended timeout {_timeout}s: {command[:100]}")
+        return ssh.execute_command(command, timeout=_timeout)
 
     @retry(max_attempts=3, base_delay=2.0, max_delay=15.0, jitter=1.0,
            retryable_exceptions=(ConnectionError, TimeoutError, OSError, IOError, EOFError),
@@ -3601,9 +3608,9 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);
         _task_start_time = _time_mod.time()
         _task_cost = 0.0
         _task_cost_prev = self._session_cost  # baseline before this task
-        _task_mode = getattr(self, 'orion_mode', 'turbo_standard') or 'turbo_standard'
+        _task_mode = getattr(self, 'orion_mode', 'fast') or 'fast'
         # Per-task limits: Turbo=$3, Pro=$5, Architect=$15
-        _TASK_LIMITS = {'turbo_standard': 3.0, 'pro_standard': 5.0, 'pro_premium': 5.0, 'architect': 15.0}
+        _TASK_LIMITS = {'fast': 3.0, 'standard': 5.0, 'premium': 5.0, 'premium': 15.0}
         _task_limit = _TASK_LIMITS.get(_task_mode, 5.0)
         _task_budget_warned = False  # 80% warning sent
         # ── CHECKPOINT: init ──────────────────────────────────────────────────
@@ -4233,7 +4240,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);
                                for a in self.actions_log[-3:]]
                 if len(_last_tools) == 3 and len(set(_last_tools)) == 1:
                     # Three identical tool calls in a row — loop detected
-                    _loop_mode = getattr(self, 'orion_mode', 'turbo_standard')
+                    _loop_mode = getattr(self, 'orion_mode', 'fast')
                     if _loop_mode in PRO_MODES:
                         # Pro/Architect: warn the model to try different approach
                         messages.append({"role": "system", "content":
@@ -4701,6 +4708,83 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);
                             "actions": result.get("actions", [])
                         })
 
+
+                    elif tool_name == "install_bitrix":
+
+                        from bitrix_provisioner import BitrixProvisioner
+
+                        from bitrix_wizard_operator import BitrixWizardOperator
+
+                        from bitrix_verifier import BitrixVerifier
+
+                        provisioner = BitrixProvisioner(self._ssh)
+
+                        config = {
+
+                            "server": self._server_config,
+
+                            "install_path": args.get("install_path"),
+
+                            "db_name": args.get("db_name"),
+
+                            "db_user": args.get("db_user"),
+
+                            "db_password": args.get("db_password"),
+
+                            "site_url": f"http://{args.get('server_host')}"
+
+                        }
+
+                        prep = provisioner.prepare_server(config)
+
+                        if not prep.get("ready"):
+
+                            result = {"success": False, "error": prep.get("errors")}
+
+                        else:
+
+                            wizard = BitrixWizardOperator(self._browser, self._snapshot_store)
+
+                            wizard_result = wizard.run_installation(
+
+                                prep["install_url"],
+
+                                {
+
+                                    "db": {"host": "localhost", "name": args.get("db_name"),
+
+                                           "user": args.get("db_user"), "password": args.get("db_password")},
+
+                                    "admin": {"login": args.get("admin_login", "admin"),
+
+                                              "email": args.get("admin_email"),
+
+                                              "password": args.get("admin_password")}
+
+                                }
+
+                            )
+
+                            if wizard_result.get("success"):
+
+                                verifier = BitrixVerifier(self._ssh, self._browser)
+
+                                verify = verifier.full_verify(config)
+
+                                result = {
+
+                                    "success": verify.get("score", 0) >= 6,
+
+                                    "wizard": wizard_result,
+
+                                    "verification": verify
+
+                                }
+
+                            else:
+
+                                result = {"success": False, "wizard": wizard_result}
+
                     elif event["type"] == "text_complete":
                         break
             except Exception as e:
@@ -4717,14 +4801,14 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);
 
 class MultiAgentLoop(AgentLoop):
     """
-    Extended agent loop with multi-agent architecture:
+    Extended agent loop with multi-agent premiumure:
     Architect -> Coder -> Reviewer -> QA
     Each agent has its own system prompt and can use tools.
     Inherits retry, idempotency, and self-healing from AgentLoop.
     """
 
     AGENTS = {
-        "architect": {
+        "premium": {
             "name": "Архитектор",
             "emoji": "🏗️",
             "prompt_suffix": """Ты — Архитектор. Проанализируй задачу и создай план:
@@ -4832,7 +4916,7 @@ class MultiAgentLoop(AgentLoop):
             
             # Switch model for this phase agent
             # For Pro/Architect: keep ONE model for entire pipeline (no switching)
-            _current_orion_mode = getattr(self, 'orion_mode', getattr(self, '_orion_mode', 'turbo_standard'))
+            _current_orion_mode = getattr(self, 'orion_mode', getattr(self, '_orion_mode', 'fast'))
             if _current_orion_mode in PRO_MODES:
                 _plog.info(f"[Pipeline] Pro/Architect mode: keeping model {self.model} (no switch)")
             else:
@@ -4874,7 +4958,7 @@ class MultiAgentLoop(AgentLoop):
                 pass
             
             # Build messages for this phase
-            system_prompt = get_system_prompt(getattr(self, "orion_mode", "turbo_standard"))
+            system_prompt = get_system_prompt(getattr(self, "orion_mode", "fast"))
             if agent_prompt_extra:
                 system_prompt += "\n\n" + agent_prompt_extra
             if hasattr(self, '_orchestrator_prompt') and self._orchestrator_prompt:
@@ -5013,7 +5097,7 @@ class MultiAgentLoop(AgentLoop):
                 yield self._sse({"type": "content", "text": "\n\n✨ **Premium QC v2**: MiniMax создаёт → Opus проверяет → MiniMax исправляет\n", "agent": "Premium QC"})
                 _pqc_api_key = self.api_key
                 _pqc_headers = {"Authorization": f"Bearer {_pqc_api_key}", "Content-Type": "application/json", "HTTP-Referer": "https://orion.mksitdev.ru"}
-                _pqc_minimax_model = "minimax/minimax-m2.5"
+                _pqc_gpt54_mini_model = "gpt54_mini/gpt54_mini-m2.5"
                 _pqc_opus_model = "anthropic/claude-opus-4"
                 _pqc_html_content = _qc_html_content if '_qc_html_content' in dir() else None
                 _pqc_site_url = f"http://{_qc_host}"
@@ -5048,7 +5132,7 @@ class MultiAgentLoop(AgentLoop):
                     yield self._sse({"type": "content", "text": "  📝 Шаг 1/4: MiniMax создаёт полный HTML...\n", "agent": "Premium QC"})
                     if not _pqc_html_content:
                         _mm_create = _pqc_req.post(self.api_url, headers=_pqc_headers, json={
-                            "model": _pqc_minimax_model,
+                            "model": _pqc_gpt54_mini_model,
                             "messages": [{"role": "user", "content": (
                                 "Create a complete, stunning single-page HTML website. "
                                 "Requirements: Tailwind CSS CDN, modern gradients, smooth animations, "
@@ -5097,7 +5181,7 @@ class MultiAgentLoop(AgentLoop):
                         if _score < 9 and _pqc_html_content:
                             yield self._sse({"type": "content", "text": "  🔧 Шаг 4/4: MiniMax исправляет по списку Opus...\n", "agent": "Premium QC"})
                             _mm_fix = _pqc_req.post(self.api_url, headers=_pqc_headers, json={
-                                "model": _pqc_minimax_model,
+                                "model": _pqc_gpt54_mini_model,
                                 "messages": [{"role": "user", "content": (
                                     f"Fix this HTML based on these design issues:\n{_opus_issues}\n\n"
                                     "Apply ALL fixes. Return ONLY complete fixed HTML starting with <!DOCTYPE html>.\n\n"
@@ -5237,7 +5321,7 @@ class MultiAgentLoop(AgentLoop):
                             "X-Title": "ORION Digital v1.0"
                         }
                         _review_payload = {
-                            "model": "minimax/minimax-m2.5",
+                            "model": "gpt54_mini/gpt54_mini-m2.5",
                             "messages": _review_messages,
                             "temperature": 0.1,
                             "max_tokens": 800,
@@ -5281,7 +5365,7 @@ class MultiAgentLoop(AgentLoop):
 
                     try:
                         _fix_payload = {
-                            "model": "minimax/minimax-m2.5",
+                            "model": "gpt54_mini/gpt54_mini-m2.5",
                             "messages": _fix_messages,
                             "temperature": 0.3,
                             "max_tokens": 16000,
@@ -5447,7 +5531,7 @@ class MultiAgentLoop(AgentLoop):
         emojis = {
             'devops': '🔧', 'designer': '🎨', 'developer': '💻',
             'tester': '🧪', 'analyst': '📊', 'copywriter': '✍️',
-            'architect': '🏗️'
+            'premium': '💎'
         }
         return emojis.get(agent_key, '🤖')
 
@@ -5608,7 +5692,6 @@ class MultiAgentLoop(AgentLoop):
                     elif _repeat_count >= 2:
                         logging.warning("[AntiLoop] " + tool_name + " repeated " + str(_repeat_count) + "x - warning injected")
                         messages.append({"role": "system", "content": "ПРЕДУПРЕЖДЕНИЕ: Ты уже вызывал '" + tool_name + "' с похожими аргументами. Если результат тот же - попробуй другой подход."})
-
                     # ── ANTI-LOOP for pipeline ──
                     _ph_hash = hashlib.md5(f"{tool_name}:{tool_args_str[:200]}".encode()).hexdigest()
                     _phase_tool_history[_ph_hash] = _phase_tool_history.get(_ph_hash, 0) + 1
@@ -5727,3 +5810,133 @@ class MultiAgentLoop(AgentLoop):
                 "agent": agent_info["name"],
                 "role": agent_key
             })
+
+
+
+
+# ═══ PIPELINE DEFINITIONS (ULTIMATE PATCH I1) ═══
+
+PIPELINE_WEBSITE = [
+    {"step": "classify", "agent": "gpt54_nano", "action": "classify_task"},
+    {"step": "blueprint", "agent": "gpt54", "action": "create_site_blueprint"},
+    {"step": "design", "agent": "gemini_flash", "action": "design_layout"},
+    {"step": "content", "agent": "gpt54_mini", "action": "generate_site_content"},
+    {"step": "build", "agent": "gpt54_mini", "action": "build_html_css_js"},
+    {"step": "photos", "agent": "gpt54_mini", "action": "generate_photos"},
+    {"step": "deploy", "agent": "mimo", "action": "deploy_site"},
+    {"step": "verify", "agent": "mimo", "action": "check_site_health"},
+    {"step": "judge", "agent": "sonnet", "action": "final_site_judge"}
+]
+
+PIPELINE_BITRIX = [
+    {"step": "classify", "agent": "gpt54_nano", "action": "classify_task"},
+    {"step": "blueprint", "agent": "gpt54", "action": "create_bitrix_blueprint"},
+    {"step": "design", "agent": "gemini_flash", "action": "design_sections"},
+    {"step": "content", "agent": "gpt54_mini", "action": "generate_site_content"},
+    {"step": "provision", "agent": "mimo", "action": "bitrix_provision_server"},
+    {"step": "wizard", "agent": "mimo", "action": "bitrix_run_wizard"},
+    {"step": "template", "agent": "gpt54_mini", "action": "bitrix_build_template"},
+    {"step": "components", "agent": "gpt54_mini", "action": "bitrix_map_components"},
+    {"step": "publish", "agent": "mimo", "action": "bitrix_publish"},
+    {"step": "verify", "agent": "mimo", "action": "bitrix_verify"},
+    {"step": "judge", "agent": "sonnet", "action": "final_site_judge"}
+]
+
+
+def select_pipeline(brief_text: str) -> list:
+    """Select pipeline based on brief content.
+    Nano classifies on first step, but we can pre-select here."""
+    brief_lower = brief_text.lower()
+    bitrix_keywords = ["bitrix", "\u0431\u0438\u0442\u0440\u0438\u043a\u0441", "cms", "1\u0441-\u0431\u0438\u0442\u0440\u0438\u043a\u0441", "1c-bitrix"]
+    if any(kw in brief_lower for kw in bitrix_keywords):
+        return PIPELINE_BITRIX
+    return PIPELINE_WEBSITE
+
+
+
+
+
+
+# ═══ CRUD HELPER FUNCTIONS (ULTIMATE PATCH C4) ═══
+def get_user(user_id):
+    """Get user by ID from database."""
+    from database import db_read
+    data = db_read()
+    for user in data.get("users", []):
+        if str(user.get("id")) == str(user_id):
+            return user
+    return None
+
+def get_chat(chat_id):
+    """Get chat by ID from database."""
+    from database import db_read
+    data = db_read()
+    for chat in data.get("chats", []):
+        if str(chat.get("id")) == str(chat_id):
+            return chat
+    return None
+
+def get_setting(key, default=None):
+    """Get system setting by key."""
+    from database import db_read
+    data = db_read()
+    settings = data.get("settings", {})
+    return settings.get(key, default)
+
+
+# ═══ BROWSER WATCHDOG (ULTIMATE PATCH C3) ═══
+class BrowserWatchdog:
+    """Monitor browser operations for timeouts and errors."""
+    def __init__(self, timeout=60):
+        self.timeout = timeout
+        self._start = None
+    
+    def start(self):
+        import time
+        self._start = time.time()
+    
+    def check(self):
+        import time
+        if self._start and (time.time() - self._start) > self.timeout:
+            raise TimeoutError(f"Browser operation exceeded {self.timeout}s timeout")
+    
+    def reset(self):
+        self._start = None
+
+
+# ═══ MODULE-LEVEL UTILITIES (ULTIMATE PATCH) ═══
+
+# SITE BLUEPRINT RULE (ULTIMATE PATCH H4)
+SITE_BLUEPRINT_RULE = """
+RULE FOR WEBSITES:
+When you receive a task to create a website/landing:
+1. FIRST call create_site_blueprint(brief) to create a structured plan
+2. Check the blueprint - all sections, photos, forms are in place
+3. THEN call build_landing(blueprint) or start building manually
+4. DO NOT start writing HTML without a blueprint
+"""
+
+
+def validate_html_before_deploy(html_content: str) -> dict:
+    """Validate HTML before deploying to server."""
+    issues = []
+    if not html_content or len(html_content) < 100:
+        issues.append('HTML too short or empty')
+    if '<html' not in html_content.lower():
+        issues.append('Missing <html> tag')
+    if '</html>' not in html_content.lower():
+        issues.append('Missing </html> closing tag')
+    if '<head' not in html_content.lower():
+        issues.append('Missing <head> tag')
+    if '<body' not in html_content.lower():
+        issues.append('Missing <body> tag')
+    if 'charset' not in html_content.lower():
+        issues.append('Missing charset declaration')
+    if '<meta name="viewport"' not in html_content.lower():
+        issues.append('Missing viewport meta tag')
+    return {
+        'valid': len(issues) == 0,
+        'issues': issues,
+        'size': len(html_content)
+    }
+

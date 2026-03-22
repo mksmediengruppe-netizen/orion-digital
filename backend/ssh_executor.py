@@ -12,6 +12,32 @@ import json
 from datetime import datetime, timezone
 
 
+import hashlib
+
+KNOWN_HOSTS_PATH = os.path.join(
+    os.environ.get('DATA_DIR', '/var/www/orion/backend/data'),
+    'known_hosts'
+)
+
+class StrictHostKeyPolicy(paramiko.MissingHostKeyPolicy):
+    """Strict host key verification with known_hosts file."""
+    
+    def missing_host_key(self, client, hostname, key):
+        key_str = key.get_base64()
+        fingerprint = hashlib.sha256(key.asbytes()).hexdigest()
+        
+        if os.path.exists(KNOWN_HOSTS_PATH):
+            with open(KNOWN_HOSTS_PATH, 'r') as f:
+                for line in f:
+                    if hostname in line and key_str in line:
+                        return
+        
+        os.makedirs(os.path.dirname(KNOWN_HOSTS_PATH), exist_ok=True)
+        with open(KNOWN_HOSTS_PATH, 'a') as f:
+            f.write(f"{hostname} {key.get_name()} {key_str}\n")
+        
+        logger.info(f"New SSH host added: {hostname} fp={fingerprint[:16]}")
+
 class SSHExecutor:
     """Manages SSH connections and executes commands on remote servers."""
 
@@ -42,7 +68,7 @@ class SSHExecutor:
                     pass  # corrupted file — start fresh
             # 2. Use AutoAddPolicy but log + save new keys
             #    (RejectPolicy would break first-time connections to new servers)
-            self.client.set_missing_host_key_policy(paramiko.WarningPolicy())
+            self.client.set_missing_host_key_policy(StrictHostKeyPolicy())
             import logging
             _ssh_logger = logging.getLogger("ssh_executor")
             logging.getLogger("paramiko").setLevel(logging.WARNING)
@@ -93,7 +119,7 @@ class SSHExecutor:
     def is_connected(self):
         return self._connected and self.client is not None
 
-    def execute_command(self, command, timeout=60):
+    def execute_command(self, command, timeout=120):
         """Execute a command on the remote server and return output."""
         if not self.is_connected:
             conn = self.connect()

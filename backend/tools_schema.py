@@ -2,8 +2,262 @@
 ORION Digital — Tools Schema Definition.
 Extracted from agent_loop.py (TASK 7).
 """
-
 TOOLS_SCHEMA = [
+    {
+        "type": "function",
+        "function": {
+            "name": "generate_site_content",
+            "description": "Generate all text content for a website from blueprint. Returns sections text, meta tags, FAQ, reviews, privacy policy.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "blueprint": {
+                        "type": "string",
+                        "description": "Blueprint JSON or ID"
+                    }
+                },
+                "required": [
+                    "blueprint"
+                ]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "final_site_judge",
+            "description": "Specialized judge for websites. Checks sections, photos, forms, mobile, speed, meta tags, design compliance.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "site_url": {
+                        "type": "string",
+                        "description": "URL of the deployed site"
+                    },
+                    "blueprint": {
+                        "type": "string",
+                        "description": "Blueprint JSON for comparison"
+                    }
+                },
+                "required": [
+                    "site_url"
+                ]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "bitrix_reverse_engineer",
+            "description": "Analyze existing Bitrix site. Determines version, template, components, modules.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "site_url": {
+                        "type": "string"
+                    },
+                    "install_path": {
+                        "type": "string"
+                    },
+                    "server_host": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "install_path",
+                    "server_host"
+                ]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "bitrix_build_template",
+            "description": "Build Bitrix template from HTML. Splits into header.php, footer.php, template_styles.css, registers template.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "html_path": {
+                        "type": "string",
+                        "description": "Path to source HTML on server"
+                    },
+                    "install_path": {
+                        "type": "string",
+                        "description": "Bitrix installation path"
+                    },
+                    "server_host": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "html_path",
+                    "install_path",
+                    "server_host"
+                ]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "bitrix_map_components",
+            "description": "Map HTML sections to Bitrix components. Forms, sliders, FAQ, maps, galleries.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "blueprint": {
+                        "type": "string"
+                    },
+                    "install_path": {
+                        "type": "string"
+                    },
+                    "server_host": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "blueprint",
+                    "install_path",
+                    "server_host"
+                ]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "bitrix_publish",
+            "description": "Publish and finalize Bitrix site. Clears cache, removes setup files, sets permissions, verifies.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "install_path": {
+                        "type": "string"
+                    },
+                    "server_host": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "install_path",
+                    "server_host"
+                ]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "create_site_blueprint",
+            "description": "Create a site structure from brief. Call BEFORE writing code. Returns JSON blueprint with sections, photos, forms, design.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "brief": {
+                        "type": "string",
+                        "description": "Full text of the brief/TZ"
+                    },
+                    "site_type": {
+                        "type": "string",
+                        "enum": [
+                            "landing",
+                            "corporate",
+                            "shop"
+                        ],
+                        "description": "Type of site to create"
+                    }
+                },
+                "required": [
+                    "brief"
+                ]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "build_landing",
+            "description": "Build a landing page from blueprint. Generates photos, HTML, CSS, JS, PHP handler, deploys to server.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "blueprint_id": {
+                        "type": "string",
+                        "description": "Blueprint ID or JSON"
+                    },
+                    "server_host": {
+                        "type": "string",
+                        "description": "Server IP or domain"
+                    },
+                    "deploy_path": {
+                        "type": "string",
+                        "description": "Server path for deployment"
+                    }
+                },
+                "required": [
+                    "blueprint_id",
+                    "server_host",
+                    "deploy_path"
+                ]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "install_bitrix",
+            "description": "Install 1C-Bitrix CMS on a server. Prepares the server, runs the installation wizard, and verifies the result.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "server_host": {
+                        "type": "string",
+                        "description": "Server IP or domain"
+                    },
+                    "install_path": {
+                        "type": "string",
+                        "description": "Installation path, e.g. /var/www/html/site"
+                    },
+                    "db_name": {
+                        "type": "string",
+                        "description": "Database name"
+                    },
+                    "db_user": {
+                        "type": "string",
+                        "description": "Database user"
+                    },
+                    "db_password": {
+                        "type": "string",
+                        "description": "Database password"
+                    },
+                    "admin_login": {
+                        "type": "string",
+                        "description": "Bitrix admin login"
+                    },
+                    "admin_email": {
+                        "type": "string",
+                        "description": "Admin email"
+                    },
+                    "admin_password": {
+                        "type": "string",
+                        "description": "Admin password"
+                    },
+                    "use_demo": {
+                        "type": "boolean",
+                        "description": "Install demo data"
+                    }
+                },
+                "required": [
+                    "server_host",
+                    "install_path",
+                    "db_name",
+                    "db_user",
+                    "db_password"
+                ]
+            }
+        }
+    },
     {
         "type": "function",
         "function": {
@@ -12,12 +266,28 @@ TOOLS_SCHEMA = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "host": {"type": "string", "description": "Server IP or hostname to connect to"},
-                    "command": {"type": "string", "description": "Shell command to execute on the server"},
-                    "username": {"type": "string", "description": "SSH username (default: root)", "default": "root"},
-                    "password": {"type": "string", "description": "SSH password for authentication"}
+                    "host": {
+                        "type": "string",
+                        "description": "Server IP or hostname to connect to"
+                    },
+                    "command": {
+                        "type": "string",
+                        "description": "Shell command to execute on the server"
+                    },
+                    "username": {
+                        "type": "string",
+                        "description": "SSH username (default: root)",
+                        "default": "root"
+                    },
+                    "password": {
+                        "type": "string",
+                        "description": "SSH password for authentication"
+                    }
                 },
-                "required": ["host", "command"]
+                "required": [
+                    "host",
+                    "command"
+                ]
             }
         }
     },
@@ -29,13 +299,33 @@ TOOLS_SCHEMA = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "host": {"type": "string", "description": "Server IP or hostname"},
-                    "path": {"type": "string", "description": "Absolute path where to create/write the file"},
-                    "content": {"type": "string", "description": "Full content of the file to write"},
-                    "username": {"type": "string", "description": "SSH username (default: root)", "default": "root"},
-                    "password": {"type": "string", "description": "SSH password"}
+                    "host": {
+                        "type": "string",
+                        "description": "Server IP or hostname"
+                    },
+                    "path": {
+                        "type": "string",
+                        "description": "Absolute path where to create/write the file"
+                    },
+                    "content": {
+                        "type": "string",
+                        "description": "Full content of the file to write"
+                    },
+                    "username": {
+                        "type": "string",
+                        "description": "SSH username (default: root)",
+                        "default": "root"
+                    },
+                    "password": {
+                        "type": "string",
+                        "description": "SSH password"
+                    }
                 },
-                "required": ["host", "path", "content"]
+                "required": [
+                    "host",
+                    "path",
+                    "content"
+                ]
             }
         }
     },
@@ -47,12 +337,28 @@ TOOLS_SCHEMA = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "host": {"type": "string", "description": "Server IP or hostname"},
-                    "path": {"type": "string", "description": "Absolute path of the file to read"},
-                    "username": {"type": "string", "description": "SSH username (default: root)", "default": "root"},
-                    "password": {"type": "string", "description": "SSH password"}
+                    "host": {
+                        "type": "string",
+                        "description": "Server IP or hostname"
+                    },
+                    "path": {
+                        "type": "string",
+                        "description": "Absolute path of the file to read"
+                    },
+                    "username": {
+                        "type": "string",
+                        "description": "SSH username (default: root)",
+                        "default": "root"
+                    },
+                    "password": {
+                        "type": "string",
+                        "description": "SSH password"
+                    }
                 },
-                "required": ["host", "path"]
+                "required": [
+                    "host",
+                    "path"
+                ]
             }
         }
     },
@@ -64,9 +370,14 @@ TOOLS_SCHEMA = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "url": {"type": "string", "description": "URL to navigate to"}
+                    "url": {
+                        "type": "string",
+                        "description": "URL to navigate to"
+                    }
                 },
-                "required": ["url"]
+                "required": [
+                    "url"
+                ]
             }
         }
     },
@@ -78,9 +389,14 @@ TOOLS_SCHEMA = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "url": {"type": "string", "description": "URL to check"}
+                    "url": {
+                        "type": "string",
+                        "description": "URL to check"
+                    }
                 },
-                "required": ["url"]
+                "required": [
+                    "url"
+                ]
             }
         }
     },
@@ -92,9 +408,14 @@ TOOLS_SCHEMA = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "url": {"type": "string", "description": "URL to get text from"}
+                    "url": {
+                        "type": "string",
+                        "description": "URL to get text from"
+                    }
                 },
-                "required": ["url"]
+                "required": [
+                    "url"
+                ]
             }
         }
     },
@@ -106,11 +427,23 @@ TOOLS_SCHEMA = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "url": {"type": "string", "description": "API endpoint URL"},
-                    "method": {"type": "string", "description": "HTTP method (GET, POST, PUT, DELETE)", "default": "GET"},
-                    "data": {"type": "object", "description": "JSON data to send (for POST/PUT)"}
+                    "url": {
+                        "type": "string",
+                        "description": "API endpoint URL"
+                    },
+                    "method": {
+                        "type": "string",
+                        "description": "HTTP method (GET, POST, PUT, DELETE)",
+                        "default": "GET"
+                    },
+                    "data": {
+                        "type": "object",
+                        "description": "JSON data to send (for POST/PUT)"
+                    }
                 },
-                "required": ["url"]
+                "required": [
+                    "url"
+                ]
             }
         }
     },
@@ -122,11 +455,23 @@ TOOLS_SCHEMA = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "content": {"type": "string", "description": "Full content of the file. For docx/pdf use markdown-like formatting (# headers, **bold**, - lists). For xlsx use CSV format (comma-separated). For html use full HTML."},
-                    "filename": {"type": "string", "description": "Filename with extension, e.g. 'report.docx', 'data.xlsx', 'page.html'"},
-                    "title": {"type": "string", "description": "Optional title for docx/pdf documents"}
+                    "content": {
+                        "type": "string",
+                        "description": "Full content of the file. For docx/pdf use markdown-like formatting (# headers, **bold**, - lists). For xlsx use CSV format (comma-separated). For html use full HTML."
+                    },
+                    "filename": {
+                        "type": "string",
+                        "description": "Filename with extension, e.g. 'report.docx', 'data.xlsx', 'page.html'"
+                    },
+                    "title": {
+                        "type": "string",
+                        "description": "Optional title for docx/pdf documents"
+                    }
                 },
-                "required": ["content", "filename"]
+                "required": [
+                    "content",
+                    "filename"
+                ]
             }
         }
     },
@@ -138,11 +483,24 @@ TOOLS_SCHEMA = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "prompt": {"type": "string", "description": "Detailed description of the image to generate"},
-                    "style": {"type": "string", "description": "Style: 'diagram', 'chart', 'illustration', 'photo', 'logo', 'mockup'", "default": "illustration"},
-                    "filename": {"type": "string", "description": "Output filename, e.g. 'diagram.png'", "default": "image.png"}
+                    "prompt": {
+                        "type": "string",
+                        "description": "Detailed description of the image to generate"
+                    },
+                    "style": {
+                        "type": "string",
+                        "description": "Style: 'diagram', 'chart', 'illustration', 'photo', 'logo', 'mockup'",
+                        "default": "illustration"
+                    },
+                    "filename": {
+                        "type": "string",
+                        "description": "Output filename, e.g. 'diagram.png'",
+                        "default": "image.png"
+                    }
                 },
-                "required": ["prompt"]
+                "required": [
+                    "prompt"
+                ]
             }
         }
     },
@@ -154,11 +512,24 @@ TOOLS_SCHEMA = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "file_path": {"type": "string", "description": "Path to the uploaded file on server"},
-                    "extract_tables": {"type": "boolean", "description": "Whether to extract tables as structured data", "default": True},
-                    "max_length": {"type": "integer", "description": "Maximum text length to return", "default": 50000}
+                    "file_path": {
+                        "type": "string",
+                        "description": "Path to the uploaded file on server"
+                    },
+                    "extract_tables": {
+                        "type": "boolean",
+                        "description": "Whether to extract tables as structured data",
+                        "default": True
+                    },
+                    "max_length": {
+                        "type": "integer",
+                        "description": "Maximum text length to return",
+                        "default": 50000
+                    }
                 },
-                "required": ["file_path"]
+                "required": [
+                    "file_path"
+                ]
             }
         }
     },
@@ -170,10 +541,19 @@ TOOLS_SCHEMA = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "file_path": {"type": "string", "description": "Path to the image file"},
-                    "question": {"type": "string", "description": "Specific question about the image (optional)", "default": "Describe this image in detail"}
+                    "file_path": {
+                        "type": "string",
+                        "description": "Path to the image file"
+                    },
+                    "question": {
+                        "type": "string",
+                        "description": "Specific question about the image (optional)",
+                        "default": "Describe this image in detail"
+                    }
                 },
-                "required": ["file_path"]
+                "required": [
+                    "file_path"
+                ]
             }
         }
     },
@@ -185,10 +565,19 @@ TOOLS_SCHEMA = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "query": {"type": "string", "description": "Search query"},
-                    "num_results": {"type": "integer", "description": "Number of results to return (1-10)", "default": 5}
+                    "query": {
+                        "type": "string",
+                        "description": "Search query"
+                    },
+                    "num_results": {
+                        "type": "integer",
+                        "description": "Number of results to return (1-10)",
+                        "default": 5
+                    }
                 },
-                "required": ["query"]
+                "required": [
+                    "query"
+                ]
             }
         }
     },
@@ -200,10 +589,19 @@ TOOLS_SCHEMA = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "url": {"type": "string", "description": "URL of the web page to fetch"},
-                    "max_length": {"type": "integer", "description": "Maximum text length to return", "default": 20000}
+                    "url": {
+                        "type": "string",
+                        "description": "URL of the web page to fetch"
+                    },
+                    "max_length": {
+                        "type": "integer",
+                        "description": "Maximum text length to return",
+                        "default": 20000
+                    }
                 },
-                "required": ["url"]
+                "required": [
+                    "url"
+                ]
             }
         }
     },
@@ -215,10 +613,18 @@ TOOLS_SCHEMA = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "code": {"type": "string", "description": "Python code to execute"},
-                    "description": {"type": "string", "description": "Brief description of what the code does"}
+                    "code": {
+                        "type": "string",
+                        "description": "Python code to execute"
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "Brief description of what the code does"
+                    }
                 },
-                "required": ["code"]
+                "required": [
+                    "code"
+                ]
             }
         }
     },
@@ -230,12 +636,28 @@ TOOLS_SCHEMA = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "chart_type": {"type": "string", "description": "Type: bar, line, pie, scatter, heatmap, histogram, area, radar"},
-                    "data": {"type": "object", "description": "Chart data: {labels: [...], datasets: [{label: '...', values: [...]}]}"},
-                    "title": {"type": "string", "description": "Chart title"},
-                    "options": {"type": "object", "description": "Additional options: {colors: [...], width: 800, height: 500}"}
+                    "chart_type": {
+                        "type": "string",
+                        "description": "Type: bar, line, pie, scatter, heatmap, histogram, area, radar"
+                    },
+                    "data": {
+                        "type": "object",
+                        "description": "Chart data: {labels: [...], datasets: [{label: '...', values: [...]}]}"
+                    },
+                    "title": {
+                        "type": "string",
+                        "description": "Chart title"
+                    },
+                    "options": {
+                        "type": "object",
+                        "description": "Additional options: {colors: [...], width: 800, height: 500}"
+                    }
                 },
-                "required": ["chart_type", "data", "title"]
+                "required": [
+                    "chart_type",
+                    "data",
+                    "title"
+                ]
             }
         }
     },
@@ -247,11 +669,24 @@ TOOLS_SCHEMA = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "content": {"type": "string", "description": "Full HTML/SVG/Mermaid content"},
-                    "type": {"type": "string", "description": "Type: html, svg, mermaid, react", "default": "html"},
-                    "title": {"type": "string", "description": "Artifact title for display"}
+                    "content": {
+                        "type": "string",
+                        "description": "Full HTML/SVG/Mermaid content"
+                    },
+                    "type": {
+                        "type": "string",
+                        "description": "Type: html, svg, mermaid, react",
+                        "default": "html"
+                    },
+                    "title": {
+                        "type": "string",
+                        "description": "Artifact title for display"
+                    }
                 },
-                "required": ["content", "title"]
+                "required": [
+                    "content",
+                    "title"
+                ]
             }
         }
     },
@@ -263,12 +698,31 @@ TOOLS_SCHEMA = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "title": {"type": "string", "description": "Report title"},
-                    "sections": {"type": "array", "description": "Array of sections: [{heading: '...', content: '...', chart_data: {...}}]", "items": {"type": "object"}},
-                    "format": {"type": "string", "description": "Output format: docx, pdf, xlsx", "default": "docx"},
-                    "filename": {"type": "string", "description": "Output filename"}
+                    "title": {
+                        "type": "string",
+                        "description": "Report title"
+                    },
+                    "sections": {
+                        "type": "array",
+                        "description": "Array of sections: [{heading: '...', content: '...', chart_data: {...}}]",
+                        "items": {
+                            "type": "object"
+                        }
+                    },
+                    "format": {
+                        "type": "string",
+                        "description": "Output format: docx, pdf, xlsx",
+                        "default": "docx"
+                    },
+                    "filename": {
+                        "type": "string",
+                        "description": "Output filename"
+                    }
                 },
-                "required": ["title", "sections"]
+                "required": [
+                    "title",
+                    "sections"
+                ]
             }
         }
     },
@@ -280,11 +734,27 @@ TOOLS_SCHEMA = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "file_path": {"type": "string", "description": "Path to the image file to edit"},
-                    "operations": {"type": "array", "description": "List of operations: [{type: 'resize', width: 800, height: 600}, {type: 'crop', x: 0, y: 0, w: 400, h: 300}, {type: 'text', text: 'Hello', x: 50, y: 50, color: '#fff', size: 24}, {type: 'filter', name: 'blur|sharpen|grayscale|sepia|brightness|contrast'}, {type: 'watermark', text: '...'}, {type: 'rotate', angle: 90}, {type: 'convert', format: 'png|jpg|webp'}]", "items": {"type": "object"}},
-                    "output_filename": {"type": "string", "description": "Output filename", "default": "edited_image.png"}
+                    "file_path": {
+                        "type": "string",
+                        "description": "Path to the image file to edit"
+                    },
+                    "operations": {
+                        "type": "array",
+                        "description": "List of operations: [{type: 'resize', width: 800, height: 600}, {type: 'crop', x: 0, y: 0, w: 400, h: 300}, {type: 'text', text: 'Hello', x: 50, y: 50, color: '#fff', size: 24}, {type: 'filter', name: 'blur|sharpen|grayscale|sepia|brightness|contrast'}, {type: 'watermark', text: '...'}, {type: 'rotate', angle: 90}, {type: 'convert', format: 'png|jpg|webp'}]",
+                        "items": {
+                            "type": "object"
+                        }
+                    },
+                    "output_filename": {
+                        "type": "string",
+                        "description": "Output filename",
+                        "default": "edited_image.png"
+                    }
                 },
-                "required": ["file_path", "operations"]
+                "required": [
+                    "file_path",
+                    "operations"
+                ]
             }
         }
     },
@@ -296,12 +766,29 @@ TOOLS_SCHEMA = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "design_type": {"type": "string", "description": "Type: banner, social_post, slide, infographic, business_card, logo, poster, flyer"},
-                    "content": {"type": "object", "description": "Design content: {title: '...', subtitle: '...', body: '...', cta: '...', colors: [...], images: [...]}"},
-                    "style": {"type": "string", "description": "Style: modern, minimal, corporate, creative, elegant, bold", "default": "modern"},
-                    "dimensions": {"type": "object", "description": "Size: {width: 1200, height: 630}", "default": {}}
+                    "design_type": {
+                        "type": "string",
+                        "description": "Type: banner, social_post, slide, infographic, business_card, logo, poster, flyer"
+                    },
+                    "content": {
+                        "type": "object",
+                        "description": "Design content: {title: '...', subtitle: '...', body: '...', cta: '...', colors: [...], images: [...]}"
+                    },
+                    "style": {
+                        "type": "string",
+                        "description": "Style: modern, minimal, corporate, creative, elegant, bold",
+                        "default": "modern"
+                    },
+                    "dimensions": {
+                        "type": "object",
+                        "description": "Size: {width: 1200, height: 630}",
+                        "default": {}
+                    }
                 },
-                "required": ["design_type", "content"]
+                "required": [
+                    "design_type",
+                    "content"
+                ]
             }
         }
     },
@@ -313,11 +800,24 @@ TOOLS_SCHEMA = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "key": {"type": "string", "description": "Memory key/topic (e.g. 'user_preferences', 'project_stack', 'server_config')"},
-                    "value": {"type": "string", "description": "Information to remember"},
-                    "category": {"type": "string", "description": "Category: preference, fact, project, decision, context", "default": "fact"}
+                    "key": {
+                        "type": "string",
+                        "description": "Memory key/topic (e.g. 'user_preferences', 'project_stack', 'server_config')"
+                    },
+                    "value": {
+                        "type": "string",
+                        "description": "Information to remember"
+                    },
+                    "category": {
+                        "type": "string",
+                        "description": "Category: preference, fact, project, decision, context",
+                        "default": "fact"
+                    }
                 },
-                "required": ["key", "value"]
+                "required": [
+                    "key",
+                    "value"
+                ]
             }
         }
     },
@@ -329,10 +829,18 @@ TOOLS_SCHEMA = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "query": {"type": "string", "description": "Search query or key to recall"},
-                    "category": {"type": "string", "description": "Filter by category (optional)"}
+                    "query": {
+                        "type": "string",
+                        "description": "Search query or key to recall"
+                    },
+                    "category": {
+                        "type": "string",
+                        "description": "Filter by category (optional)"
+                    }
                 },
-                "required": ["query"]
+                "required": [
+                    "query"
+                ]
             }
         }
     },
@@ -344,12 +852,28 @@ TOOLS_SCHEMA = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "title": {"type": "string", "description": "Canvas document title"},
-                    "content": {"type": "string", "description": "Full content (Markdown, code, or HTML)"},
-                    "canvas_type": {"type": "string", "description": "Type: document, code, plan, design", "default": "document"},
-                    "canvas_id": {"type": "string", "description": "Existing canvas ID to update (omit for new)"}
+                    "title": {
+                        "type": "string",
+                        "description": "Canvas document title"
+                    },
+                    "content": {
+                        "type": "string",
+                        "description": "Full content (Markdown, code, or HTML)"
+                    },
+                    "canvas_type": {
+                        "type": "string",
+                        "description": "Type: document, code, plan, design",
+                        "default": "document"
+                    },
+                    "canvas_id": {
+                        "type": "string",
+                        "description": "Existing canvas ID to update (omit for new)"
+                    }
                 },
-                "required": ["title", "content"]
+                "required": [
+                    "title",
+                    "content"
+                ]
             }
         }
     },
@@ -361,13 +885,17 @@ TOOLS_SCHEMA = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "summary": {"type": "string", "description": "Summary of what was accomplished"}
+                    "summary": {
+                        "type": "string",
+                        "description": "Summary of what was accomplished"
+                    }
                 },
-                "required": ["summary"]
+                "required": [
+                    "summary"
+                ]
             }
         }
     },
-    # ── ЗАДАЧА-1: Интерактивная браузерная автоматизация ──────────────────────
     {
         "type": "function",
         "function": {
@@ -376,9 +904,14 @@ TOOLS_SCHEMA = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "selector": {"type": "string", "description": "CSS selector or text=... selector of the element to click"}
+                    "selector": {
+                        "type": "string",
+                        "description": "CSS selector or text=... selector of the element to click"
+                    }
                 },
-                "required": ["selector"]
+                "required": [
+                    "selector"
+                ]
             }
         }
     },
@@ -387,28 +920,13 @@ TOOLS_SCHEMA = [
         "function": {
             "name": "update_scratchpad",
             "description": "Update your internal scratchpad with thoughts, plans, and progress notes. Use this to organize your thinking and track progress on complex tasks."
-            }
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "update_task_charter",
-                "description": "Update the structured Task Charter with project goals, pages, style, tech stack, and status. Use this at the start of complex tasks to define the project plan. All agents can see this charter.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "field": {
-                            "type": "string",
-                            "description": "Which field to update: goal, pages, style, tech_stack, status, current_phase, quality_score, notes",
-                            "enum": ["goal", "pages", "style", "tech_stack", "status", "current_phase", "quality_score", "notes"]
-                        },
-                        "value": {
-                            "type": "string",
-                            "description": "JSON string of the new value for the field"
-                        }
-                    },
-                    "required": ["field", "value"]
-                },
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "update_task_charter",
+            "description": "Update the structured Task Charter with project goals, pages, style, tech stack, and status. Use this at the start of complex tasks to define the project plan. All agents can see this charter.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -418,11 +936,19 @@ TOOLS_SCHEMA = [
                     },
                     "category": {
                         "type": "string",
-                        "enum": ["plan", "thought", "progress", "error", "decision"],
+                        "enum": [
+                            "plan",
+                            "thought",
+                            "progress",
+                            "error",
+                            "decision"
+                        ],
                         "description": "Category of the scratchpad entry"
                     }
                 },
-                "required": ["content"]
+                "required": [
+                    "content"
+                ]
             }
         }
     },
@@ -434,10 +960,19 @@ TOOLS_SCHEMA = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "selector": {"type": "string", "description": "CSS selector of the input field"},
-                    "value": {"type": "string", "description": "Value to type into the field"}
+                    "selector": {
+                        "type": "string",
+                        "description": "CSS selector of the input field"
+                    },
+                    "value": {
+                        "type": "string",
+                        "description": "Value to type into the field"
+                    }
                 },
-                "required": ["selector", "value"]
+                "required": [
+                    "selector",
+                    "value"
+                ]
             }
         }
     },
@@ -449,7 +984,10 @@ TOOLS_SCHEMA = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "selector": {"type": "string", "description": "CSS selector of submit button or form (optional). If omitted — presses Enter."}
+                    "selector": {
+                        "type": "string",
+                        "description": "CSS selector of submit button or form (optional). If omitted — presses Enter."
+                    }
                 },
                 "required": []
             }
@@ -463,10 +1001,19 @@ TOOLS_SCHEMA = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "selector": {"type": "string", "description": "CSS selector of the <select> element"},
-                    "value": {"type": "string", "description": "Option value or label text to select"}
+                    "selector": {
+                        "type": "string",
+                        "description": "CSS selector of the <select> element"
+                    },
+                    "value": {
+                        "type": "string",
+                        "description": "Option value or label text to select"
+                    }
                 },
-                "required": ["selector", "value"]
+                "required": [
+                    "selector",
+                    "value"
+                ]
             }
         }
     },
@@ -478,14 +1025,19 @@ TOOLS_SCHEMA = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "url": {"type": "string", "description": "URL of the login page (optional, uses current page if omitted)"},
-                    "hint": {"type": "string", "description": "Hint for user about what system requires login (e.g. 'Bitrix admin panel', 'FTP server')"}
+                    "url": {
+                        "type": "string",
+                        "description": "URL of the login page (optional, uses current page if omitted)"
+                    },
+                    "hint": {
+                        "type": "string",
+                        "description": "Hint for user about what system requires login (e.g. 'Bitrix admin panel', 'FTP server')"
+                    }
                 },
                 "required": []
             }
         }
     },
-    # ── НОВЫЕ BROWSER ИНСТРУМЕНТЫ v2 ─────────────────────────────────
     {
         "type": "function",
         "function": {
@@ -494,11 +1046,24 @@ TOOLS_SCHEMA = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "selector": {"type": "string", "description": "CSS selector of the input field"},
-                    "value": {"type": "string", "description": "Text to type"},
-                    "clear": {"type": "boolean", "description": "Clear field before typing (default: true)", "default": True}
+                    "selector": {
+                        "type": "string",
+                        "description": "CSS selector of the input field"
+                    },
+                    "value": {
+                        "type": "string",
+                        "description": "Text to type"
+                    },
+                    "clear": {
+                        "type": "boolean",
+                        "description": "Clear field before typing (default: True)",
+                        "default": True
+                    }
                 },
-                "required": ["selector", "value"]
+                "required": [
+                    "selector",
+                    "value"
+                ]
             }
         }
     },
@@ -510,9 +1075,14 @@ TOOLS_SCHEMA = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "code": {"type": "string", "description": "JavaScript code to execute. Can return a value."}
+                    "code": {
+                        "type": "string",
+                        "description": "JavaScript code to execute. Can return a value."
+                    }
                 },
-                "required": ["code"]
+                "required": [
+                    "code"
+                ]
             }
         }
     },
@@ -524,9 +1094,14 @@ TOOLS_SCHEMA = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "key": {"type": "string", "description": "Key name: Enter, Tab, Escape, ArrowDown, ArrowUp, Control+a, etc."}
+                    "key": {
+                        "type": "string",
+                        "description": "Key name: Enter, Tab, Escape, ArrowDown, ArrowUp, Control+a, etc."
+                    }
                 },
-                "required": ["key"]
+                "required": [
+                    "key"
+                ]
             }
         }
     },
@@ -538,10 +1113,25 @@ TOOLS_SCHEMA = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "direction": {"type": "string", "enum": ["up", "down", "left", "right"], "description": "Scroll direction"},
-                    "amount": {"type": "integer", "description": "Scroll amount in pixels (default: 500)", "default": 500}
+                    "direction": {
+                        "type": "string",
+                        "enum": [
+                            "up",
+                            "down",
+                            "left",
+                            "right"
+                        ],
+                        "description": "Scroll direction"
+                    },
+                    "amount": {
+                        "type": "integer",
+                        "description": "Scroll amount in pixels (default: 500)",
+                        "default": 500
+                    }
                 },
-                "required": ["direction"]
+                "required": [
+                    "direction"
+                ]
             }
         }
     },
@@ -553,9 +1143,14 @@ TOOLS_SCHEMA = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "selector": {"type": "string", "description": "CSS selector of the element to hover over"}
+                    "selector": {
+                        "type": "string",
+                        "description": "CSS selector of the element to hover over"
+                    }
                 },
-                "required": ["selector"]
+                "required": [
+                    "selector"
+                ]
             }
         }
     },
@@ -567,9 +1162,19 @@ TOOLS_SCHEMA = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "selector": {"type": "string", "description": "CSS selector to wait for (optional)"},
-                    "url_contains": {"type": "string", "description": "Wait until URL contains this substring (optional)"},
-                    "timeout": {"type": "integer", "description": "Max wait time in ms (default: 15000)", "default": 15000}
+                    "selector": {
+                        "type": "string",
+                        "description": "CSS selector to wait for (optional)"
+                    },
+                    "url_contains": {
+                        "type": "string",
+                        "description": "Wait until URL contains this substring (optional)"
+                    },
+                    "timeout": {
+                        "type": "integer",
+                        "description": "Max wait time in ms (default: 15000)",
+                        "default": 15000
+                    }
                 },
                 "required": []
             }
@@ -583,10 +1188,19 @@ TOOLS_SCHEMA = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "selector": {"type": "string", "description": "CSS selector to match elements (e.g. 'button', '.menu-item', '[st]')"},
-                    "limit": {"type": "integer", "description": "Max elements to return (default: 50)", "default": 50}
+                    "selector": {
+                        "type": "string",
+                        "description": "CSS selector to match elements (e.g. 'button', '.menu-item', '[st]')"
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Max elements to return (default: 50)",
+                        "default": 50
+                    }
                 },
-                "required": ["selector"]
+                "required": [
+                    "selector"
+                ]
             }
         }
     },
@@ -622,11 +1236,24 @@ TOOLS_SCHEMA = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "url": {"type": "string", "description": "Login page URL"},
-                    "login": {"type": "string", "description": "Username/email/login"},
-                    "password": {"type": "string", "description": "Password"}
+                    "url": {
+                        "type": "string",
+                        "description": "Login page URL"
+                    },
+                    "login": {
+                        "type": "string",
+                        "description": "Username/email/login"
+                    },
+                    "password": {
+                        "type": "string",
+                        "description": "Password"
+                    }
                 },
-                "required": ["url", "login", "password"]
+                "required": [
+                    "url",
+                    "login",
+                    "password"
+                ]
             }
         }
     },
@@ -638,10 +1265,26 @@ TOOLS_SCHEMA = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "reason": {"type": "string", "enum": ["captcha", "2fa", "login_failed", "unusual_form", "confirmation", "custom"], "description": "Why user takeover is needed"},
-                    "instruction": {"type": "string", "description": "What the user should do (shown in chat)"}
+                    "reason": {
+                        "type": "string",
+                        "enum": [
+                            "captcha",
+                            "2fa",
+                            "login_failed",
+                            "unusual_form",
+                            "confirmation",
+                            "custom"
+                        ],
+                        "description": "Why user takeover is needed"
+                    },
+                    "instruction": {
+                        "type": "string",
+                        "description": "What the user should do (shown in chat)"
+                    }
                 },
-                "required": ["reason"]
+                "required": [
+                    "reason"
+                ]
             }
         }
     },
@@ -657,7 +1300,6 @@ TOOLS_SCHEMA = [
             }
         }
     },
-    # ── ЗАДАЧА-1: FTP инструменты (ftplib, без SSH) ───────────────────────────
     {
         "type": "function",
         "function": {
@@ -666,14 +1308,39 @@ TOOLS_SCHEMA = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "host": {"type": "string", "description": "FTP server hostname or IP"},
-                    "username": {"type": "string", "description": "FTP username"},
-                    "password": {"type": "string", "description": "FTP password (special chars supported)"},
-                    "remote_path": {"type": "string", "description": "Full remote path including filename, e.g. /www/site.ru/index.php"},
-                    "content": {"type": "string", "description": "File content to upload"},
-                    "port": {"type": "integer", "description": "FTP port (default: 21)", "default": 21}
+                    "host": {
+                        "type": "string",
+                        "description": "FTP server hostname or IP"
+                    },
+                    "username": {
+                        "type": "string",
+                        "description": "FTP username"
+                    },
+                    "password": {
+                        "type": "string",
+                        "description": "FTP password (special chars supported)"
+                    },
+                    "remote_path": {
+                        "type": "string",
+                        "description": "Full remote path including filename, e.g. /www/site.ru/index.php"
+                    },
+                    "content": {
+                        "type": "string",
+                        "description": "File content to upload"
+                    },
+                    "port": {
+                        "type": "integer",
+                        "description": "FTP port (default: 21)",
+                        "default": 21
+                    }
                 },
-                "required": ["host", "username", "password", "remote_path", "content"]
+                "required": [
+                    "host",
+                    "username",
+                    "password",
+                    "remote_path",
+                    "content"
+                ]
             }
         }
     },
@@ -685,13 +1352,34 @@ TOOLS_SCHEMA = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "host": {"type": "string", "description": "FTP server hostname or IP"},
-                    "username": {"type": "string", "description": "FTP username"},
-                    "password": {"type": "string", "description": "FTP password"},
-                    "remote_path": {"type": "string", "description": "Full remote path of the file to download"},
-                    "port": {"type": "integer", "description": "FTP port (default: 21)", "default": 21}
+                    "host": {
+                        "type": "string",
+                        "description": "FTP server hostname or IP"
+                    },
+                    "username": {
+                        "type": "string",
+                        "description": "FTP username"
+                    },
+                    "password": {
+                        "type": "string",
+                        "description": "FTP password"
+                    },
+                    "remote_path": {
+                        "type": "string",
+                        "description": "Full remote path of the file to download"
+                    },
+                    "port": {
+                        "type": "integer",
+                        "description": "FTP port (default: 21)",
+                        "default": 21
+                    }
                 },
-                "required": ["host", "username", "password", "remote_path"]
+                "required": [
+                    "host",
+                    "username",
+                    "password",
+                    "remote_path"
+                ]
             }
         }
     },
@@ -703,13 +1391,34 @@ TOOLS_SCHEMA = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "host": {"type": "string", "description": "FTP server hostname or IP"},
-                    "username": {"type": "string", "description": "FTP username"},
-                    "password": {"type": "string", "description": "FTP password"},
-                    "remote_path": {"type": "string", "description": "Remote directory path to list", "default": "/"},
-                    "port": {"type": "integer", "description": "FTP port (default: 21)", "default": 21}
+                    "host": {
+                        "type": "string",
+                        "description": "FTP server hostname or IP"
+                    },
+                    "username": {
+                        "type": "string",
+                        "description": "FTP username"
+                    },
+                    "password": {
+                        "type": "string",
+                        "description": "FTP password"
+                    },
+                    "remote_path": {
+                        "type": "string",
+                        "description": "Remote directory path to list",
+                        "default": "/"
+                    },
+                    "port": {
+                        "type": "integer",
+                        "description": "FTP port (default: 21)",
+                        "default": 21
+                    }
                 },
-        "required": ["host", "username", "password"]
+                "required": [
+                    "host",
+                    "username",
+                    "password"
+                ]
             }
         }
     },
@@ -1025,14 +1734,24 @@ TOOLS_SCHEMA = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "code": {"type": "string", "description": "Python code to execute. Use print() to output results."},
-                    "description": {"type": "string", "description": "Brief description of what the code does"},
-                    "timeout": {"type": "integer", "description": "Execution timeout in seconds (default: 30, max: 120)", "default": 30}
+                    "code": {
+                        "type": "string",
+                        "description": "Python code to execute. Use print() to output results."
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "Brief description of what the code does"
+                    },
+                    "timeout": {
+                        "type": "integer",
+                        "description": "Execution timeout in seconds (default: 30, max: 120)",
+                        "default": 30
+                    }
                 },
-                "required": ["code"]
+                "required": [
+                    "code"
+                ]
             }
         }
     }
 ]
-
-

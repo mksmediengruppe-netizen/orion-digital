@@ -7,8 +7,8 @@ Specialized Agents v7.0 — ORION Digital
   designer   → gemini   (google/gemini-2.5-pro)
   developer  → mimo     (xiaomi/mimo-v2-flash)   — hands
   devops     → mimo     (xiaomi/mimo-v2-flash)   — hands
-  tester     → minimax  (minimax/minimax-m2.5)   — brain
-  analyst    → minimax  / sonnet в pro_premium   — brain
+  tester     → minimax  (openai/gpt-5.4-mini)   — brain
+  analyst    → gpt54_mini / sonnet в premium   — brain
   integrator → mimo     (xiaomi/mimo-v2-flash)   — hands
 
 preferred_model берётся из model_router по роли и режиму.
@@ -142,8 +142,8 @@ SPECIALIZED_AGENTS = {
         "emoji": "🧪",
         "role": "tester",
         # MiniMax — быстрые проверки (brain)
-        "preferred_model": "minimax/minimax-m2.5",  # PATCH fix: minimax brain
-        "model_key": "minimax",
+        "preferred_model": "openai/gpt-5.4-mini",  # PATCH fix: gpt54_mini worker
+        "model_key": "gpt54_mini",
         "priority_tools": [
             "browser_navigate", "browser_get_text", "browser_check_site",
             "browser_check_api", "code_interpreter", "ssh_execute"
@@ -179,9 +179,9 @@ SPECIALIZED_AGENTS = {
         "name": "Аналитик",
         "emoji": "📊",
         "role": "analyst",
-        # MiniMax standard / Sonnet в pro_premium (brain)
-        "preferred_model": "minimax/minimax-m2.5",  # PATCH fix: minimax brain
-        "model_key": "minimax",
+        # GPT-5.4 Mini / Sonnet в premium (brain)
+        "preferred_model": "openai/gpt-5.4-mini",  # PATCH fix: gpt54_mini worker
+        "model_key": "gpt54_mini",
         "priority_tools": [
             "web_search", "web_fetch", "code_interpreter",
             "generate_chart", "generate_file", "generate_report",
@@ -303,7 +303,7 @@ def get_agent_model(agent_key: str, mode: str = DEFAULT_MODE) -> str:
         return cfg.get("id", SPECIALIZED_AGENTS[agent_key]["preferred_model"])
     except Exception:
         return SPECIALIZED_AGENTS.get(agent_key, {}).get(
-            "preferred_model", "deepseek/deepseek-v3.2"  # PATCH fix
+            "preferred_model", "openai/gpt-5.4-mini"  # PATCH fix
         )
 
 
@@ -412,7 +412,7 @@ def select_agents_for_task(user_message: str, mode: str = "chat",
                            orion_mode: str = DEFAULT_MODE) -> List[Dict[str, Any]]:
     """
     Выбрать лучших агентов для задачи.
-    orion_mode — режим ORION (turbo_standard / pro_premium / ...)
+    orion_mode — режим ORION (fast / premium / ...)
     """
     msg_lower = user_message.lower()
     scores = {}

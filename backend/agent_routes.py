@@ -359,7 +359,7 @@ def _process_message_queue(chat_id: str, user_id: str):
                 # Inject resume message into queue
                 _message_queue[chat_id] = [{
                     "message": f"Продолжи прерванную задачу: {paused.get('task', '')}",
-                    "mode": paused.get("mode", "turbo_standard"),
+                    "mode": paused.get("mode", "fast"),
                     "user_id": user_id,
                     "file_content": ""
                 }]
@@ -378,7 +378,7 @@ def _process_message_queue(chat_id: str, user_id: str):
             json={
                 "chat_id": chat_id,
                 "message": next_msg["message"],
-                "mode": next_msg.get("mode", "turbo_standard"),
+                "mode": next_msg.get("mode", "fast"),
                 "file_content": next_msg.get("file_content", ""),
             },
             headers={"X-Internal-Queue": "1", "X-User-Id": next_msg.get("user_id", user_id)},
@@ -434,15 +434,15 @@ def send_message(chat_id):
     # FIX: Load mode from chat if not in send payload
     _raw_mode = data.get("mode") or (chat.get("orion_mode") if chat else None) or "turbo-basic"
     _MODE_NORMALIZE = {
-        "auto": "auto", 
-        "turbo-basic": "turbo_standard", "turbo_basic": "turbo_standard", "turbo_standard": "turbo_standard",
-        "turbo-premium": "turbo_premium", "turbo_premium": "turbo_premium",
-        "pro-basic": "pro_standard", "pro_basic": "pro_standard", "pro_standard": "pro_standard",
-        "pro-premium": "pro_premium", "pro_premium": "pro_premium",
-        "architect": "architect",
-        "smart_turbo": "smart_turbo",
-}
-    orion_mode = _MODE_NORMALIZE.get(_raw_mode, "turbo_standard")
+        "turbo-basic": "fast", "turbo_basic": "fast", "fast": "fast",
+        "turbo-premium": "fast", "fast": "fast",
+        "pro-basic": "standard", "pro_basic": "standard", "standard": "standard",
+        "pro-premium": "premium", "premium": "premium",
+        "premium": "premium",
+        "standard": "standard",
+        "fast": "fast", "standard": "standard", "premium": "premium",
+    }
+    orion_mode = _MODE_NORMALIZE.get(_raw_mode, "fast")
     
     # ══ PATCH 14 FIX: Interrupt / Queue / Append for send_message route ══
     with _tasks_lock:
@@ -511,17 +511,17 @@ def send_message(chat_id):
                       "dns", "домен", "хостинг", "beget", "vps", "сайт-визитк",
                       "интернет-магазин", "портал", "дашборд", "dashboard"]
         if any(kw in _msg_lower for kw in _opus_kw):
-            orion_mode = "architect"
-            _auto_resolved_mode = "architect"
+            orion_mode = "premium"
+            _auto_resolved_mode = "premium"
             logging.info(f"[AUTO MODE] → architect (Opus keywords detected)")
         elif any(kw in _msg_lower for kw in _sonnet_kw) or _msg_len > 200:
-            orion_mode = "pro_standard"
-            _auto_resolved_mode = "pro_standard"
-            logging.info(f"[AUTO MODE] → pro_standard (Sonnet keywords or long message)")
+            orion_mode = "standard"
+            _auto_resolved_mode = "standard"
+            logging.info(f"[AUTO MODE] → standard (Sonnet keywords or long message)")
         else:
-            orion_mode = "turbo_standard"
-            _auto_resolved_mode = "turbo_standard"
-            logging.info(f"[AUTO MODE] → turbo_standard (simple message)")
+            orion_mode = "fast"
+            _auto_resolved_mode = "fast"
+            logging.info(f"[AUTO MODE] → fast (simple message)")
     logging.info(f"[send_message] orion_mode={orion_mode} (raw={_raw_mode})")
 
     if not user_message and not file_content:
@@ -529,7 +529,7 @@ def send_message(chat_id):
 
     # Get user settings
     user_settings = db["users"].get(request.user_id, {}).get("settings", {})
-    variant = user_settings.get("variant", "premium")
+    variant = orion_mode  # FIX: orion_mode is single source of truth
     enhanced = user_settings.get("enhanced_mode", False)
     self_check_level = user_settings.get("self_check_level", "none")  # none | light | medium | deep
     chat_model = user_settings.get("chat_model", "qwen3")
@@ -572,7 +572,7 @@ def send_message(chat_id):
     # Auto-title from first message — generate smart title via LLM (using orchestrator model)
     if len(chat["messages"]) == 1 and chat["title"] == "Новый чат":
         try:
-            _title_config = MODEL_CONFIGS.get(variant, MODEL_CONFIGS["premium"])
+            _title_config = MODEL_CONFIGS.get(orion_mode, MODEL_CONFIGS.get("standard", list(MODEL_CONFIGS.values())[0]))  # FIX: use orion_mode
             _title_model = _title_config["tools"]["model"]  # Используем модель оркестратора (DeepSeek V3.2)
             _title_resp = http_requests.post(
                 OPENROUTER_BASE_URL,
@@ -604,7 +604,7 @@ def send_message(chat_id):
     db_write(db)
 
     # Determine which model to use
-    config = MODEL_CONFIGS.get(variant, MODEL_CONFIGS["premium"])
+    config = MODEL_CONFIGS.get(orion_mode, MODEL_CONFIGS.get("standard", list(MODEL_CONFIGS.values())[0]))  # FIX: use orion_mode
     model = config["coding"]["model"]
     model_name = config["coding"]["name"]
     # Separate model for Agent Mode (must support OpenAI tool calling)
@@ -613,16 +613,14 @@ def send_message(chat_id):
 
     # ── PATCH 4: Single model selection path via model_router ──
     # Model is selected ONLY by orion_mode via model_router, no keyword overrides
-    _TURBO_MODES = ("turbo_standard", "turbo_premium", "smart_turbo")
+    _TURBO_MODES = ("fast", "fast", "standard")
     try:
         from model_router import MODELS as _MR_MODELS
         _mode_to_model = {
-            "turbo_standard": ("google/gemini-2.5-flash", "Gemini 2.5 Flash"),
-            "turbo_premium":  ("google/gemini-2.5-flash", "Gemini 2.5 Flash"),
-            "pro_standard":   (_MR_MODELS["sonnet"]["id"], _MR_MODELS["sonnet"]["name"]),
-            "pro_premium":    (_MR_MODELS["sonnet"]["id"], _MR_MODELS["sonnet"]["name"]),
-            "architect":      (_MR_MODELS["opus"]["id"], _MR_MODELS["opus"]["name"]),
-            "smart_turbo":    ("google/gemini-2.5-flash", "Gemini 2.5 Flash"),
+            # FIX: no duplicate keys - each mode maps to exactly one model
+            "fast":     (_MR_MODELS.get("gpt54_mini", {}).get("id", "openai/gpt-4o-mini"), _MR_MODELS.get("gpt54_mini", {}).get("name", "GPT-5.4 Mini")),
+            "standard": (_MR_MODELS.get("gpt54", {}).get("id", "openai/gpt-4o"),           _MR_MODELS.get("gpt54", {}).get("name", "GPT-5.4")),
+            "premium":  (_MR_MODELS.get("opus", {}).get("id", "anthropic/claude-opus-4"),  _MR_MODELS.get("opus", {}).get("name", "Claude Opus 4")),
         }
         if orion_mode in _mode_to_model:
             agent_model, agent_model_name = _mode_to_model[orion_mode]
@@ -711,15 +709,15 @@ def send_message(chat_id):
 
     # Build chat history for context
     # Context: 50 messages for Pro/Architect, 10 for Turbo
-    _ctx_limit_app = 50 if orion_mode in ("pro_standard", "pro_premium", "architect") else 10
+    _ctx_limit_app = 50 if orion_mode in ("standard", "premium", "premium") else 10
     history = [{"role": m["role"], "content": m["content"]} for m in chat["messages"][-_ctx_limit_app:]]
 
     # ═══ ФИНАЛЬНАЯ АРХИТЕКТУРА: Pro/Architect bypass — один агент, без pipeline ═══
-    if orion_mode in ("pro_standard", "pro_premium", "architect"):
-        if orion_mode == "architect":
+    if orion_mode in ("standard", "premium", "premium"):
+        if orion_mode == "premium":
             _pro_agent_model = "anthropic/claude-opus-4"
             _pro_model_name = "Claude Opus 4"
-        elif orion_mode == "pro_premium":
+        elif orion_mode == "premium":
             _pro_agent_model = "anthropic/claude-sonnet-4.6"
             _pro_model_name = "Claude Sonnet 4.6"
         else:
@@ -819,7 +817,7 @@ def send_message(chat_id):
                     with _tasks_lock:
                         pass  # db access outside lock
                     chat["messages"].append({"role": "assistant", "content": full_response, "created_at": _now_iso()})
-                    _save_db(_saved_db_pro)
+                    db_write(_saved_db_pro)
                 # Cost tracking
                 _cost = _calc_cost(tokens_in, tokens_out, _pro_agent_model)
                 chat["total_cost"] = chat.get("total_cost", 0) + _cost
@@ -831,7 +829,7 @@ def send_message(chat_id):
                 _analytics["total_tokens_out"] = _analytics.get("total_tokens_out", 0) + tokens_out
                 _analytics["total_cost"] = _analytics.get("total_cost", 0) + _cost
                 _analytics["total_requests"] = _analytics.get("total_requests", 0) + 1
-                _save_db(_saved_db_pro)
+                db_write(_saved_db_pro)
                 try:
                     log_cost(
                         user_id=_saved_user_id_pro,
@@ -936,7 +934,7 @@ def send_message(chat_id):
             try:
                 def _orch_llm_send(messages, model=None):
                     import requests as _rq
-                    _llm_model = model or "minimax/minimax-m2.5"  # PATCH fix2: real model ID
+                    _llm_model = model or "openai/gpt-5.4-mini"  # PATCH fix2: real model ID
                     logging.info(f"[_orch_llm_send] Calling {_llm_model} with {len(messages)} messages")
                     resp = _rq.post(
                         OPENROUTER_BASE_URL,
@@ -1103,7 +1101,7 @@ def send_message(chat_id):
                     logging.warning(f"Model routing error: {_route_err}")
                 # === КОНЕЦ МАРШРУТИЗАЦИИ ===
                 # ── BUG-1 FIX: Premium mode → Sonnet for agent too ──
-                if orion_mode in ("turbo_premium", "pro_premium") and not _sm_model_override:
+                if orion_mode in ("fast", "premium") and not _sm_model_override:
                     _sm_model_override = "anthropic/claude-sonnet-4.6"
                     model_name = "Claude Sonnet 4.6"
                     agent_model_name = "Claude Sonnet 4.6"
@@ -1231,7 +1229,7 @@ def send_message(chat_id):
 Отвечай кратко и по делу."""
 
             # ── BUG-1 FIX: Premium mode → Sonnet override ──
-            if orion_mode in ("turbo_premium", "pro_premium"):
+            if orion_mode in ("fast", "premium"):
                 active_model = "anthropic/claude-sonnet-4.6"
                 active_model_name = "Claude Sonnet 4.6"
                 model_name = "Claude Sonnet 4.6"
@@ -1248,7 +1246,7 @@ def send_message(chat_id):
                         _r = http_requests.post(
                             OPENROUTER_BASE_URL,
                             headers={"Authorization": f"Bearer {OPENROUTER_API_KEY}", "Content-Type": "application/json"},
-                            json={"model": "minimax/minimax-m2.5", "messages": msgs, "temperature": 0.1, "max_tokens": 512},  # PATCH fix2
+                            json={"model": "openai/gpt-5.4-mini", "messages": msgs, "temperature": 0.1, "max_tokens": 512},  # PATCH fix2
                             timeout=15
                         )
                         return _r.json()["choices"][0]["message"]["content"]
@@ -1357,7 +1355,7 @@ def send_message(chat_id):
             # ═══ SELF-CHECK: проверка ответа вторым AI ═══
             if self_check_level != "none" and full_response and "❌" not in full_response[:10]:
                 SELF_CHECK_MODELS = {
-                    "light":  {"model": "minimax/minimax-m2.5", "name": "MiniMax M2.5", "input_price": 0.27, "output_price": 0.95},  # PATCH fix2
+                    "light":  {"model": "openai/gpt-5.4-mini", "name": "GPT-5.4 Mini", "input_price": 0.27, "output_price": 0.95},  # PATCH fix2
                     "medium": None,  # same model as main
                     "deep":   {"model": "anthropic/claude-sonnet-4.6", "name": "Claude Sonnet 4", "input_price": 3.00, "output_price": 15.00},
                 }
@@ -1577,7 +1575,7 @@ def send_message(chat_id):
                             _r = http_requests.post(
                                 OPENROUTER_BASE_URL,
                                 headers={"Authorization": f"Bearer {OPENROUTER_API_KEY}", "Content-Type": "application/json"},
-                                json={"model": "minimax/minimax-m2.5", "messages": msgs, "temperature": 0.1, "max_tokens": 512},  # PATCH fix2
+                                json={"model": "openai/gpt-5.4-mini", "messages": msgs, "temperature": 0.1, "max_tokens": 512},  # PATCH fix2
                                 timeout=15
                             )
                             return _r.json()["choices"][0]["message"]["content"]
@@ -1813,22 +1811,22 @@ def direct_chat():
     data = request.get_json() or {}
     user_message = data.get("message", "").strip()
     file_content = data.get("file_content", "")
+    # ── Extract chat_id early (needed for interrupt check) ──
+    chat_id = data.get("chat_id")
     # ── BUG-1 FIX: Extract and normalize orion_mode ──
-    # FIX: Load mode from chat if not in send payload
-    _raw_mode = data.get("mode") or (chat.get("orion_mode") if chat else None) or "turbo-basic"
+    _raw_mode = data.get("mode") or "fast"
     _MODE_NORMALIZE = {
         "auto": "auto", 
-        "turbo-basic": "turbo_standard", "turbo_basic": "turbo_standard", "turbo_standard": "turbo_standard",
-        "turbo-premium": "turbo_premium", "turbo_premium": "turbo_premium",
-        "pro-basic": "pro_standard", "pro_basic": "pro_standard", "pro_standard": "pro_standard",
-        "pro-premium": "pro_premium", "pro_premium": "pro_premium",
-        "architect": "architect",
+        "turbo-basic": "fast", "turbo_basic": "fast", "fast": "fast",
+        "turbo-premium": "fast",
+        "pro-basic": "standard", "pro_basic": "standard", "standard": "standard",
+        "pro-premium": "premium", "premium": "premium",
     }
-    orion_mode = _MODE_NORMALIZE.get(_raw_mode, "turbo_standard")
+    orion_mode = _MODE_NORMALIZE.get(_raw_mode, "fast")
     
     # ══ PATCH 14 FIX: Interrupt / Queue / Append for send_message route ══
     with _tasks_lock:
-        _existing_task = _running_tasks.get(chat_id)
+        _existing_task = _running_tasks.get(chat_id) if chat_id else None
         _task_is_running = _existing_task and _existing_task.get("status") == "running"
     if _task_is_running:
         _msg_type = _classify_interrupt_message(user_message)
@@ -1884,17 +1882,17 @@ def direct_chat():
                       "dns", "домен", "хостинг", "beget", "vps", "сайт-визитк",
                       "интернет-магазин", "портал", "дашборд", "dashboard"]
         if any(kw in _msg_lower for kw in _opus_kw):
-            orion_mode = "architect"
-            _auto_resolved_mode = "architect"
+            orion_mode = "premium"
+            _auto_resolved_mode = "premium"
             logging.info(f"[AUTO MODE] → architect (Opus keywords detected)")
         elif any(kw in _msg_lower for kw in _sonnet_kw) or _msg_len > 200:
-            orion_mode = "pro_standard"
-            _auto_resolved_mode = "pro_standard"
-            logging.info(f"[AUTO MODE] → pro_standard (Sonnet keywords or long message)")
+            orion_mode = "standard"
+            _auto_resolved_mode = "standard"
+            logging.info(f"[AUTO MODE] → standard (Sonnet keywords or long message)")
         else:
-            orion_mode = "turbo_standard"
-            _auto_resolved_mode = "turbo_standard"
-            logging.info(f"[AUTO MODE] → turbo_standard (simple message)")
+            orion_mode = "fast"
+            _auto_resolved_mode = "fast"
+            logging.info(f"[AUTO MODE] → fast (simple message)")
     logging.info(f"[send_message] orion_mode={orion_mode} (raw={_raw_mode})")
     chat_id = data.get("chat_id")
 
@@ -2024,13 +2022,13 @@ def direct_chat():
         "timestamp": time.time()
     }
     with _lock:
-        db2 = _load_db()
+        db2 = db_read()
         db2["chats"][chat_id]["messages"].append(user_msg)
         db2["chats"][chat_id]["updated_at"] = time.time()
-        _save_db(db2)
+        db_write(db2)
 
     # Получаем историю (BUG-4 FIX: ограничиваем до 10 сообщений чтобы не переполнять контекст)
-    _ctx_limit_v2 = 50 if orion_mode in ("pro_standard", "pro_premium", "architect") else 10
+    _ctx_limit_v2 = 50 if orion_mode in ("standard", "premium", "premium") else 10
     history = db2["chats"][chat_id]["messages"][-_ctx_limit_v2:]
     user_settings = request.user.get("settings", {})
 
@@ -2056,7 +2054,7 @@ def direct_chat():
     # Выбираем модель по режиму
     from model_router import get_model_for_agent
     _agent_cfg = get_model_for_agent("orchestrator", orion_mode)
-    model = _agent_cfg.get("model_id", "minimax/minimax-m2.5")  # PATCH fix2: real model ID
+    model = _agent_cfg.get("model_id", "openai/gpt-5.4-mini")  # PATCH fix2: real model ID
     api_key = OPENROUTER_API_KEY
 
     def generate():
@@ -2085,7 +2083,7 @@ def direct_chat():
             _orch_prompt_extra = ""
             _orch_plan = None
             multi_agent = False
-            premium_design = (orion_mode == pro_premium)
+            premium_design = (orion_mode == premium)
             
             # ══ QUICK PATH REMOVED: ALL messages go through orchestrator + agent ══
 
@@ -2094,7 +2092,7 @@ def direct_chat():
                     # Функция для вызова LLM из оркестратора
                     def _orch_call_llm(messages, model=None):
                         import requests as _req
-                        _model = model or "minimax/minimax-m2.5"  # PATCH fix2: real model ID
+                        _model = model or "openai/gpt-5.4-mini"  # PATCH fix2: real model ID
                         resp = _req.post(
                             OPENROUTER_BASE_URL,
                             headers={"Authorization": f"Bearer {OPENROUTER_API_KEY}",
@@ -2244,11 +2242,11 @@ def direct_chat():
                     "content": assistant_content, "timestamp": time.time()
                 }
                 with _lock:
-                    db3 = _load_db()
+                    db3 = db_read()
                     if chat_id in db3["chats"]:
                         db3["chats"][chat_id]["messages"].append(asst_msg)
                         db3["chats"][chat_id]["updated_at"] = time.time()
-                        _save_db(db3)
+                        db_write(db3)
 
             # НЕ делаем yield в finally — это вызывает RuntimeError: generator ignored GeneratorExit
 

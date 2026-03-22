@@ -291,7 +291,7 @@ Assistant: {assistant_msg}"""
             api_url or "https://openrouter.ai/api/v1/chat/completions",
             headers=headers,
             json={
-                "model": "minimax/minimax-m2.5",  # PATCH fix: real model ID
+                "model": "openai/gpt-5.4-mini",  # PATCH fix: real model ID
                 "messages": [
                     {"role": "user", "content": extraction_prompt.format(
                         user_msg=user_message[:500],
