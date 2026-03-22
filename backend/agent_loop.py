@@ -5693,6 +5693,30 @@ class MultiAgentLoop(AgentLoop):
                         logging.warning("[AntiLoop] " + tool_name + " repeated " + str(_repeat_count) + "x - warning injected")
                         messages.append({"role": "system", "content": "ПРЕДУПРЕЖДЕНИЕ: Ты уже вызывал '" + tool_name + "' с похожими аргументами. Если результат тот же - попробуй другой подход."})
 
+def validate_html_before_deploy(html_content: str) -> dict:
+    """Validate HTML before deploying to server."""
+    issues = []
+    if not html_content or len(html_content) < 100:
+        issues.append('HTML too short or empty')
+    if '<html' not in html_content.lower():
+        issues.append('Missing <html> tag')
+    if '</html>' not in html_content.lower():
+        issues.append('Missing </html> closing tag')
+    if '<head' not in html_content.lower():
+        issues.append('Missing <head> tag')
+    if '<body' not in html_content.lower():
+        issues.append('Missing <body> tag')
+    if 'charset' not in html_content.lower():
+        issues.append('Missing charset declaration')
+    if '<meta name="viewport"' not in html_content.lower():
+        issues.append('Missing viewport meta tag')
+    return {
+        'valid': len(issues) == 0,
+        'issues': issues,
+        'size': len(html_content)
+    }
+
+
                     # ── ANTI-LOOP for pipeline ──
                     _ph_hash = hashlib.md5(f"{tool_name}:{tool_args_str[:200]}".encode()).hexdigest()
                     _phase_tool_history[_ph_hash] = _phase_tool_history.get(_ph_hash, 0) + 1
