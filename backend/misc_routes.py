@@ -496,14 +496,14 @@ def get_agent_pipelines():
 
 @misc_bp.route("/api/modes", methods=["GET"])
 def get_modes():
-    """Список режимов работы ORION (turbo_standard / pro_premium / ...)."""
+    """Список режимов работы ORION (fast / premium / ...)."""
     try:
         from model_router import list_modes, list_models
         return jsonify({
             "success": True,
             "modes": list_modes(),
             "models": list_models(),
-            "default": "turbo_standard"
+            "default": "standard"
         })
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
@@ -518,7 +518,7 @@ def api_clarify_intent():
         from intent_clarifier import clarify, format_clarification_for_user
         data = request.get_json() or {}
         message = data.get("message", "")
-        orion_mode = data.get("mode", "turbo_standard")
+        orion_mode = data.get("mode", "fast")
         history = data.get("history", [])
         result = clarify(message, history=history, orion_mode=orion_mode)
         result["label"] = format_clarification_for_user(result)
@@ -535,7 +535,7 @@ def get_session_cost():
     try:
         from model_router import get_cost_analytics, check_cost_limit
         session_id = request.args.get("session_id", request.user_id)
-        orion_mode = request.args.get("mode", "turbo_standard")
+        orion_mode = request.args.get("mode", "fast")
         cost_check = check_cost_limit(session_id, orion_mode)
         analytics = get_cost_analytics(user_id=request.user_id, days=1)
         return jsonify({
@@ -626,7 +626,7 @@ def estimate_task():
                     "Content-Type": "application/json"
                 },
                 json={
-                    "model": "minimax/minimax-m2.5",  # PATCH fix2: real model ID
+                    "model": "openai/gpt-5.4-mini",  # PATCH fix2: real model ID
                     "messages": [
                         {"role": "system", "content": (
                             "Ты — менеджер проектов. Оцени задачу клиента и дай краткий комментарий к смете. "

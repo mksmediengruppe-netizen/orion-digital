@@ -36,6 +36,97 @@ import logging
 import os
 import uuid
 
+
+# ═══════ PARALLEL CHAT BROWSER CONTEXTS ═══════
+import threading as _pw_threading
+import time as _pw_time
+
+_pw_contexts = {}  # {chat_id: {"context": ctx, "page": page, "last_used": float}}
+_pw_lock = _pw_threading.Lock()
+_MAX_BROWSER_CONTEXTS = 5
+
+
+import threading as _threading_watchdog
+
+class BrowserWatchdog:
+    """C3: Kill hung Playwright contexts after timeout."""
+    
+    def __init__(self, timeout=300):
+        self._timeout = timeout
+        self._timer = None
+    
+    def start(self, chat_id):
+        self.cancel()
+        self._timer = _threading_watchdog.Timer(
+            self._timeout, 
+            self._kill, 
+            args=[chat_id]
+        )
+        self._timer.daemon = True
+        self._timer.start()
+    
+    def cancel(self):
+        if self._timer:
+            self._timer.cancel()
+            self._timer = None
+    
+    def _kill(self, chat_id):
+        logger.warning(f"Browser watchdog: killing context for {chat_id}")
+        try:
+            close_browser_context(chat_id)
+        except Exception as e:
+            logger.error(f"Watchdog kill failed: {e}")
+
+
+def get_browser_page(chat_id, pw_browser=None):
+    """Get or create a Playwright page for a specific chat."""
+    with _pw_lock:
+        if chat_id in _pw_contexts:
+            _pw_contexts[chat_id]["last_used"] = _pw_time.time()
+            return _pw_contexts[chat_id]["page"]
+        
+        # Evict oldest if at limit
+        if len(_pw_contexts) >= _MAX_BROWSER_CONTEXTS:
+            oldest = min(_pw_contexts, key=lambda k: _pw_contexts[k].get("last_used", 0))
+            _close_browser_context_unsafe(oldest)
+        
+        if pw_browser is None:
+            return None
+        
+        try:
+            context = pw_browser.new_context(
+                viewport={"width": 1920, "height": 1080},
+                user_agent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            )
+            page = context.new_page()
+            _pw_contexts[chat_id] = {
+                "context": context,
+                "page": page,
+                "last_used": _pw_time.time()
+            }
+            return page
+        except Exception as e:
+            logging.getLogger("browser_agent").error(f"Failed to create browser context for {chat_id}: {e}")
+            return None
+
+def close_browser_context(chat_id):
+    """Close browser context for a specific chat (call on task_complete)."""
+    with _pw_lock:
+        _close_browser_context_unsafe(chat_id)
+
+def _close_browser_context_unsafe(chat_id):
+    """Close without lock - must be called with _pw_lock held."""
+    if chat_id in _pw_contexts:
+        try:
+            _pw_contexts[chat_id]["page"].close()
+        except:
+            pass
+        try:
+            _pw_contexts[chat_id]["context"].close()
+        except:
+            pass
+        del _pw_contexts[chat_id]
+
 logger = logging.getLogger("browser_agent")
 
 # ── Playwright support ─────────────────────────────────────────────────────
@@ -60,6 +151,26 @@ _user_takeover_event = threading.Event()
 
 # ── FIX: Dedicated thread for Playwright (asyncio loop conflict) ──
 import concurrent.futures
+
+# MEGA PATCH Bug 3.1: Smart timeout for heavy pages
+_HEAVY_URL_PATTERNS = ["install", "setup", "wizard", "bitrix", "bitrixsetup", "wp-admin"]
+
+def _get_page_timeout(url: str) -> int:
+    """Return timeout in ms based on URL pattern"""
+    url_lower = url.lower() if url else ""
+    for pattern in _HEAVY_URL_PATTERNS:
+        if pattern in url_lower:
+            return 180000  # 180 seconds for heavy pages
+    return 90000  # 90 seconds default (was 30s)
+
+def _get_nav_timeout(url: str) -> int:
+    """Return navigation timeout based on URL"""
+    url_lower = url.lower() if url else ""
+    for pattern in _HEAVY_URL_PATTERNS:
+        if pattern in url_lower:
+            return 180000
+    return 90000
+
 _pw_thread_pool = concurrent.futures.ThreadPoolExecutor(max_workers=1, thread_name_prefix="pw")
 
 
@@ -80,9 +191,9 @@ def _run_in_pw_thread(fn, *args, **kwargs):
     """Run a function in the dedicated Playwright thread (no asyncio loop)."""
     try:
         future = _pw_thread_pool.submit(fn, *args, **kwargs)
-        return future.result(timeout=120)
+        return future.result(timeout=180)
     except concurrent.futures.TimeoutError:
-        logger.error("[PW] Playwright operation timed out (60s)")
+        logger.error("[PW] Playwright operation timed out (180s)")
         return None
     except Exception as e:
         logger.error(f"[PW] Thread pool error: {e}")
@@ -116,14 +227,14 @@ def _get_pw_page_impl(url: str = None, width: int = 1280, height: int = 800):
                 timezone_id="Europe/Moscow",
             )
             # Включаем cookies persistence
-            _pw_context.set_default_timeout(15000)
+            _pw_context.set_default_timeout(30000)
         if _pw_page is None or _pw_page.is_closed():
             _pw_page = _pw_context.new_page()
         if url:
-            _pw_page.goto(url, timeout=30000, wait_until="domcontentloaded")
+            _pw_page.goto(url, timeout=_get_timeout(url), wait_until="domcontentloaded")
             # Ждём загрузки SPA-фреймворков
             try:
-                _pw_page.wait_for_load_state("networkidle", timeout=10000)
+                _pw_page.wait_for_load_state("networkidle", timeout=90000)
             except Exception:
                 _pw_page.wait_for_timeout(2000)
         return _pw_playwright, _pw_browser, _pw_context, _pw_page
@@ -161,12 +272,12 @@ def _get_pw_page_impl(url: str = None, width: int = 1280, height: int = 800):
                     locale="ru-RU",
                     timezone_id="Europe/Moscow",
                 )
-                _pw_context.set_default_timeout(15000)
+                _pw_context.set_default_timeout(30000)
                 _pw_page = _pw_context.new_page()
                 if url:
-                    _pw_page.goto(url, timeout=30000, wait_until="domcontentloaded")
+                    _pw_page.goto(url, timeout=_get_timeout(url), wait_until="domcontentloaded")
                     try:
-                        _pw_page.wait_for_load_state("networkidle", timeout=10000)
+                        _pw_page.wait_for_load_state("networkidle", timeout=90000)
                     except Exception:
                         _pw_page.wait_for_timeout(2000)
                 logger.info(f"[PW] Playwright recreated successfully after greenlet error")
@@ -560,6 +671,20 @@ def _get_pw_page(url: str = None, width: int = 1280, height: int = 800):
         return None, None, None, None
 
 
+# B2: Heavy page timeout patterns
+HEAVY_PAGE_PATTERNS = [
+    "install", "setup", "wizard", "bitrix", "bitrixsetup",
+    "wp-admin/install", "phpmyadmin"
+]
+
+def _get_timeout(url):
+    url_lower = url.lower()
+    for pattern in HEAVY_PAGE_PATTERNS:
+        if pattern in url_lower:
+            return 300000  # 5 minutes
+    return 90000  # 90 seconds default
+
+
 class BrowserAgent:
     """Universal browser agent for web automation with user takeover support."""
 
@@ -593,7 +718,7 @@ class BrowserAgent:
     # ══════════════════════════════════════════════════════════════════
 
     def navigate(self, url: str) -> dict:
-        """Открыть страницу в Playwright браузере. Вернуть скриншот + информацию."""
+        """Открыть страницу в Playwright браузере. Retry до 3 раз перед fallback."""
         try:
             if not url.startswith(("http://", "https://")):
                 url = "https://" + url
@@ -601,14 +726,37 @@ class BrowserAgent:
             if not _playwright_available:
                 return self._navigate_requests(url)
 
-            result = _pw_navigate(url)
-            if result is None:
-                logger.warning(f"[PW] navigate: failed, falling back to requests for {url}")
-                return self._navigate_requests(url)
-            self._current_url = result.get("url", url)
-            self._last_screenshot_b64 = result.get("screenshot")
-            self.history.append({"url": result.get("url", url), "status": 200, "time": time.time()})
-            return result
+            # ══ PATCH: Retry logic — 3 attempts with increasing wait ══
+            last_error = None
+            for attempt in range(3):
+                try:
+                    result = _pw_navigate(url)
+                    if result is not None and result.get("success"):
+                        self._current_url = result.get("url", url)
+                        self._last_screenshot_b64 = result.get("screenshot")
+                        self.history.append({"url": result.get("url", url), "status": 200, "time": time.time()})
+                        return result
+                    elif result is not None and not result.get("success"):
+                        last_error = result.get("error", "unknown")
+                        logger.warning(f"[PW] navigate attempt {attempt+1}/3 failed: {last_error}")
+                    else:
+                        last_error = "result is None"
+                        logger.warning(f"[PW] navigate attempt {attempt+1}/3 returned None")
+                except Exception as e:
+                    last_error = str(e)
+                    logger.warning(f"[PW] navigate attempt {attempt+1}/3 exception: {e}")
+                
+                if attempt < 2:
+                    time.sleep(2 * (attempt + 1))  # 2s, 4s backoff
+                    # Reset PW state for retry
+                    try:
+                        global _pw_page
+                        _pw_page = None
+                    except Exception:
+                        pass
+
+            logger.warning(f"[PW] navigate: all 3 attempts failed ({last_error}), falling back to requests for {url}")
+            return self._navigate_requests(url)
         except Exception as e:
             return {"success": False, "url": url, "error": str(e)}
 
@@ -827,7 +975,7 @@ class BrowserAgent:
 
                 # Умное ожидание: сначала networkidle, потом fallback
                 try:
-                    page.wait_for_load_state("networkidle", timeout=10000)
+                    page.wait_for_load_state("networkidle", timeout=90000)
                 except Exception:
                     page.wait_for_timeout(3000)
 
@@ -867,7 +1015,7 @@ class BrowserAgent:
                 # Если Enter — ждём возможную навигацию
                 if key.lower() in ("enter", "return"):
                     try:
-                        page.wait_for_load_state("networkidle", timeout=10000)
+                        page.wait_for_load_state("networkidle", timeout=90000)
                     except Exception:
                         page.wait_for_timeout(3000)
                 else:

@@ -873,13 +873,13 @@ class TestPrompts(unittest.TestCase):
 
     def test_03_get_system_prompt(self):
         """Получение промпта по режиму"""
-        prompt = self.mod.get_system_prompt("turbo_standard")
+        prompt = self.mod.get_system_prompt("fast")
         self.assertIsInstance(prompt, str)
         self.assertGreater(len(prompt), 50)
 
     def test_04_get_pro_prompt(self):
         """Получение Pro промпта"""
-        prompt = self.mod.get_system_prompt("pro_standard")
+        prompt = self.mod.get_system_prompt("standard")
         self.assertIsInstance(prompt, str)
 
     def test_05_agent_state_type(self):

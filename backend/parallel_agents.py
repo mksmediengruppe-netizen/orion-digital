@@ -119,7 +119,7 @@ class ParallelAgentOrchestrator:
     
     Usage:
         orchestrator = ParallelAgentOrchestrator(
-            model="minimax/minimax-m2.5",
+            model="openai/gpt-5.4-mini",
             api_key="...",
             ssh_credentials={...}
         )

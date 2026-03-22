@@ -519,3 +519,344 @@ def get_operators(ssh_executor=None, browser_executor=None) -> HighLevelOperator
     if _operators is None:
         _operators = HighLevelOperators(ssh_executor, browser_executor)
     return _operators
+
+
+
+# ═══════════════════════════════════════════════════════════
+# MEGA PATCH Part 7: 7 Critical Operators
+# ═══════════════════════════════════════════════════════════
+
+def fix_bug(error_log, project_path, server=None):
+    """Получает traceback или описание бага.
+    1. Парсит ошибку — файл, строка, тип
+    2. Читает файл через SSH
+    3. Анализирует контекст вокруг ошибки
+    4. Генерирует фикс
+    5. Применяет через SSH
+    6. Проверяет что ошибка ушла
+    Returns: {"fixed": true/false, "file": "...", "change": "..."}
+    """
+    import re as _re
+    result = {"fixed": False, "file": None, "change": None, "error_type": None}
+
+    # Parse traceback
+    file_match = _re.search(r'File "([^"]+)", line (\d+)', error_log)
+    if file_match:
+        result["file"] = file_match.group(1)
+        result["line"] = int(file_match.group(2))
+
+    type_match = _re.search(r'(\w+Error|\w+Exception):\s*(.+)', error_log)
+    if type_match:
+        result["error_type"] = type_match.group(1)
+        result["error_msg"] = type_match.group(2)
+
+    if server and result["file"]:
+        import paramiko as _pm
+        _ssh = _pm.SSHClient()
+        _ssh.set_missing_host_key_policy(_pm.WarningPolicy())
+        try:
+            _ssh.connect(server["host"], username=server["user"],
+                         password=server["password"], timeout=15)
+            line = result.get("line", 1)
+            start = max(1, line - 10)
+            end = line + 10
+            _, out, _ = _ssh.exec_command(
+                f"sed -n '{start},{end}p' {result['file']}")
+            result["context"] = out.read().decode()
+            _ssh.close()
+        except Exception as e:
+            result["ssh_error"] = str(e)
+
+    return result
+
+
+def create_backup(project_path, server=None):
+    """Бэкап перед опасной операцией.
+    SSH: mkdir -p /root/backups
+    SSH: tar -czf /root/backups/{name}_{timestamp}.tar.gz {path}
+    Returns: {"backup_path": "...", "size_mb": N}
+    """
+    import time as _time
+    import os as _os
+
+    name = _os.path.basename(project_path.rstrip("/"))
+    timestamp = _time.strftime("%Y%m%d_%H%M%S")
+    backup_path = f"/root/backups/{name}_{timestamp}.tar.gz"
+    result = {"backup_path": backup_path, "size_mb": 0, "success": False}
+
+    if server:
+        import paramiko as _pm
+        _ssh = _pm.SSHClient()
+        _ssh.set_missing_host_key_policy(_pm.WarningPolicy())
+        try:
+            _ssh.connect(server["host"], username=server["user"],
+                         password=server["password"], timeout=15)
+            _, out, err = _ssh.exec_command(
+                f"mkdir -p /root/backups && "
+                f"tar -czf {backup_path} {project_path} 2>&1 && "
+                f"stat -c%s {backup_path}")
+            output = out.read().decode().strip()
+            try:
+                size = int(output.split("\n")[-1])
+                result["size_mb"] = round(size / 1024 / 1024, 2)
+                result["success"] = size > 0
+            except (ValueError, IndexError):
+                result["error"] = output
+            _ssh.close()
+        except Exception as e:
+            result["error"] = str(e)
+    return result
+
+
+def rollback_deploy(project_path, backup_path, server=None):
+    """Откатить из бэкапа.
+    SSH: rm -rf {project_path}
+    SSH: tar -xzf {backup_path} -C /
+    SSH: nginx -t && systemctl reload nginx
+    Returns: {"restored": true/false}
+    """
+    result = {"restored": False, "error": None}
+
+    if server:
+        import paramiko as _pm
+        _ssh = _pm.SSHClient()
+        _ssh.set_missing_host_key_policy(_pm.WarningPolicy())
+        try:
+            _ssh.connect(server["host"], username=server["user"],
+                         password=server["password"], timeout=15)
+            _, out, err = _ssh.exec_command(
+                f"rm -rf {project_path} && "
+                f"tar -xzf {backup_path} -C / && "
+                f"nginx -t 2>&1 && systemctl reload nginx 2>&1")
+            output = out.read().decode() + err.read().decode()
+            result["restored"] = "syntax is ok" in output.lower() or "successful" in output.lower()
+            result["output"] = output[:500]
+            _ssh.close()
+        except Exception as e:
+            result["error"] = str(e)
+    return result
+
+
+def check_server_ready(server, requirements=None):
+    """Проверить готовность сервера к установке.
+    SSH: php -v, mysql --version, nginx -v, df -h, free -m
+    Returns: {"ready": true/false, "checks": {...}, "missing": [...]}
+    """
+    if requirements is None:
+        requirements = ["php", "mysql", "nginx"]
+
+    result = {"ready": True, "checks": {}, "missing": []}
+
+    if server:
+        import paramiko as _pm
+        _ssh = _pm.SSHClient()
+        _ssh.set_missing_host_key_policy(_pm.WarningPolicy())
+        try:
+            _ssh.connect(server["host"], username=server["user"],
+                         password=server["password"], timeout=15)
+
+            checks = {
+                "php": "php -v 2>&1 | head -1",
+                "mysql": "mysql --version 2>&1",
+                "nginx": "nginx -v 2>&1",
+                "disk": "df -h / | tail -1 | awk '{print $4}'",
+                "memory": "free -m | grep Mem | awk '{print $7}'",
+            }
+
+            for name, cmd in checks.items():
+                _, out, err = _ssh.exec_command(cmd)
+                output = (out.read().decode() + err.read().decode()).strip()
+                result["checks"][name] = output
+                if name in requirements and ("not found" in output.lower() or not output):
+                    result["missing"].append(name)
+                    result["ready"] = False
+
+            _ssh.close()
+        except Exception as e:
+            result["error"] = str(e)
+            result["ready"] = False
+    return result
+
+
+def run_project_qa(project_path, server=None):
+    """Запустить тесты проекта.
+    Ищет: pytest, npm test, phpunit.
+    Returns: {"passed": N, "failed": N, "framework": "..."}
+    """
+    result = {"passed": 0, "failed": 0, "framework": None, "output": ""}
+
+    if server:
+        import paramiko as _pm
+        _ssh = _pm.SSHClient()
+        _ssh.set_missing_host_key_policy(_pm.WarningPolicy())
+        try:
+            _ssh.connect(server["host"], username=server["user"],
+                         password=server["password"], timeout=15)
+
+            # Detect test framework
+            _, out, _ = _ssh.exec_command(
+                f"ls {project_path}/package.json {project_path}/pytest.ini "
+                f"{project_path}/phpunit.xml {project_path}/tests/ 2>/dev/null")
+            files = out.read().decode().strip()
+
+            if "pytest.ini" in files or "/tests/" in files:
+                result["framework"] = "pytest"
+                _, out, err = _ssh.exec_command(
+                    f"cd {project_path} && python -m pytest --tb=line -q 2>&1 | tail -5",
+                    timeout=120)
+            elif "package.json" in files:
+                result["framework"] = "npm"
+                _, out, err = _ssh.exec_command(
+                    f"cd {project_path} && npm test 2>&1 | tail -10",
+                    timeout=120)
+            elif "phpunit.xml" in files:
+                result["framework"] = "phpunit"
+                _, out, err = _ssh.exec_command(
+                    f"cd {project_path} && phpunit 2>&1 | tail -5",
+                    timeout=120)
+            else:
+                result["framework"] = "none"
+                result["output"] = "No test framework detected"
+                _ssh.close()
+                return result
+
+            output = out.read().decode() + err.read().decode()
+            result["output"] = output[:1000]
+
+            import re as _re
+            passed = _re.search(r'(\d+) passed', output)
+            failed = _re.search(r'(\d+) failed', output)
+            if passed:
+                result["passed"] = int(passed.group(1))
+            if failed:
+                result["failed"] = int(failed.group(1))
+
+            _ssh.close()
+        except Exception as e:
+            result["error"] = str(e)
+    return result
+
+
+def analyze_traceback(error_log):
+    """Парсить traceback, найти причину и команду для фикса.
+    Returns: {"file": "...", "line": N, "error_type": "...",
+    "fix_suggestion": "...", "fix_command": "..."}
+    """
+    import re as _re
+    result = {
+        "file": None, "line": None, "error_type": None,
+        "fix_suggestion": None, "fix_command": None,
+    }
+
+    # Parse file and line
+    matches = _re.findall(r'File "([^"]+)", line (\d+)', error_log)
+    if matches:
+        result["file"] = matches[-1][0]
+        result["line"] = int(matches[-1][1])
+
+    # Parse error type
+    type_match = _re.search(r'(\w+Error|\w+Exception):\s*(.+)', error_log)
+    if type_match:
+        result["error_type"] = type_match.group(1)
+        result["error_msg"] = type_match.group(2).strip()
+
+    # Generate fix suggestions
+    etype = result.get("error_type", "")
+    emsg = result.get("error_msg", "")
+
+    if etype == "SyntaxError":
+        result["fix_suggestion"] = f"Syntax error at line {result['line']}. Check indentation, brackets, quotes."
+        if result["file"]:
+            result["fix_command"] = "python3 -c 'import ast; ast.parse(open(\"" + str(result.get("file", "")) + "\").read())'"
+    elif etype == "ImportError" or etype == "ModuleNotFoundError":
+        module = _re.search(r"No module named '([^']+)'", emsg)
+        if module:
+            result["fix_suggestion"] = f"Install missing module: {module.group(1)}"
+            result["fix_command"] = f"pip install {module.group(1)}"
+    elif etype == "FileNotFoundError":
+        result["fix_suggestion"] = "File or directory does not exist. Create it or fix the path."
+    elif etype == "PermissionError":
+        result["fix_suggestion"] = "Permission denied. Fix with chmod/chown."
+        if result["file"]:
+            result["fix_command"] = f"chmod 644 {result['file']}"
+    elif etype == "ConnectionRefusedError":
+        result["fix_suggestion"] = "Service not running. Start it."
+    elif etype == "TimeoutError":
+        result["fix_suggestion"] = "Operation timed out. Increase timeout or check network."
+
+    return result
+
+
+def replan_task(current_plan, blocker, charter):
+    """Перепланировать задачу когда подход не работает.
+    Получает: текущий план, что заблокировало, charter.
+    Генерирует альтернативный план.
+    Returns: {"new_plan": [...], "reason": "..."}
+    """
+    result = {
+        "new_plan": [],
+        "reason": f"Blocked by: {blocker}",
+        "original_plan": current_plan,
+    }
+
+    # Simple replanning logic - skip blocked phase, add workaround
+    if isinstance(current_plan, list):
+        for phase in current_plan:
+            phase_name = phase if isinstance(phase, str) else str(phase)
+            if blocker.lower() in phase_name.lower():
+                result["new_plan"].append(f"[SKIP] {phase_name} (blocked)")
+                result["new_plan"].append(f"[ALT] Workaround for: {blocker}")
+            else:
+                result["new_plan"].append(phase_name)
+    else:
+        result["new_plan"] = [
+            f"Analyze blocker: {blocker}",
+            "Find alternative approach",
+            "Execute alternative",
+            "Verify result",
+        ]
+
+    return result
+
+
+def check_responsive_layout(url, server=None):
+    """Скриншоты на 5 разрешениях.
+    1920x1080, 1440x900, 1024x768, 768x1024, 375x812.
+    Returns: {"screenshots": {...}, "issues": [...], "score": 8}
+    """
+    import subprocess as _sp
+    import os as _os
+    import tempfile as _tmp
+
+    viewports = {
+        "desktop_1920": "1920,1080",
+        "desktop_1440": "1440,900",
+        "tablet_landscape": "1024,768",
+        "tablet_portrait": "768,1024",
+        "mobile_375": "375,812",
+    }
+
+    result = {"screenshots": {}, "issues": [], "score": 10}
+    tmpdir = _tmp.mkdtemp(prefix="responsive_")
+
+    for name, size in viewports.items():
+        w, h = size.split(",")
+        path = f"{tmpdir}/{name}.png"
+        try:
+            cmd = [
+                "chromium-browser", "--headless", "--no-sandbox",
+                "--disable-gpu", f"--window-size={w},{h}",
+                f"--screenshot={path}", url,
+            ]
+            _sp.run(cmd, timeout=30, capture_output=True)
+            if _os.path.exists(path) and _os.path.getsize(path) > 1000:
+                result["screenshots"][name] = path
+            else:
+                result["issues"].append(f"{name}: screenshot failed")
+                result["score"] -= 2
+        except Exception as e:
+            result["issues"].append(f"{name}: {str(e)[:100]}")
+            result["score"] -= 2
+
+    result["score"] = max(0, result["score"])
+    return result

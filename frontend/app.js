@@ -1,4 +1,22 @@
 
+// A10: XSS protection
+function safeText(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+// Queue handler for busy workers
+function handleBusyResponse(response) {
+    if (response.status === 429 || (response.data && response.data.status === 'busy')) {
+        const pos = response.data?.queue_position || '?';
+        const wait = response.data?.estimated_wait || '~3';
+        showNotification(`⏳ Все воркеры заняты. Ваша задача в очереди. Позиция: ${pos}. Ожидание ${wait} мин.`, 'warning');
+        return true;
+    }
+    return false;
+}
+
 /* ── PROJECT TEMPLATES ────────────────────────────────── */
 const PROJECT_TEMPLATES = [
     { icon: '🏪', name: 'Интернет-магазин', prompt: 'Создай интернет-магазин с каталогом товаров, корзиной, оформлением заказа и интеграцией платёжной системы' },
@@ -22,28 +40,16 @@ const API_BASE = '/api';
 const SSE_TIMEOUT = 120000;
 
 const MODES = {
-    'turbo-basic':     { label: 'Turbo',        tag: 'TURBO', desc: 'MiniMax думает + MiMo действует. Быстро и экономично.' },
-    'turbo_standard':  { label: 'Turbo',        tag: 'TURBO', desc: 'MiniMax думает + MiMo действует. Быстро и экономично.' },
-    'turbo_premium':   { label: 'Turbo Premium', tag: 'TURBO', desc: 'MiniMax M2.5 + MiMo Flash. Быстро и экономично.' },
-    'pro-basic':       { label: 'Pro',          tag: 'PRO',   desc: 'Claude Sonnet 4.6. Планирование, code review, качество.' },
-    'pro_standard':    { label: 'Pro Standard', tag: 'PRO',   desc: 'Claude Sonnet 4.6. Планирование, code review, качество.' },
-    'pro_premium':     { label: 'Pro Premium',  tag: 'PRO',   desc: 'Claude Sonnet 4.6. Премиум дизайн и копирайтинг.' },
-    'architect':       { label: 'Architect',    tag: 'OPUS',  desc: 'Claude Opus 4. Архитектура, глубокий анализ, аудит кода.' },
-    'smart_turbo':     { label: 'Smart Turbo', tag: 'SMART', desc: 'Opus план + MiniMax код + MiMo деплой. Один вызов Opus, остальное дёшево.' }
+    'fast':     { label: '⚡ Быстрый',   tag: 'FAST',     desc: 'GPT-5.4 Mini · Простые задачи, тесты, MVP. Лимит $2.' },
+    'standard': { label: '⭐ Стандарт',  tag: 'STANDARD', desc: 'GPT-5.4 · Клиентские сайты, качественный код. Лимит $5.' },
+    'premium':  { label: '💎 Премиум',   tag: 'PREMIUM',  desc: 'GPT-5.4 + Sonnet · Сложные проекты, code review, аудит. Лимит $15.' }
 };
 
-/* ── MODE_INFO (УЛУЧ-3) ──────────────────────────────────── */
+/* ── MODE_INFO ────────────────────────────────────────────── */
 const MODE_INFO = {
-    'turbo-basic':    { text: 'MiniMax M2.5 + MiMo Flash · Быстро и экономично', icon: '⚡' },
-    'turbo_basic':    { text: 'MiniMax M2.5 + MiMo Flash · Быстро и экономично', icon: '⚡' },
-    'turbo_standard': { text: 'MiniMax M2.5 + MiMo Flash · Быстро и экономично', icon: '⚡' },
-    'pro-basic':      { text: 'Claude Sonnet 4.6 · Планирование и качество', icon: '🧠' },
-    'pro_basic':      { text: 'Claude Sonnet 4.6 · Планирование и качество', icon: '🧠' },
-    'pro_standard':   { text: 'Claude Sonnet 4.6 · Планирование и качество', icon: '🧠' },
-    'turbo_premium':  { text: 'MiniMax M2.5 + MiMo Flash · Быстро и экономично', icon: '⚡' },
-    'pro-premium':    { text: 'Claude Sonnet 4.6 · Премиум дизайн и копирайтинг', icon: '🚀' },
-    'pro_premium':    { text: 'Claude Sonnet 4.6 · Премиум дизайн и копирайтинг', icon: '🚀' },
-    'architect':      { text: 'Claude Opus 4 · Архитектор · Для сложных задач', icon: '🏛' },
+    'fast':     { text: 'GPT-5.4 Mini · Быстро и дёшево · Лимит $2', icon: '⚡' },
+    'standard': { text: 'GPT-5.4 · Оптимальное качество · Лимит $5', icon: '⭐' },
+    'premium':  { text: 'GPT-5.4 + Sonnet · Максимум качества · Лимит $15', icon: '💎' }
 };
 
 const WELCOME_CHIPS = [
@@ -53,15 +59,19 @@ const WELCOME_CHIPS = [
     'Настрой nginx с SSL сертификатом',
     'Сделай REST API на FastAPI',
     'Проанализируй логи и найди ошибки',
-    'Покажи, как использовать новые функции Chart.js и артефактов.',
-    'Продемонстрируй работу Claude Opus в режиме архитектора.'
+    'Покажи возможности GPT-5.4 в режиме Стандарт',
+    'Создай проект с code review в режиме Премиум'
 ];
 
 const MODEL_TAGS = [
-    { name: 'MiniMax M2.5', color: '#3B82F6' },
-    { name: 'MiMo Flash', color: '#06B6D4' },
-    { name: 'Claude Sonnet', color: '#8B5CF6' },
-    { name: 'Claude Opus', color: '#7C3AED' }
+    { name: 'GPT-5.4 Mini', color: '#10B981' },
+    { name: 'GPT-5.4 Nano', color: '#06B6D4' },
+    { name: 'GPT-5.4', color: '#3B82F6' },
+    { name: 'Gemini 2.5 Flash', color: '#F59E0B' },
+    { name: 'Gemini 2.5 Pro', color: '#EF4444' },
+    { name: 'Claude Sonnet 4.6', color: '#8B5CF6' },
+    { name: 'Claude Opus 4', color: '#7C3AED' },
+    { name: 'MiMo V2 Flash', color: '#06B6D4' }
 ];
 
 /* ── STATE ────────────────────────────────────────────────── */
@@ -71,7 +81,7 @@ const state = {
     chats: [],
     currentChatId: null,
     messages: [],
-    mode: 'turbo-basic',
+    mode: 'fast',
     premiumDesign: false,
     theme: 'light',
     isStreaming: false,
@@ -83,7 +93,7 @@ const state = {
     activityLines: [],
     taskProgress: { current: 0, total: 0, steps: [] },
     totalCost: 0,
-    monthlyLimit: 2.00,
+    monthlyLimit: 2.00,  // Fast mode default
     adminData: { users: [], chats: [], analytics: null, memories: [] }
 };
 
@@ -573,16 +583,9 @@ const UI = {
         if (modeInfo) Toast.show(modeInfo.icon + ' ' + (MODES[key]?.label || key) + ': ' + modeInfo.text, 'info');
         // Improvement 3: Update model label on mode switch
         const MODEL_LABELS = {
-            'turbo-basic': 'MiniMax + MiMo',
-            'turbo_basic': 'MiniMax + MiMo',
-            'turbo_standard': 'MiniMax + MiMo',
-            'turbo_premium': 'MiniMax + MiMo',
-            'pro-basic': 'Claude Sonnet',
-            'pro_basic': 'Claude Sonnet',
-            'pro_standard': 'Claude Sonnet',
-            'pro-premium': 'Claude Sonnet 4.6',
-            'pro_premium': 'Claude Sonnet 4.6',
-            'architect': 'Claude Opus 4'
+            'fast': 'GPT-5.4 Mini',
+            'standard': 'GPT-5.4',
+            'premium': 'GPT-5.4 + Sonnet'
         };
         const modelLabel = document.querySelector('.header-model, .model-label, [data-model]');
         if (modelLabel) modelLabel.textContent = MODEL_LABELS[key] || MODEL_LABELS[key.replace('-','_')] || 'ORION AI';

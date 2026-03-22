@@ -414,7 +414,7 @@ def needs_clarification(message: str, intent: str,
 
 
 def clarify(message: str, history: List[Dict] = None,
-            orion_mode: str = "turbo_standard") -> Dict[str, Any]:
+            orion_mode: str = "fast") -> Dict[str, Any]:
     """
     Главная функция — полный анализ запроса.
 
@@ -429,7 +429,7 @@ def clarify(message: str, history: List[Dict] = None,
             "suggested_agents": ["devops", "developer"],
             "execution_mode": "sequential",  # sequential | parallel
             "confidence": 0.85,
-            "orion_mode": "turbo_standard",
+            "orion_mode": "fast",
             "estimated_cost_usd": 0.05,
         }
     """
