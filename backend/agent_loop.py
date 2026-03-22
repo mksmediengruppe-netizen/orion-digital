@@ -219,6 +219,22 @@ AGENT_ZONES = {
         "models": {"fast": "mimo", "fast": "mimo",  # PATCH fix: hands
                    "standard": "mimo", "premium": "mimo"}
     },
+    "website_builder": {
+        "tools": ["parse_site_brief", "build_site_blueprint", "plan_site_design",
+                  "generate_site_content", "build_landing", "publish_site",
+                  "verify_site", "judge_site_release",
+                  "ssh_execute", "file_write", "generate_image", "browser_check_site"],
+        "description": "Создание сайтов, лендингов, веб-приложений",
+        "models": {"fast": "gpt54_mini", "standard": "gpt54_mini", "premium": "sonnet"}
+    },
+    "bitrix_builder": {
+        "tools": ["provision_bitrix_server", "run_bitrix_wizard", "verify_bitrix",
+                  "build_bitrix_template", "map_bitrix_components", "analyze_bitrix_site",
+                  "publish_bitrix", "judge_bitrix_release", "backup_bitrix", "restore_bitrix",
+                  "ssh_execute", "file_write", "browser_navigate", "browser_check_site"],
+        "description": "Установка и настройка 1С-Битрикс",
+        "models": {"fast": "gpt54_mini", "standard": "gpt54_mini", "premium": "sonnet"}
+    },
 }
 
 # ══════════════════════════════════════════════════════════════════
@@ -1602,9 +1618,9 @@ class AgentLoop:
 
             # ═══ WEBSITE FACTORY TOOLS ═══
             elif tool_name == "parse_site_brief":
-                from site_brief_parser import parse_brief
+                from site_brief_parser import parse_site_brief
                 brief_text = args.get("brief_text", "")
-                result = parse_brief(brief_text)
+                result = parse_site_brief(brief_text)
                 return {"success": True, "parsed_brief": result}
 
             elif tool_name == "build_site_blueprint":
@@ -1650,11 +1666,11 @@ class AgentLoop:
                 return {"success": True, "verification": result}
 
             elif tool_name == "judge_site_release":
-                from site_release_judge import judge_release
+                from site_release_judge import judge_site_release
                 url = args.get("url", "")
                 brief = args.get("original_brief", "")
                 blueprint = args.get("blueprint", {})
-                result = judge_release(url, brief, blueprint)
+                result = judge_site_release(url, brief, blueprint)
                 return {"success": True, "verdict": result}
 
             # ═══ BITRIX FACTORY TOOLS ═══
@@ -1692,10 +1708,10 @@ class AgentLoop:
                 return {"success": True, "component_map": result}
 
             elif tool_name == "analyze_bitrix_site":
-                from bitrix_reverse_engineer import analyze_site
+                from bitrix_reverse_engineer import analyze_bitrix_site
                 url = args.get("url", "")
                 ssh_creds = args.get("ssh_credentials", self.ssh_credentials)
-                result = analyze_site(url, ssh_creds)
+                result = analyze_bitrix_site(url, ssh_creds)
                 return {"success": True, "analysis": result}
 
             elif tool_name == "publish_bitrix":
@@ -1707,24 +1723,24 @@ class AgentLoop:
                 return {"success": True, "publish_result": result}
 
             elif tool_name == "judge_bitrix_release":
-                from bitrix_release_judge import judge_release
+                from bitrix_release_judge import judge_bitrix_release
                 url = args.get("url", "")
                 brief = args.get("original_brief", "")
-                result = judge_release(url, brief)
+                result = judge_bitrix_release(url, brief)
                 return {"success": True, "verdict": result}
 
             elif tool_name == "backup_bitrix":
-                from bitrix_recovery import backup_bitrix
+                from bitrix_recovery import create_backup
                 ssh_creds = args.get("ssh_credentials", self.ssh_credentials)
                 site_path = args.get("site_path", "/var/www/html")
-                result = backup_bitrix(ssh_creds, site_path)
+                result = create_backup(ssh_creds, site_path)
                 return {"success": True, "backup_result": result}
 
             elif tool_name == "restore_bitrix":
-                from bitrix_recovery import restore_bitrix
+                from bitrix_recovery import restore_backup
                 ssh_creds = args.get("ssh_credentials", self.ssh_credentials)
                 backup_id = args.get("backup_id", "")
-                result = restore_bitrix(ssh_creds, backup_id)
+                result = restore_backup(ssh_creds, backup_id)
                 return {"success": True, "restore_result": result}
 
             else:
