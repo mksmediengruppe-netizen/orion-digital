@@ -1,0 +1,16 @@
+{
+  "33ee58179f99": {
+    "id": "33ee58179f99",
+    "key": "project_dimydiv_phase5",
+    "value": "Проверен лендинг на http://45.67.57.175/dimydiv/ (200 OK). HTTPS на 45.67.57.175 недоступен (connection refused). В /var/www/html/dimydiv/ каталога bitrix/ нет, Bitrix не развернут, поэтому форма через компонент Bitrix не настроена. Скриншоты в browser_check_site получены для главной и контактов.",
+    "user_id": null,
+    "project_id": null,
+    "source": "project",
+    "confidence": 0.8,
+    "pinned": false,
+    "access_count": 0,
+    "last_accessed": null,
+    "created_at": "2026-03-22T12:49:18.894085+00:00",
+    "updated_at": "2026-03-22T12:49:18.894096+00:00"
+  }
+}

@@ -25,7 +25,7 @@ from shared import (
     _message_queue, _paused_tasks,
 )
 
-from agent_loop import AgentLoop, MultiAgentLoop
+from agent_loop import AgentLoop, MultiAgentLoop, _iter_lines_with_timeout
 from ssh_executor import SSHExecutor, ssh_pool
 from browser_agent import BrowserAgent
 from shared import _classify_interrupt_message, _cleanup_running_task
@@ -709,20 +709,20 @@ def send_message(chat_id):
 
     # Build chat history for context
     # Context: 50 messages for Pro/Architect, 10 for Turbo
-    _ctx_limit_app = 50 if orion_mode in ("standard", "premium", "premium") else 10
+    _ctx_limit_app = 50 if orion_mode in ("standard", "premium") else 10
     history = [{"role": m["role"], "content": m["content"]} for m in chat["messages"][-_ctx_limit_app:]]
 
     # ═══ ФИНАЛЬНАЯ АРХИТЕКТУРА: Pro/Architect bypass — один агент, без pipeline ═══
-    if orion_mode in ("standard", "premium", "premium"):
+    if orion_mode in ("standard", "premium"):
         if orion_mode == "premium":
             _pro_agent_model = "anthropic/claude-opus-4"
             _pro_model_name = "Claude Opus 4"
-        elif orion_mode == "premium":
-            _pro_agent_model = "anthropic/claude-sonnet-4.6"
-            _pro_model_name = "Claude Sonnet 4.6"
+        elif orion_mode == "standard":
+            _pro_agent_model = "openai/gpt-5.4"
+            _pro_model_name = "GPT-5.4"
         else:
-            _pro_agent_model = "anthropic/claude-sonnet-4.6"
-            _pro_model_name = "Claude Sonnet 4.6"
+            _pro_agent_model = "openai/gpt-5.4"
+            _pro_model_name = "GPT-5.4"
         
         _pro_auto_prefix = ""
         if _auto_resolved_mode:
@@ -818,15 +818,21 @@ def send_message(chat_id):
                         pass  # db access outside lock
                     chat["messages"].append({"role": "assistant", "content": full_response, "created_at": _now_iso()})
                     db_write(_saved_db_pro)
-                # Cost tracking
-                _cost = _calc_cost(tokens_in, tokens_out, _pro_agent_model)
+                # Cost tracking — use AgentLoop's own _session_cost for accuracy
+                _loop_cost = getattr(_pro_loop, '_session_cost', 0.0)
+                _loop_tokens_in = getattr(_pro_loop, 'total_tokens_in', tokens_in)
+                _loop_tokens_out = getattr(_pro_loop, 'total_tokens_out', tokens_out)
+                # Use loop cost if available (more accurate), else fallback to calc
+                _cost = _loop_cost if _loop_cost > 0 else _calc_cost(tokens_in, tokens_out, _pro_agent_model)
+                _final_tokens_in = _loop_tokens_in if _loop_tokens_in > 0 else tokens_in
+                _final_tokens_out = _loop_tokens_out if _loop_tokens_out > 0 else tokens_out
                 chat["total_cost"] = chat.get("total_cost", 0) + _cost
                 _user = _saved_db_pro["users"].get(_saved_user_id_pro, {})
                 if _user:
                     _user["total_spent"] = _user.get("total_spent", 0) + _cost
                 _analytics = _saved_db_pro.get("analytics", {})
-                _analytics["total_tokens_in"] = _analytics.get("total_tokens_in", 0) + tokens_in
-                _analytics["total_tokens_out"] = _analytics.get("total_tokens_out", 0) + tokens_out
+                _analytics["total_tokens_in"] = _analytics.get("total_tokens_in", 0) + _final_tokens_in
+                _analytics["total_tokens_out"] = _analytics.get("total_tokens_out", 0) + _final_tokens_out
                 _analytics["total_cost"] = _analytics.get("total_cost", 0) + _cost
                 _analytics["total_requests"] = _analytics.get("total_requests", 0) + 1
                 db_write(_saved_db_pro)
@@ -834,8 +840,8 @@ def send_message(chat_id):
                     log_cost(
                         user_id=_saved_user_id_pro,
                         model_id=_pro_agent_model,
-                        tokens_in=tokens_in,
-                        tokens_out=tokens_out,
+                        tokens_in=_final_tokens_in,
+                        tokens_out=_final_tokens_out,
                         cost_usd=_cost,
                         tier="pro",
                         complexity=5,
@@ -844,8 +850,8 @@ def send_message(chat_id):
                     )
                 except Exception as _lc_err:
                     logging.warning(f"log_cost error: {_lc_err}")
-                # Send done event
-                _put(f"data: {json.dumps({'type': 'done', 'cost': _cost, 'tokens_in': tokens_in, 'tokens_out': tokens_out, 'model': _pro_model_name})}\n\n")
+                # Send done event with accurate cost from AgentLoop
+                _put(f"data: {json.dumps({'type': 'done', 'cost': _cost, 'tokens_in': _final_tokens_in, 'tokens_out': _final_tokens_out, 'model': _pro_model_name})}\n\n")
                 # Mark task done and signal queue
                 with _tasks_lock:
                     task = _running_tasks.get(chat_id)
@@ -953,8 +959,11 @@ def send_message(chat_id):
                     return _content
                 
                 _orch_send = Orchestrator(_orch_llm_send, orion_mode)  # FIX: pass orion_mode not intent mode
+                _has_ssh_send = bool(ssh_credentials.get("host") and ssh_credentials.get("password"))
+                _ssh_info_send = f"host={ssh_credentials.get('host','')}, user={ssh_credentials.get('username','root')}, password=PROVIDED" if _has_ssh_send else ""
                 _orch_plan_send = _orch_send.plan(user_message, history, 
-                                                   has_ssh=bool(ssh_credentials.get("host")))
+                                                   has_ssh=_has_ssh_send,
+                                                   ssh_info=_ssh_info_send)
                 logging.info(f'[send_message] Orchestrator plan result: {_orch_plan_send}')
                 
                 # Отправить план клиенту
@@ -1101,7 +1110,7 @@ def send_message(chat_id):
                     logging.warning(f"Model routing error: {_route_err}")
                 # === КОНЕЦ МАРШРУТИЗАЦИИ ===
                 # ── BUG-1 FIX: Premium mode → Sonnet for agent too ──
-                if orion_mode in ("fast", "premium") and not _sm_model_override:
+                if orion_mode == "premium" and not _sm_model_override:
                     _sm_model_override = "anthropic/claude-sonnet-4.6"
                     model_name = "Claude Sonnet 4.6"
                     agent_model_name = "Claude Sonnet 4.6"
@@ -1165,7 +1174,15 @@ def send_message(chat_id):
                             full_response += event_data.get("text", "")
                     except Exception as _sse_err:
                         logging.warning(f"SSE parse error: {_sse_err}")
+                # Send done event after loop finishes
+                try:
+                    yield "data: " + json.dumps({"type": "done", "tokens_in": agent.total_tokens_in, "tokens_out": agent.total_tokens_out, "cost": agent.total_cost, "model": getattr(agent, "model", "")}) + "\n\n"
+                except GeneratorExit:
+                    pass
+                except Exception as _done_err:
+                    logging.warning(f"Done event error: {_done_err}")
 
+                # Get token counts from agent
                  # Get token counts from agent
                 if hasattr(agent, 'total_tokens_in'):
                     tokens_in = agent.total_tokens_in
@@ -1321,7 +1338,7 @@ def send_message(chat_id):
                 )
                 resp.raise_for_status()
 
-                for line in resp.iter_lines():
+                for line in _iter_lines_with_timeout(resp, timeout_per_chunk=90):
                     if not line:
                         continue
                     line_str = line.decode("utf-8", errors="replace")
@@ -1414,7 +1431,7 @@ def send_message(chat_id):
                         # Signal frontend to clear previous response and show checked version
                         yield f"data: {json.dumps({'type': 'self_check_replace', 'status': 'streaming'})}\n\n"
 
-                        for line in check_resp.iter_lines():
+                        for line in _iter_lines_with_timeout(check_resp, timeout_per_chunk=60):
                             if not line:
                                 continue
                             line_str = line.decode("utf-8", errors="replace")
@@ -2021,11 +2038,10 @@ def direct_chat():
         "content": user_message + (f"\n\n[Файл]:\n{file_content}" if file_content else ""),
         "timestamp": time.time()
     }
-    with _lock:
-        db2 = db_read()
-        db2["chats"][chat_id]["messages"].append(user_msg)
-        db2["chats"][chat_id]["updated_at"] = time.time()
-        db_write(db2)
+    db2 = db_read()
+    db2["chats"][chat_id]["messages"].append(user_msg)
+    db2["chats"][chat_id]["updated_at"] = time.time()
+    db_write(db2)
 
     # Получаем историю (BUG-4 FIX: ограничиваем до 10 сообщений чтобы не переполнять контекст)
     _ctx_limit_v2 = 50 if orion_mode in ("standard", "premium", "premium") else 10
@@ -2058,7 +2074,7 @@ def direct_chat():
     api_key = OPENROUTER_API_KEY
 
     def generate():
-        from agent_loop import AgentLoop, MultiAgentLoop
+        from agent_loop import AgentLoop, MultiAgentLoop, _iter_lines_with_timeout
         import json as _json
 
         assistant_content = ""
@@ -2083,7 +2099,7 @@ def direct_chat():
             _orch_prompt_extra = ""
             _orch_plan = None
             multi_agent = False
-            premium_design = (orion_mode == premium)
+            premium_design = (orion_mode == "premium")
             
             # ══ QUICK PATH REMOVED: ALL messages go through orchestrator + agent ══
 
@@ -2215,6 +2231,13 @@ def direct_chat():
                 except Exception as _ev_err:
                     logging.error(f"SSE event error: {_ev_err}")
                     continue
+            # Send done event after loop finishes
+            try:
+                yield "data: " + _json.dumps({"type": "done", "tokens_in": loop.total_tokens_in, "tokens_out": loop.total_tokens_out, "cost": getattr(loop, "_session_cost", 0.0), "model": getattr(loop, "model", "")}) + SSE
+            except GeneratorExit:
+                pass
+            except Exception as _done_err:
+                logging.warning(f"Done event error: {_done_err}")
 
         except GeneratorExit:
             pass  # Клиент отключился — не делаем yield
@@ -2241,12 +2264,11 @@ def direct_chat():
                     "id": assistant_msg_id, "role": "assistant",
                     "content": assistant_content, "timestamp": time.time()
                 }
-                with _lock:
-                    db3 = db_read()
-                    if chat_id in db3["chats"]:
-                        db3["chats"][chat_id]["messages"].append(asst_msg)
-                        db3["chats"][chat_id]["updated_at"] = time.time()
-                        db_write(db3)
+                db3 = db_read()
+                if chat_id in db3["chats"]:
+                    db3["chats"][chat_id]["messages"].append(asst_msg)
+                    db3["chats"][chat_id]["updated_at"] = time.time()
+                    db_write(db3)
 
             # НЕ делаем yield в finally — это вызывает RuntimeError: generator ignored GeneratorExit
 

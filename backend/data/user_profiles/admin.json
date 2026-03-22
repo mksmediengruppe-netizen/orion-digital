@@ -1,6 +1,6 @@
 {
   "user_id": "admin",
-  "chat_count": 919,
+  "chat_count": 950,
   "facts": [
     "Пользователя зовут Тестер5",
     "Работает с Elixir и Phoenix",
@@ -240,7 +240,12 @@
     "access_method": "SSH",
     "programming_language": "Python",
     "project_type": "Telegram bot",
-    "learning_style": "step-by-step"
+    "learning_style": "step-by-step",
+    "prefered_stack": "Битрикс",
+    "site_name": "dimydiv — реклама у блогеров",
+    "admin_login": "admin",
+    "admin_email": "dimydiv@gmail.com",
+    "AI-фото": "красивый закат над морем"
   },
   "expertise_level": "unknown"
 }

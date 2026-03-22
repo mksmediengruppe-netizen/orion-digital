@@ -267,9 +267,9 @@ MODEL_CONFIGS = {
     "original": {
         "name": "Оригинал",
         "emoji": "🔴",
-        "coding": {"model": "xiaomi/mimo-v2-flash", "name": "MiMo-V2-Flash", "input_price": 0.09, "output_price": 0.29},
+        "coding": {"model": "openai/gpt-5.4-nano", "name": "MiMo-V2-Flash", "input_price": 0.09, "output_price": 0.29},
         "planner": {"model": "anthropic/claude-sonnet-4.6", "name": "Claude Sonnet 4.6", "input_price": 3.00, "output_price": 15.00},
-        "tools": {"model": "xiaomi/mimo-v2-flash", "name": "MiMo-V2-Flash", "input_price": 0.09, "output_price": 0.29},
+        "tools": {"model": "openai/gpt-5.4-nano", "name": "MiMo-V2-Flash", "input_price": 0.09, "output_price": 0.29},
         "quality": 72.1,
         "monthly_cost": "$2,200"
     },
@@ -278,16 +278,16 @@ MODEL_CONFIGS = {
         "emoji": "🟢",
         "coding": {"model": "openai/gpt-5.4-mini", "name": "MiniMax M2.5", "input_price": 0.20, "output_price": 1.10},
         "planner": {"model": "anthropic/claude-sonnet-4.6", "name": "Claude Sonnet 4.6", "input_price": 3.00, "output_price": 15.00},
-        "tools": {"model": "xiaomi/mimo-v2-flash", "name": "MiMo-V2-Flash", "input_price": 0.09, "output_price": 0.29},
+        "tools": {"model": "openai/gpt-5.4-nano", "name": "MiMo-V2-Flash", "input_price": 0.09, "output_price": 0.29},
         "quality": 80.2,
         "monthly_cost": "$1,750"
     },
     "budget": {
         "name": "Бюджет",
         "emoji": "🔵",
-        "coding": {"model": "xiaomi/mimo-v2-flash", "name": "MiMo-V2-Flash", "input_price": 0.09, "output_price": 0.29},
+        "coding": {"model": "openai/gpt-5.4-nano", "name": "MiMo-V2-Flash", "input_price": 0.09, "output_price": 0.29},
         "planner": {"model": "openai/gpt-5.4-mini", "name": "MiniMax M2.5", "input_price": 0.20, "output_price": 1.10},
-        "tools": {"model": "xiaomi/mimo-v2-flash", "name": "MiMo-V2-Flash", "input_price": 0.09, "output_price": 0.29},
+        "tools": {"model": "openai/gpt-5.4-nano", "name": "MiMo-V2-Flash", "input_price": 0.09, "output_price": 0.29},
         "quality": 75.8,
         "monthly_cost": "$750"
     }
@@ -296,7 +296,7 @@ MODEL_CONFIGS = {
 # CHAT_MODELS: реальные ID моделей (PATCH 12 fix2)
 CHAT_MODELS = {
     "qwen3":    {"model": "openai/gpt-5.4-mini",   "name": "MiniMax M2.5",    "lang": "RU ⭐⭐⭐⭐⭐", "input_price": 0.20, "output_price": 1.10},
-    "mimo":     {"model": "xiaomi/mimo-v2-flash",   "name": "MiMo-V2-Flash",  "lang": "RU ⭐⭐⭐⭐",  "input_price": 0.09, "output_price": 0.29},
+    "mimo":     {"model": "openai/gpt-5.4-nano",   "name": "MiMo-V2-Flash",  "lang": "RU ⭐⭐⭐⭐",  "input_price": 0.09, "output_price": 0.29},
     "gpt5nano": {"model": "openai/gpt-5.4-mini",   "name": "MiniMax M2.5",   "lang": "RU ⭐⭐⭐⭐",  "input_price": 0.20, "output_price": 1.10},
 }  # PATCH fix: replaced deepseek with mimo
 
@@ -349,7 +349,7 @@ def _calc_cost(tokens_in, tokens_out, model_name):
         'anthropic/claude-sonnet-4': (3.00, 15.00),
         'openai/gpt-5.4-mini': (0.20, 1.10),
         'minimax/minimax-m2.7': (0.20, 1.10),
-        'xiaomi/mimo-v2-flash': (0.09, 0.29),
+        'openai/gpt-5.4-nano': (0.09, 0.29),
         'xiaomi/mimo-v2-omni':  (0.15, 0.75),
         # deepseek kept as fallback for cost calculation
         'openai/gpt-5.4-mini': (0.27, 1.10),  # fallback 3rd level

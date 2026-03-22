@@ -181,3 +181,31 @@ def save_report(report: dict, path: str = "wizard_report.json"):
     with open(path, "w", encoding="utf-8") as f:
         json.dump(report, f, ensure_ascii=False, indent=2)
     return path
+
+
+def run_installation_with_fallback(url: str, config: dict, ssh_fn=None, browser_fn=None) -> dict:
+    """
+    Запускает установку Битрикс: сначала через wizard, при ошибке — через SSH напрямую.
+    """
+    # Попробовать browser wizard
+    result = run_wizard(
+        url=url,
+        db_name=config.get("db", {}).get("name", "bitrix_db"),
+        db_user=config.get("db", {}).get("user", "bitrix_user"),
+        db_password=config.get("db", {}).get("password", ""),
+        admin_login=config.get("admin_login", "admin"),
+        admin_password=config.get("admin_password", ""),
+        admin_email=config.get("admin_email", "admin@example.com"),
+        site_name=config.get("site_name", "My Site"),
+        ssh_fn=ssh_fn,
+        browser_fn=browser_fn,
+        edition=config.get("edition", "business"),
+    )
+
+    if result.get("status") in ("success", "partial") and len(result.get("errors", [])) == 0:
+        return result
+
+    # Fallback: установка через SSH без wizard
+    logger.warning(f"[run_installation_with_fallback] Browser wizard failed ({result.get(status)}), using SSH direct install")
+    from bitrix_provisioner import install_bitrix_cli
+    return install_bitrix_cli(config, ssh_fn)

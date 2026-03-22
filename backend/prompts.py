@@ -507,6 +507,14 @@ BITRIX_PIPELINE_RULE = """
 - НЕ создавай шаблон без HTML. Сначала build_landing, потом template.
 - Перед деплоем ВСЕГДА делай backup_bitrix.
 - Если judge вернул FAIL — исправь и повтори.
+
+ВАЖНО — УСТАНОВКА БИТРИКС:
+  bitrixsetup.php устанавливает BITRIX24 (корпоративный портал), НЕ 1С-Битрикс CMS!
+  Для 1С-Битрикс CMS нужен архив tar.gz (требует авторизации на 1c-bitrix.ru).
+  Редакции CMS: start_encode.tar.gz, standard_encode.tar.gz, business_encode.tar.gz
+  Если архив недоступен — использовать bitrixsetup.php (установит Bitrix24).
+  NGINX должен выполнять PHP: location ~ \.php$ { fastcgi_pass unix:/run/php/... }
+  bitrixsetup.php должен быть в КОРНЕ сайта (не в /subdir/).
 """
 
 # ══════════════════════════════════════════════════════════════════

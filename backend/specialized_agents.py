@@ -5,11 +5,11 @@ Specialized Agents v7.0 — ORION Digital
 
 Модели по MASTER_PROMPT:
   designer   → gemini   (google/gemini-2.5-pro)
-  developer  → mimo     (xiaomi/mimo-v2-flash)   — hands
-  devops     → mimo     (xiaomi/mimo-v2-flash)   — hands
+  developer  → mimo     (openai/gpt-5.4-nano)   — hands
+  devops     → mimo     (openai/gpt-5.4-nano)   — hands
   tester     → minimax  (openai/gpt-5.4-mini)   — brain
   analyst    → gpt54_mini / sonnet в premium   — brain
-  integrator → mimo     (xiaomi/mimo-v2-flash)   — hands
+  integrator → mimo     (openai/gpt-5.4-nano)   — hands
 
 preferred_model берётся из model_router по роли и режиму.
 """
@@ -68,7 +68,7 @@ SPECIALIZED_AGENTS = {
         "emoji": "💻",
         "role": "developer",
         # MiMo — код, SSH, DevOps (hands)
-        "preferred_model": "xiaomi/mimo-v2-flash",  # PATCH fix: mimo hands
+        "preferred_model": "openai/gpt-5.4-nano",  # PATCH fix: mimo hands
         "model_key": "mimo",
         "priority_tools": [
             "ssh_execute", "file_write", "file_read",
@@ -104,7 +104,7 @@ SPECIALIZED_AGENTS = {
         "emoji": "🔧",
         "role": "devops",
         # MiMo — серверные операции (hands)
-        "preferred_model": "xiaomi/mimo-v2-flash",  # PATCH fix: mimo hands
+        "preferred_model": "openai/gpt-5.4-nano",  # PATCH fix: mimo hands
         "model_key": "mimo",
         "priority_tools": [
             "ssh_execute", "file_write", "file_read",
@@ -219,7 +219,7 @@ SPECIALIZED_AGENTS = {
         "emoji": "🔌",
         "role": "integrator",
         # MiMo — интеграции и API (hands)
-        "preferred_model": "xiaomi/mimo-v2-flash",  # PATCH fix: mimo hands
+        "preferred_model": "openai/gpt-5.4-nano",  # PATCH fix: mimo hands
         "model_key": "mimo",
         "priority_tools": [
             "ssh_execute", "file_write", "file_read",

@@ -115,7 +115,7 @@ BRAIN_TOOLS = frozenset([
 ])
 
 TURBO_BRAIN_MODEL = "openai/gpt-5.4-mini"
-TURBO_HANDS_MODEL = "xiaomi/mimo-v2-flash"
+TURBO_HANDS_MODEL = "openai/gpt-5.4-nano"
 TURBO_FALLBACK_MODEL = "openai/gpt-5.4-mini"  # PATCH fix: real model ID
 
 
@@ -289,6 +289,18 @@ if _MEMORY_V9_AVAILABLE and ALL_MEMORY_TOOLS:
     for _mt in ALL_MEMORY_TOOLS:
         if _mt["function"]["name"] not in _existing_names:
             TOOLS_SCHEMA.append(_mt)
+
+# ── DEDUP FIX: Remove duplicate tool names (Gemini rejects duplicates) ──
+_seen_tool_names = set()
+_deduped_tools = []
+for _tool in reversed(TOOLS_SCHEMA):  # Keep last occurrence (most complete)
+    _tname = _tool["function"]["name"]
+    if _tname not in _seen_tool_names:
+        _seen_tool_names.add(_tname)
+        _deduped_tools.append(_tool)
+TOOLS_SCHEMA[:] = list(reversed(_deduped_tools))
+import logging as _dedup_logging
+_dedup_logging.info(f"[TOOLS_SCHEMA] Deduplicated: {len(TOOLS_SCHEMA)} tools (removed duplicates)")
 
 
 
@@ -1018,6 +1030,9 @@ class AgentLoop:
             except Exception:
                 pass
         result = self._execute_tool_raw(tool_name, arguments)
+        # FIX: guard against None result (e.g. Playwright timeout)
+        if result is None:
+            result = {"success": False, "error": f"Tool {tool_name} returned None (possible timeout)"}
         # Пост-обработка: сохраняем большие результаты в файл
         _fs_context_tools = ("ssh_execute", "browser_navigate", "browser_get_text", "web_fetch", "browser_check_site")
         if tool_name in _fs_context_tools and isinstance(result, dict) and result.get("success"):
@@ -1674,11 +1689,49 @@ class AgentLoop:
                 return {"success": True, "provision_result": result}
 
             elif tool_name == "run_bitrix_wizard":
-                from bitrix_wizard_operator import run_wizard
+                # install_bitrix_cli — полная установка через SSH без браузера
+                from bitrix_provisioner import install_bitrix_cli
+                import re as _re
                 url = args.get("url", "")
+                # Поддерживаем оба формата: плоский (db_name/db_user/db_password) и вложенный (db_config)
                 db_config = args.get("db_config", {})
-                result = run_wizard(url, db_config)
-                return {"success": True, "wizard_result": result}
+                if not db_config:
+                    db_config = {
+                        "host": args.get("db_host", "localhost"),
+                        "name": args.get("db_name", ""),
+                        "user": args.get("db_user", ""),
+                        "password": args.get("db_password", ""),
+                    }
+                # Определяем install_path из url если не задан явно
+                install_path = args.get("install_path", "")
+                if not install_path:
+                    m = _re.search(r"https?://[^/]+(/[^?#]*)", url)
+                    if m and m.group(1) and m.group(1) != "/":
+                        subpath = m.group(1).strip("/")
+                        install_path = f"/var/www/html/{subpath}"
+                    else:
+                        install_path = "/var/www/html"
+                config = {
+                    "install_path": install_path,
+                    "db": db_config,
+                    "admin_login": args.get("admin_login", "admin"),
+                    "admin_password": args.get("admin_password", "Admin123!"),
+                    "admin_email": args.get("admin_email", "admin@example.com"),
+                    "site_name": args.get("site_name", "My Bitrix Site"),
+                    "php_bin": args.get("php_bin", "php8.1"),
+                }
+                # Создаём ssh_fn из stored credentials
+                _ssh_host = self.ssh_credentials.get("host", args.get("host", ""))
+                _ssh_user = self.ssh_credentials.get("username", self.ssh_credentials.get("user", "root"))
+                _ssh_pass = self.ssh_credentials.get("password", "")
+                if _ssh_host and _ssh_pass:
+                    def ssh_fn(cmd, _h=_ssh_host, _u=_ssh_user, _p=_ssh_pass):
+                        return self._ssh_execute_with_retry(_h, _u, _p, cmd)
+                else:
+                    ssh_fn = None
+                    logger.warning("[run_bitrix_wizard] No SSH credentials available for install_bitrix_cli")
+                result = install_bitrix_cli(config, ssh_fn)
+                return {"success": result.get("status") in ("success", "partial"), "install_result": result}
 
             elif tool_name == "verify_bitrix":
                 from bitrix_verifier import verify_bitrix
@@ -3007,6 +3060,8 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);
 
     def _preview_result(self, tool_name, result):
         """Create a short preview of tool result for display."""
+        if result is None:
+            return f"❌ Ошибка: инструмент {tool_name} вернул None (возможно таймаут)"
         if not result.get("success", False):
             error = result.get("error", result.get("stderr", "Unknown error"))
             return f"❌ Ошибка: {str(error)[:200]}"

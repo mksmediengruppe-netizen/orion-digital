@@ -1575,20 +1575,23 @@ TOOLS_SCHEMA = [
         "type": "function",
         "function": {
             "name": "run_bitrix_wizard",
-            "description": "Run Bitrix web installer wizard: accept license, configure DB, set site name, install modules, create admin.",
+            "description": "Install Bitrix CMS via SSH without browser wizard. Downloads archive, extracts, creates dbconn.php, initializes DB, creates admin user, configures nginx. Use this tool to install Bitrix on a remote server.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "url": {"type": "string", "description": "Server URL"},
+                    "url": {"type": "string", "description": "Site URL, e.g. http://45.67.57.175/dimydiv/"},
+                    "install_path": {"type": "string", "description": "Absolute path on server, e.g. /var/www/html/dimydiv"},
                     "db_name": {"type": "string", "description": "Database name"},
                     "db_user": {"type": "string", "description": "DB username"},
                     "db_password": {"type": "string", "description": "DB password"},
+                    "db_host": {"type": "string", "description": "DB host", "default": "localhost"},
                     "admin_login": {"type": "string", "description": "Admin login", "default": "admin"},
                     "admin_password": {"type": "string", "description": "Admin password"},
+                    "admin_email": {"type": "string", "description": "Admin email"},
                     "site_name": {"type": "string", "description": "Site name"},
-                    "edition": {"type": "string", "description": "Edition: start, standard, business", "default": "start"}
+                    "php_bin": {"type": "string", "description": "PHP binary, e.g. php8.1", "default": "php8.1"}
                 },
-                "required": ["url", "db_name", "db_user", "db_password"]
+                "required": ["install_path", "db_name", "db_user", "db_password"]
             }
         }
     },

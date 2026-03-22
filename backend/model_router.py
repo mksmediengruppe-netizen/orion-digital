@@ -86,7 +86,7 @@ MODELS = {
         "max_tokens": 32000
     },
     "mimo": {
-        "id": "xiaomi/mimo-v2-flash",
+        "id": "openai/gpt-5.4-nano",
         "name": "MiMo V2 Flash",
         "input_price": 0.09,
         "output_price": 0.29,
@@ -174,7 +174,7 @@ FALLBACK_CHAINS = {
     "gemini_pro":  ["google/gemini-2.5-pro", "anthropic/claude-sonnet-4.6"],
     "sonnet":      ["anthropic/claude-sonnet-4.6", "openai/gpt-5.4"],
     "opus":        ["anthropic/claude-opus-4", "openai/gpt-5.4", "anthropic/claude-sonnet-4.6"],
-    "mimo":        ["xiaomi/mimo-v2-flash", "openai/gpt-5.4-nano"],
+    "mimo":        ["openai/gpt-5.4-nano", "openai/gpt-5.4-nano"],
 }
 
 # ══════════════════════════════════════════════════════════════
@@ -189,7 +189,7 @@ PRICING = {
     "google/gemini-2.5-pro":       (1.25, 10.00),
     "anthropic/claude-sonnet-4.6": (3.00, 15.00),
     "anthropic/claude-opus-4":     (15.00, 75.00),
-    "xiaomi/mimo-v2-flash":        (0.09, 0.29),
+    "openai/gpt-5.4-nano":        (0.09, 0.29),
 }
 
 # ══════════════════════════════════════════════════════════════
