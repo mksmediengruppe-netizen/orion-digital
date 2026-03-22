@@ -5853,6 +5853,57 @@ def select_pipeline(brief_text: str) -> list:
     return PIPELINE_WEBSITE
 
 
+
+
+
+
+# ═══ CRUD HELPER FUNCTIONS (ULTIMATE PATCH C4) ═══
+def get_user(user_id):
+    """Get user by ID from database."""
+    from database import db_read
+    data = db_read()
+    for user in data.get("users", []):
+        if str(user.get("id")) == str(user_id):
+            return user
+    return None
+
+def get_chat(chat_id):
+    """Get chat by ID from database."""
+    from database import db_read
+    data = db_read()
+    for chat in data.get("chats", []):
+        if str(chat.get("id")) == str(chat_id):
+            return chat
+    return None
+
+def get_setting(key, default=None):
+    """Get system setting by key."""
+    from database import db_read
+    data = db_read()
+    settings = data.get("settings", {})
+    return settings.get(key, default)
+
+
+# ═══ BROWSER WATCHDOG (ULTIMATE PATCH C3) ═══
+class BrowserWatchdog:
+    """Monitor browser operations for timeouts and errors."""
+    def __init__(self, timeout=60):
+        self.timeout = timeout
+        self._start = None
+    
+    def start(self):
+        import time
+        self._start = time.time()
+    
+    def check(self):
+        import time
+        if self._start and (time.time() - self._start) > self.timeout:
+            raise TimeoutError(f"Browser operation exceeded {self.timeout}s timeout")
+    
+    def reset(self):
+        self._start = None
+
+
 # ═══ MODULE-LEVEL UTILITIES (ULTIMATE PATCH) ═══
 
 # SITE BLUEPRINT RULE (ULTIMATE PATCH H4)
