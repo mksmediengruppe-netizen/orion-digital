@@ -5,6 +5,31 @@ Extracted from agent_loop.py (TASK 7).
 
 TOOLS_SCHEMA = [
     {
+        "name": "create_site_blueprint",
+        "description": "Create a site structure from brief. Call BEFORE writing code. Returns JSON blueprint with sections, photos, forms, design.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "brief": {"type": "string", "description": "Full text of the brief/TZ"},
+                "site_type": {"type": "string", "enum": ["landing", "corporate", "shop"], "description": "Type of site to create"}
+            },
+            "required": ["brief"]
+        }
+    },
+    {
+        "name": "build_landing",
+        "description": "Build a landing page from blueprint. Generates photos, HTML, CSS, JS, PHP handler, deploys to server.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "blueprint_id": {"type": "string", "description": "Blueprint ID or JSON"},
+                "server_host": {"type": "string", "description": "Server IP or domain"},
+                "deploy_path": {"type": "string", "description": "Server path for deployment"}
+            },
+            "required": ["blueprint_id", "server_host", "deploy_path"]
+        }
+    },
+    {
         "name": "install_bitrix",
         "description": "Install 1C-Bitrix CMS on a server. Prepares the server, runs the installation wizard, and verifies the result.",
         "parameters": {
