@@ -519,7 +519,7 @@ TOOLS_SCHEMA = [
                     "extract_tables": {
                         "type": "boolean",
                         "description": "Whether to extract tables as structured data",
-                        "default": true
+                        "default": True
                     },
                     "max_length": {
                         "type": "integer",
@@ -1056,8 +1056,8 @@ TOOLS_SCHEMA = [
                     },
                     "clear": {
                         "type": "boolean",
-                        "description": "Clear field before typing (default: true)",
-                        "default": true
+                        "description": "Clear field before typing (default: True)",
+                        "default": True
                     }
                 },
                 "required": [
