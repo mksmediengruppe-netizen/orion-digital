@@ -5692,41 +5692,6 @@ class MultiAgentLoop(AgentLoop):
                     elif _repeat_count >= 2:
                         logging.warning("[AntiLoop] " + tool_name + " repeated " + str(_repeat_count) + "x - warning injected")
                         messages.append({"role": "system", "content": "ПРЕДУПРЕЖДЕНИЕ: Ты уже вызывал '" + tool_name + "' с похожими аргументами. Если результат тот же - попробуй другой подход."})
-# SITE BLUEPRINT RULE (ULTIMATE PATCH H4)
-SITE_BLUEPRINT_RULE = """
-RULE FOR WEBSITES:
-When you receive a task to create a website/landing:
-1. FIRST call create_site_blueprint(brief) to create a structured plan
-2. Check the blueprint - all sections, photos, forms are in place
-3. THEN call build_landing(blueprint) or start building manually
-4. DO NOT start writing HTML without a blueprint
-"""
-
-
-def validate_html_before_deploy(html_content: str) -> dict:
-    """Validate HTML before deploying to server."""
-    issues = []
-    if not html_content or len(html_content) < 100:
-        issues.append('HTML too short or empty')
-    if '<html' not in html_content.lower():
-        issues.append('Missing <html> tag')
-    if '</html>' not in html_content.lower():
-        issues.append('Missing </html> closing tag')
-    if '<head' not in html_content.lower():
-        issues.append('Missing <head> tag')
-    if '<body' not in html_content.lower():
-        issues.append('Missing <body> tag')
-    if 'charset' not in html_content.lower():
-        issues.append('Missing charset declaration')
-    if '<meta name="viewport"' not in html_content.lower():
-        issues.append('Missing viewport meta tag')
-    return {
-        'valid': len(issues) == 0,
-        'issues': issues,
-        'size': len(html_content)
-    }
-
-
                     # ── ANTI-LOOP for pipeline ──
                     _ph_hash = hashlib.md5(f"{tool_name}:{tool_args_str[:200]}".encode()).hexdigest()
                     _phase_tool_history[_ph_hash] = _phase_tool_history.get(_ph_hash, 0) + 1
@@ -5845,3 +5810,42 @@ def validate_html_before_deploy(html_content: str) -> dict:
                 "agent": agent_info["name"],
                 "role": agent_key
             })
+
+
+
+# ═══ MODULE-LEVEL UTILITIES (ULTIMATE PATCH) ═══
+
+# SITE BLUEPRINT RULE (ULTIMATE PATCH H4)
+SITE_BLUEPRINT_RULE = """
+RULE FOR WEBSITES:
+When you receive a task to create a website/landing:
+1. FIRST call create_site_blueprint(brief) to create a structured plan
+2. Check the blueprint - all sections, photos, forms are in place
+3. THEN call build_landing(blueprint) or start building manually
+4. DO NOT start writing HTML without a blueprint
+"""
+
+
+def validate_html_before_deploy(html_content: str) -> dict:
+    """Validate HTML before deploying to server."""
+    issues = []
+    if not html_content or len(html_content) < 100:
+        issues.append('HTML too short or empty')
+    if '<html' not in html_content.lower():
+        issues.append('Missing <html> tag')
+    if '</html>' not in html_content.lower():
+        issues.append('Missing </html> closing tag')
+    if '<head' not in html_content.lower():
+        issues.append('Missing <head> tag')
+    if '<body' not in html_content.lower():
+        issues.append('Missing <body> tag')
+    if 'charset' not in html_content.lower():
+        issues.append('Missing charset declaration')
+    if '<meta name="viewport"' not in html_content.lower():
+        issues.append('Missing viewport meta tag')
+    return {
+        'valid': len(issues) == 0,
+        'issues': issues,
+        'size': len(html_content)
+    }
+
