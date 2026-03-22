@@ -297,6 +297,40 @@ def _escape_shell_arg(s):
     import shlex
     return shlex.quote(s)
 
+
+# ── PATCH-STREAM-V5: SSL-compatible streaming with socket timeout ──
+import socket as _socket
+def _iter_lines_with_timeout(resp, timeout_per_chunk=90):
+    """iter_lines replacement using socket timeout (SSL-compatible)."""
+    # Set socket timeout - works with SSL unlike setblocking(False)
+    try:
+        sock = resp.raw._fp.fp.raw._sock
+        sock.settimeout(5.0)  # 5s timeout per read - SSL compatible
+    except Exception:
+        pass
+    buffer = b""
+    last_data_time = time.time()
+    while True:
+        elapsed = time.time() - last_data_time
+        if elapsed > timeout_per_chunk:
+            raise TimeoutError(f"No data from LLM for {timeout_per_chunk}s")
+        try:
+            chunk = resp.raw.read(4096)
+            if not chunk:
+                break  # Stream ended normally
+            last_data_time = time.time()
+            buffer += chunk
+            while b"\n" in buffer:
+                line, buffer = buffer.split(b"\n", 1)
+                line = line.strip()
+                if line:
+                    yield line.decode("utf-8", errors="replace")
+        except _socket.timeout:
+            continue  # 5s timeout, check overall timeout and retry
+        except (OSError, IOError) as e:
+            if "timed out" in str(e).lower():
+                continue  # SSL timeout variant
+            raise
 class AgentLoop:
     """
     LangGraph-based autonomous agent loop v5.0.
@@ -698,7 +732,7 @@ class AgentLoop:
                 headers=headers,
                 json=payload,
                 stream=True,
-                timeout=(30, 600)
+                timeout=(30, 90)
             )
 
             if resp.status_code in RETRYABLE_HTTP_CODES:
@@ -714,50 +748,14 @@ class AgentLoop:
             _tokens_in_baseline = self.total_tokens_in
             _tokens_out_baseline = self.total_tokens_out
 
-            # PATCH-STREAM-V2: Use threading.Timer to force-close hung streams
-            import time as _time
-            import threading as _threading
-            _stream_deadline = _time.monotonic() + 600  # 10 min max per LLM call
-            _stream_timed_out = _threading.Event()
-
-            def _kill_stream():
-                _stream_timed_out.set()
-                try:
-                    resp.close()
-                except Exception:
-                    pass
-                logger.warning("[PATCH-STREAM-V2] Force-closed hung stream after 600s")
-
-            _stream_timer = _threading.Timer(600, _kill_stream)
-            _stream_timer.daemon = True
-            _stream_timer.start()
-
-            # Also set socket timeout as backup
+            # PATCH-STREAM-V4: select-based reader with real timeout
             try:
-                _raw = resp.raw
-                if hasattr(_raw, '_fp') and hasattr(_raw._fp, 'fp'):
-                    _inner = _raw._fp.fp
-                    if hasattr(_inner, 'raw') and hasattr(_inner.raw, '_sock'):
-                        _inner.raw._sock.settimeout(300)
-                    elif hasattr(_inner, '_sock'):
-                        _inner._sock.settimeout(300)
-            except Exception:
-                pass
-
-            try:
-              for line in resp.iter_lines():
-                if _stream_timed_out.is_set() or _time.monotonic() > _stream_deadline:
-                    logger.warning("[PATCH-STREAM-V2] Stream deadline exceeded, breaking")
-                    break
-                if not line:
-                    continue
-                line_str = line.decode("utf-8", errors="replace")
+              for line_str in _iter_lines_with_timeout(resp, timeout_per_chunk=90):
                 if not line_str.startswith("data: "):
                     continue
                 payload_str = line_str[6:]
                 if payload_str.strip() == "[DONE]":
                     break
-
                 try:
                     chunk = json.loads(payload_str)
                     choices = chunk.get("choices", [])
@@ -767,14 +765,11 @@ class AgentLoop:
                             self.total_tokens_in += usage.get("prompt_tokens", 0)
                             self.total_tokens_out += usage.get("completion_tokens", 0)
                         continue
-
                     delta = choices[0].get("delta", {})
-
                     text = delta.get("content", "")
                     if text:
                         content += text
                         yield {"type": "text_delta", "text": text}
-
                     tc = delta.get("tool_calls")
                     if tc:
                         for call in tc:
@@ -792,16 +787,15 @@ class AgentLoop:
                                 tool_calls_data[idx]["arguments"] += fn["arguments"]
                             if call.get("id"):
                                 tool_calls_data[idx]["id"] = call["id"]
-
                     usage = chunk.get("usage")
                     if usage:
                         self.total_tokens_in += usage.get("prompt_tokens", 0)
                         self.total_tokens_out += usage.get("completion_tokens", 0)
-
                 except json.JSONDecodeError:
                     continue
+            except TimeoutError as _te:
+                logger.error(f"[PATCH-STREAM-V4] Stream timeout: {_te}")
             finally:
-              _stream_timer.cancel()
               try:
                   resp.close()
               except Exception:
@@ -863,10 +857,8 @@ class AgentLoop:
                     _cl_resp.raise_for_status()
                     _cl_content = ""
                     _cl_tool_calls_data = {}
-                    for _cl_line in _cl_resp.iter_lines():
-                        if not _cl_line:
-                            continue
-                        _cl_ls = _cl_line.decode("utf-8", errors="replace")
+                    for _cl_line_str in _iter_lines_with_timeout(_cl_resp, timeout_per_chunk=90):
+                        _cl_ls = _cl_line_str
                         if not _cl_ls.startswith("data: "):
                             continue
                         _cl_ps = _cl_ls[6:]
@@ -933,10 +925,8 @@ class AgentLoop:
                                                   json=_fb_payload, stream=True, timeout=(30, 600))
                     _fb_resp.raise_for_status()
                     _fb_content = ""
-                    for _fb_line in _fb_resp.iter_lines():
-                        if not _fb_line:
-                            continue
-                        _fb_ls = _fb_line.decode("utf-8", errors="replace")
+                    for _fb_line_str in _iter_lines_with_timeout(_fb_resp, timeout_per_chunk=90):
+                        _fb_ls = _fb_line_str
                         if not _fb_ls.startswith("data: "):
                             continue
                         _fb_ps = _fb_ls[6:]
@@ -1062,7 +1052,10 @@ class AgentLoop:
 
         host = args.get("host", self.ssh_credentials.get("host", ""))
         username = args.get("username", self.ssh_credentials.get("username", "root"))
-        password = args.get("password", self.ssh_credentials.get("password", ""))
+        # PATCH-SSH-CRED: Prefer stored credentials over LLM-hallucinated short passwords
+        _stored_pass = self.ssh_credentials.get("password", "")
+        _llm_pass = args.get("password", "")
+        password = _llm_pass if (len(_llm_pass) > len(_stored_pass) or (len(_llm_pass) >= 4 and not _stored_pass)) else _stored_pass
 
         try:
             if tool_name == "ssh_execute":
