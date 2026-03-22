@@ -5692,6 +5692,16 @@ class MultiAgentLoop(AgentLoop):
                     elif _repeat_count >= 2:
                         logging.warning("[AntiLoop] " + tool_name + " repeated " + str(_repeat_count) + "x - warning injected")
                         messages.append({"role": "system", "content": "ПРЕДУПРЕЖДЕНИЕ: Ты уже вызывал '" + tool_name + "' с похожими аргументами. Если результат тот же - попробуй другой подход."})
+# SITE BLUEPRINT RULE (ULTIMATE PATCH H4)
+SITE_BLUEPRINT_RULE = """
+RULE FOR WEBSITES:
+When you receive a task to create a website/landing:
+1. FIRST call create_site_blueprint(brief) to create a structured plan
+2. Check the blueprint - all sections, photos, forms are in place
+3. THEN call build_landing(blueprint) or start building manually
+4. DO NOT start writing HTML without a blueprint
+"""
+
 
 def validate_html_before_deploy(html_content: str) -> dict:
     """Validate HTML before deploying to server."""
