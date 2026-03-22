@@ -575,3 +575,70 @@ def close_db():
 
 # Initialize on import
 init_db()
+
+
+# ═══ C4: Point CRUD functions ═══
+
+def get_user(user_id):
+    conn = _get_conn()
+    try:
+        row = conn.execute("SELECT data FROM users WHERE id=?", (user_id,)).fetchone()
+        return json.loads(row[0]) if row else None
+    finally:
+        conn.close()
+
+def update_user(user_id, patch):
+    conn = _get_conn()
+    try:
+        row = conn.execute("SELECT data FROM users WHERE id=?", (user_id,)).fetchone()
+        if row:
+            user = json.loads(row[0])
+            user.update(patch)
+            conn.execute("UPDATE users SET data=? WHERE id=?", (json.dumps(user), user_id))
+            conn.commit()
+            return True
+        return False
+    finally:
+        conn.close()
+
+def get_chat(chat_id):
+    conn = _get_conn()
+    try:
+        row = conn.execute("SELECT data FROM chats WHERE id=?", (chat_id,)).fetchone()
+        return json.loads(row[0]) if row else None
+    finally:
+        conn.close()
+
+def update_chat(chat_id, patch):
+    conn = _get_conn()
+    try:
+        row = conn.execute("SELECT data FROM chats WHERE id=?", (chat_id,)).fetchone()
+        if row:
+            chat = json.loads(row[0])
+            chat.update(patch)
+            conn.execute("UPDATE chats SET data=? WHERE id=?", (json.dumps(chat), chat_id))
+            conn.commit()
+            return True
+        return False
+    finally:
+        conn.close()
+
+def get_setting(key):
+    conn = _get_conn()
+    try:
+        row = conn.execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone()
+        return row[0] if row else None
+    finally:
+        conn.close()
+
+def set_setting(key, value):
+    import time as _time
+    conn = _get_conn()
+    try:
+        conn.execute(
+            "INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, ?)",
+            (key, value, _time.time())
+        )
+        conn.commit()
+    finally:
+        conn.close()
