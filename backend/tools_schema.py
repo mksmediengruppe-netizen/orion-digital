@@ -1514,7 +1514,7 @@ TOOLS_SCHEMA = [
                     "html_content": {"type": "string", "description": "HTML content to deploy"},
                     "domain": {"type": "string", "description": "Domain name"},
                     "deploy_path": {"type": "string", "description": "Server path", "default": "/var/www/html"},
-                    "enable_ssl": {"type": "boolean", "description": "Setup Let's Encrypt SSL", "default": true}
+                    "enable_ssl": {"type": "boolean", "description": "Setup Let's Encrypt SSL", "default": True}
                 },
                 "required": ["host", "html_content", "domain"]
             }
@@ -1671,7 +1671,7 @@ TOOLS_SCHEMA = [
                     "html_content": {"type": "string", "description": "HTML content"},
                     "css_content": {"type": "string", "description": "CSS styles"},
                     "install_path": {"type": "string", "description": "Install path", "default": "/var/www/html"},
-                    "enable_ssl": {"type": "boolean", "description": "Setup SSL", "default": true}
+                    "enable_ssl": {"type": "boolean", "description": "Setup SSL", "default": True}
                 },
                 "required": ["host", "domain"]
             }
