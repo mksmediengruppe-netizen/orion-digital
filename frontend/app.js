@@ -1,4 +1,11 @@
 
+// A10: XSS protection
+function safeText(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
 // Queue handler for busy workers
 function handleBusyResponse(response) {
     if (response.status === 429 || (response.data && response.data.status === 'busy')) {
@@ -265,8 +272,8 @@ const API = {
 /* ── AUTH ─────────────────────────────────────────────────── */
 const Auth = {
     init() {
-        const token = localStorage.getItem('orion_token');
-        const user = localStorage.getItem('orion_user');
+        const token = null;
+        const user = null;
         if (token && user) {
             state.token = token;
             state.user = JSON.parse(user);
@@ -306,13 +313,12 @@ const Auth = {
         try {
             const data = await API.login(username, password);
             state.token = data.access_token;
-            localStorage.setItem('orion_token', data.access_token);
             // BUG-12v2: Save creds for silent re-login after server restart
-            localStorage.setItem('orion_creds', JSON.stringify({ email: username, password }));
+            );
 
             const me = await API.get('/auth/me');
             state.user = me;
-            localStorage.setItem('orion_user', JSON.stringify(me));
+            );
 
             this.onLogin();
         } catch (err) {
@@ -353,13 +359,12 @@ const Auth = {
 
     // BUG-12v2: Silent re-login when session expired (server restart)
     async silentRelogin() {
-        const savedCreds = localStorage.getItem('orion_creds');
+        const savedCreds = null;
         if (!savedCreds) return false;
         try {
             const { email, password } = JSON.parse(savedCreds);
             const data = await API.login(email, password);
             state.token = data.access_token;
-            localStorage.setItem('orion_token', data.access_token);
             console.log('BUG-12v2: Silent re-login successful');
             return true;
         } catch (e) {
@@ -382,7 +387,7 @@ const Auth = {
         // Don't remove orion_user — needed for re-login
         this.showAuthScreen();
         // BUG-12v4: Pre-fill login if we have saved creds
-        const savedCreds = localStorage.getItem('orion_creds');
+        const savedCreds = null;
         if (savedCreds) {
             try {
                 const { email } = JSON.parse(savedCreds);

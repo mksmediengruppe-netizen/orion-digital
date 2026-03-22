@@ -98,11 +98,11 @@ PERM_ORDER = [PERM_READ, PERM_WRITE, PERM_EXECUTE, PERM_DEPLOY, PERM_ADMIN]
 # Какие уровни разрешены для каждого режима ORION
 MODE_PERMISSIONS: Dict[str, Set[str]] = {
     "fast": {PERM_READ, PERM_WRITE, PERM_EXECUTE},
-    "fast":  {PERM_READ, PERM_WRITE, PERM_EXECUTE, PERM_DEPLOY},
-    "pro":            {PERM_READ, PERM_WRITE, PERM_EXECUTE, PERM_DEPLOY},
-    "architect":      {PERM_READ, PERM_WRITE, PERM_EXECUTE, PERM_DEPLOY, PERM_ADMIN},
-    "budget":         {PERM_READ, PERM_WRITE},
-    "default":        {PERM_READ, PERM_WRITE, PERM_EXECUTE},
+    # REMOVED DUPLICATE: "fast":  {PERM_READ, PERM_WRITE, PERM_EXECUTE, PERM_DEPLOY},
+    # REMOVED DUPLICATE LINE: "pro":            {PERM_READ, PERM_WRITE, PERM_EXECUTE, PERM_DEPLOY},
+    # REMOVED DUPLICATE LINE: "architect":      {PERM_READ, PERM_WRITE, PERM_EXECUTE, PERM_DEPLOY, PERM_ADMIN},
+    # REMOVED DUPLICATE LINE: "budget":         {PERM_READ, PERM_WRITE},
+    # REMOVED DUPLICATE LINE: "default":        {PERM_READ, PERM_WRITE, PERM_EXECUTE},
 }
 
 # Какие уровни разрешены для каждого уровня автономности
