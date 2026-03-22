@@ -1422,6 +1422,310 @@ TOOLS_SCHEMA = [
             }
         }
     },
+    # ══ WEBSITE FACTORY TOOLS ══════════════════════════════════════════
+    {
+        "type": "function",
+        "function": {
+            "name": "parse_site_brief",
+            "description": "Parse a site brief/TZ into structured JSON. Extracts: goal, audience, sections, style, features, contacts, SEO keywords. Use as the FIRST step in website creation pipeline.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "brief_text": {"type": "string", "description": "Raw brief/TZ text from user"},
+                    "site_type": {"type": "string", "description": "Type: landing, corporate, ecommerce, portfolio", "default": "landing"}
+                },
+                "required": ["brief_text"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "build_site_blueprint",
+            "description": "Create a site blueprint (JSON structure) from parsed brief. Defines sections, order, content blocks, forms, navigation. MUST be called before building HTML.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "brief": {"type": "object", "description": "Parsed brief JSON from parse_site_brief"},
+                    "site_type": {"type": "string", "description": "Type: landing, corporate, ecommerce", "default": "landing"}
+                },
+                "required": ["brief"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "plan_site_design",
+            "description": "Plan visual design: colors, fonts, layout, spacing, component styles. Returns design_plan.json.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "brief": {"type": "object", "description": "Parsed brief JSON"},
+                    "blueprint": {"type": "object", "description": "Site blueprint JSON"},
+                    "style_preference": {"type": "string", "description": "Style: modern, minimal, corporate, creative", "default": "modern"}
+                },
+                "required": ["brief", "blueprint"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "generate_site_content",
+            "description": "Generate text content for all site sections: headings, descriptions, CTAs, FAQ, reviews. Returns site_content.json.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "blueprint": {"type": "object", "description": "Site blueprint JSON"},
+                    "brief": {"type": "object", "description": "Parsed brief JSON"},
+                    "tone": {"type": "string", "description": "Tone: professional, friendly, formal, creative", "default": "professional"}
+                },
+                "required": ["blueprint", "brief"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "build_landing",
+            "description": "Build a complete landing page (HTML+CSS+JS) from blueprint, design, and content. Includes responsive layout, forms, photos, animations. NEVER call without blueprint.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "blueprint": {"type": "object", "description": "Site blueprint JSON"},
+                    "design": {"type": "object", "description": "Design plan JSON"},
+                    "content": {"type": "object", "description": "Site content JSON"},
+                    "output_path": {"type": "string", "description": "Path to save HTML file", "default": "index.html"}
+                },
+                "required": ["blueprint", "design", "content"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "publish_site",
+            "description": "Deploy site to server: upload files, configure nginx, setup HTTPS, verify. Returns deploy_report.json.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "host": {"type": "string", "description": "Server IP or hostname"},
+                    "html_content": {"type": "string", "description": "HTML content to deploy"},
+                    "domain": {"type": "string", "description": "Domain name"},
+                    "deploy_path": {"type": "string", "description": "Server path", "default": "/var/www/html"},
+                    "enable_ssl": {"type": "boolean", "description": "Setup Let's Encrypt SSL", "default": true}
+                },
+                "required": ["host", "html_content", "domain"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "verify_site",
+            "description": "Comprehensive site verification: HTTP status, mobile, meta tags, forms, links, speed, security headers. Returns verification_report.json.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": {"type": "string", "description": "URL of the deployed site"},
+                    "checks": {"type": "array", "items": {"type": "string"}, "description": "Specific checks to run (default: all)"}
+                },
+                "required": ["url"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "judge_site_release",
+            "description": "Final judge for website release. Checks 9 criteria: sections, photos, forms, mobile, meta, speed, links, HTTPS, content. Returns verdict: RELEASE/CONDITIONAL/REWORK/FAIL.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": {"type": "string", "description": "URL of the site"},
+                    "blueprint": {"type": "object", "description": "Site blueprint JSON"},
+                    "brief": {"type": "object", "description": "Original brief JSON"}
+                },
+                "required": ["url", "blueprint"]
+            }
+        }
+    },
+    # ══ BITRIX FACTORY TOOLS ═══════════════════════════════════════════
+    {
+        "type": "function",
+        "function": {
+            "name": "provision_bitrix_server",
+            "description": "Prepare server for Bitrix: install Apache/Nginx, PHP, MySQL, create DB, download bitrixsetup.php.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "host": {"type": "string", "description": "Server IP"},
+                    "db_name": {"type": "string", "description": "Database name", "default": "bitrix_db"},
+                    "db_user": {"type": "string", "description": "DB username", "default": "bitrix_user"},
+                    "db_password": {"type": "string", "description": "DB password (auto-generated if empty)"},
+                    "php_version": {"type": "string", "description": "PHP version", "default": "8.1"},
+                    "web_server": {"type": "string", "description": "apache or nginx", "default": "apache"}
+                },
+                "required": ["host"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "run_bitrix_wizard",
+            "description": "Run Bitrix web installer wizard: accept license, configure DB, set site name, install modules, create admin.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": {"type": "string", "description": "Server URL"},
+                    "db_name": {"type": "string", "description": "Database name"},
+                    "db_user": {"type": "string", "description": "DB username"},
+                    "db_password": {"type": "string", "description": "DB password"},
+                    "admin_login": {"type": "string", "description": "Admin login", "default": "admin"},
+                    "admin_password": {"type": "string", "description": "Admin password"},
+                    "site_name": {"type": "string", "description": "Site name"},
+                    "edition": {"type": "string", "description": "Edition: start, standard, business", "default": "start"}
+                },
+                "required": ["url", "db_name", "db_user", "db_password"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "verify_bitrix",
+            "description": "Verify Bitrix installation health: core files, DB, PHP, modules, permissions, cron, settings.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "host": {"type": "string", "description": "Server IP"},
+                    "install_path": {"type": "string", "description": "Bitrix install path", "default": "/var/www/html"},
+                    "url": {"type": "string", "description": "Site URL (optional)"}
+                },
+                "required": ["host"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "build_bitrix_template",
+            "description": "Create Bitrix template from HTML/CSS: header.php, footer.php, template_styles.css, description.php.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "host": {"type": "string", "description": "Server IP"},
+                    "template_name": {"type": "string", "description": "Template slug name"},
+                    "html_content": {"type": "string", "description": "Full HTML of the site"},
+                    "css_content": {"type": "string", "description": "CSS styles"},
+                    "js_content": {"type": "string", "description": "JavaScript code"},
+                    "install_path": {"type": "string", "description": "Bitrix install path", "default": "/var/www/html"}
+                },
+                "required": ["host", "template_name", "html_content"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "map_bitrix_components",
+            "description": "Map site sections to Bitrix components: news.list, form.result.new, main.include, etc. Returns component_map.json.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "blueprint": {"type": "object", "description": "Site blueprint JSON"}
+                },
+                "required": ["blueprint"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "analyze_bitrix_site",
+            "description": "Reverse-engineer existing Bitrix site: version, edition, template, modules, iblocks, components, forms, custom code.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "host": {"type": "string", "description": "Server IP"},
+                    "install_path": {"type": "string", "description": "Bitrix install path", "default": "/var/www/html"},
+                    "url": {"type": "string", "description": "Site URL"}
+                },
+                "required": ["host"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "publish_bitrix",
+            "description": "Deploy Bitrix site: upload template, configure domain, SSL, clear cache, set permissions.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "host": {"type": "string", "description": "Server IP"},
+                    "domain": {"type": "string", "description": "Domain name"},
+                    "template_name": {"type": "string", "description": "Template name"},
+                    "html_content": {"type": "string", "description": "HTML content"},
+                    "css_content": {"type": "string", "description": "CSS styles"},
+                    "install_path": {"type": "string", "description": "Install path", "default": "/var/www/html"},
+                    "enable_ssl": {"type": "boolean", "description": "Setup SSL", "default": true}
+                },
+                "required": ["host", "domain"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "judge_bitrix_release",
+            "description": "Final judge for Bitrix site release. Checks: installation, admin panel, template, forms, public access, assets, cache, PHP errors, .htaccess. Returns verdict with grade.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": {"type": "string", "description": "Site URL"},
+                    "admin_url": {"type": "string", "description": "Admin panel URL"},
+                    "admin_login": {"type": "string", "description": "Admin login"},
+                    "admin_password": {"type": "string", "description": "Admin password"}
+                },
+                "required": ["url"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "backup_bitrix",
+            "description": "Create backup of Bitrix site: database dump + files archive. Returns backup metadata.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "host": {"type": "string", "description": "Server IP"},
+                    "install_path": {"type": "string", "description": "Bitrix install path", "default": "/var/www/html"},
+                    "label": {"type": "string", "description": "Backup label"}
+                },
+                "required": ["host"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "restore_bitrix",
+            "description": "Restore Bitrix site from backup: database + files. Stops services, restores, clears cache, restarts.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "host": {"type": "string", "description": "Server IP"},
+                    "label": {"type": "string", "description": "Backup label to restore"}
+                },
+                "required": ["host", "label"]
+            }
+        }
+    },
+    # PATCH 13: Universal code_execute tool
     {
         "type": "function",
         "function": {

@@ -456,3 +456,134 @@ def get_system_prompt(orion_mode):
 # ██ AGENT ZONES — зоны ответственности агентов ██
 # ══════════════════════════════════════════════════════════════════
 
+
+
+# ══════════════════════════════════════════════════════════════════
+# ██ WEBSITE PIPELINE RULE — обязательный порядок для сайтов ██
+# ══════════════════════════════════════════════════════════════════
+
+WEBSITE_PIPELINE_RULE = """
+═══ WEBSITE CREATION PIPELINE (обязательный порядок) ═══
+
+При создании ЛЮБОГО сайта/лендинга ОБЯЗАТЕЛЬНО следуй этому порядку:
+
+1. BRIEF → parse_site_brief: Разбери ТЗ в структурированный JSON
+2. BLUEPRINT → build_site_blueprint: Создай структуру сайта (секции, навигация, формы)
+3. DESIGN → plan_site_design: Спланируй визуальный стиль (цвета, шрифты, layout)
+4. CONTENT → generate_site_content: Сгенерируй тексты для каждой секции
+5. BUILD → build_landing: Собери HTML+CSS+JS по blueprint
+6. PUBLISH → publish_site: Задеплой на сервер (nginx + HTTPS)
+7. VERIFY → verify_site: Проверь сайт (mobile, meta, forms, speed)
+8. JUDGE → judge_site_release: Финальная оценка — RELEASE/CONDITIONAL/REWORK/FAIL
+
+ПРАВИЛА:
+- НЕ начинай HTML без blueprint. Сначала blueprint, потом build.
+- НЕ говори "готово" без judge. Всегда запускай judge_site_release.
+- НЕ пропускай шаги. Каждый шаг зависит от предыдущего.
+- Если judge вернул REWORK — исправь и повтори с шага 5.
+- Если judge вернул CONDITIONAL — покажи пользователю список доработок.
+"""
+
+BITRIX_PIPELINE_RULE = """
+═══ BITRIX CREATION PIPELINE (обязательный порядок) ═══
+
+При создании Битрикс-сайта ОБЯЗАТЕЛЬНО следуй этому порядку:
+
+1. BRIEF → parse_site_brief: Разбери ТЗ
+2. BLUEPRINT → build_site_blueprint: Структура сайта
+3. PROVISION → provision_bitrix_server: Подготовь сервер (PHP, MySQL, Apache)
+4. WIZARD → run_bitrix_wizard: Пройди установщик Битрикс
+5. VERIFY_INSTALL → verify_bitrix: Проверь установку
+6. DESIGN → plan_site_design: Визуальный стиль
+7. CONTENT → generate_site_content: Тексты
+8. BUILD → build_landing: Собери HTML
+9. TEMPLATE → build_bitrix_template: Создай шаблон Битрикс из HTML
+10. COMPONENTS → map_bitrix_components: Маппинг секций → компоненты
+11. PUBLISH → publish_bitrix: Деплой (домен, SSL, кеш)
+12. JUDGE → judge_bitrix_release: Финальная оценка
+
+ПРАВИЛА:
+- НЕ начинай без provision. Сервер должен быть готов.
+- НЕ создавай шаблон без HTML. Сначала build_landing, потом template.
+- Перед деплоем ВСЕГДА делай backup_bitrix.
+- Если judge вернул FAIL — исправь и повтори.
+"""
+
+# ══════════════════════════════════════════════════════════════════
+# ██ TASK TYPE CLASSIFIER — определение типа задачи ██
+# ══════════════════════════════════════════════════════════════════
+
+PIPELINE_WEBSITE = "website"
+PIPELINE_BITRIX = "bitrix"
+PIPELINE_GENERAL = "general"
+
+BITRIX_KEYWORDS = [
+    "битрикс", "bitrix", "1с-битрикс", "1c-bitrix",
+    "bitrixsetup", "инфоблок", "iblock",
+]
+
+WEBSITE_KEYWORDS = [
+    "сайт", "лендинг", "landing", "website", "веб-сайт",
+    "корпоративный сайт", "интернет-магазин", "портфолио",
+    "homepage", "web page", "html сайт",
+]
+
+
+def classify_task_type(user_message: str) -> str:
+    """
+    Классифицирует задачу по типу pipeline.
+    Вызывается Nano-классификатором при получении задачи.
+
+    Returns:
+        "bitrix" | "website" | "general"
+    """
+    msg_lower = user_message.lower()
+
+    # Bitrix has priority (more specific)
+    for kw in BITRIX_KEYWORDS:
+        if kw in msg_lower:
+            return PIPELINE_BITRIX
+
+    # Website pipeline
+    for kw in WEBSITE_KEYWORDS:
+        if kw in msg_lower:
+            return PIPELINE_WEBSITE
+
+    return PIPELINE_GENERAL
+
+
+def get_pipeline_prompt(task_type: str) -> str:
+    """Возвращает промпт pipeline для типа задачи."""
+    if task_type == PIPELINE_BITRIX:
+        return BITRIX_PIPELINE_RULE
+    elif task_type == PIPELINE_WEBSITE:
+        return WEBSITE_PIPELINE_RULE
+    return ""
+
+
+# ══════════════════════════════════════════════════════════════════
+# ██ SUCCESS CRITERIA — критерии успеха ██
+# ══════════════════════════════════════════════════════════════════
+
+WEBSITE_SUCCESS_CRITERIA = [
+    "all_sections_present",       # Все секции из blueprint есть в HTML
+    "photos_loaded",              # Все фото загружаются (HTTP 200)
+    "forms_functional",           # Формы отправляются
+    "mobile_responsive",          # viewport meta + media queries
+    "meta_tags_complete",         # title, description, og:title, charset, viewport
+    "load_speed_ok",              # < 3 секунд
+    "no_broken_links",            # Нет 404 ссылок
+    "https_active",               # HTTPS работает
+    "content_matches_brief",      # Контент соответствует ТЗ
+]
+
+BITRIX_SUCCESS_CRITERIA = [
+    "bitrix_installed",           # Битрикс установлен и работает
+    "admin_accessible",           # Админка доступна
+    "template_connected",         # Кастомный шаблон подключён
+    "forms_working",              # Формы через Битрикс модуль
+    "site_public",                # Сайт доступен публично
+    "assets_ok",                  # CSS/JS/изображения загружаются
+    "cache_clean",                # Кеш почищен
+    "no_php_errors",              # Нет PHP ошибок в логах
+]

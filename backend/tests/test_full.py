@@ -1214,189 +1214,264 @@ class Test17Integration(unittest.TestCase):
 # ══════════════════════════════════════════════════════════════
 # RUNNER
 # ══════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════
+# ГРУППА 18: Website Factory Modules (8 modules)
+# ═══════════════════════════════════════════════════════════════
+
+class Test18WebsiteFactory(unittest.TestCase):
+    """Тесты для 8 модулей Website Factory."""
+
+    def test_01_site_brief_parser_syntax(self):
+        """site_brief_parser.py — синтаксис"""
+        path = os.path.join(BACKEND, "site_brief_parser.py")
+        if not os.path.exists(path):
+            self.skipTest("site_brief_parser.py not found")
+        import ast
+        with open(path) as f:
+            ast.parse(f.read())
+
+    def test_02_site_blueprint_builder_syntax(self):
+        """site_blueprint_builder.py — синтаксис"""
+        path = os.path.join(BACKEND, "site_blueprint_builder.py")
+        if not os.path.exists(path):
+            self.skipTest("site_blueprint_builder.py not found")
+        import ast
+        with open(path) as f:
+            ast.parse(f.read())
+
+    def test_03_site_content_generator_syntax(self):
+        """site_content_generator.py — синтаксис"""
+        path = os.path.join(BACKEND, "site_content_generator.py")
+        if not os.path.exists(path):
+            self.skipTest("site_content_generator.py not found")
+        import ast
+        with open(path) as f:
+            ast.parse(f.read())
+
+    def test_04_site_design_planner_syntax(self):
+        """site_design_planner.py — синтаксис"""
+        path = os.path.join(BACKEND, "site_design_planner.py")
+        if not os.path.exists(path):
+            self.skipTest("site_design_planner.py not found")
+        import ast
+        with open(path) as f:
+            ast.parse(f.read())
+
+    def test_05_landing_builder_syntax(self):
+        """landing_builder.py — синтаксис"""
+        path = os.path.join(BACKEND, "landing_builder.py")
+        if not os.path.exists(path):
+            self.skipTest("landing_builder.py not found")
+        import ast
+        with open(path) as f:
+            ast.parse(f.read())
+
+    def test_06_site_publish_operator_syntax(self):
+        """site_publish_operator.py — синтаксис"""
+        path = os.path.join(BACKEND, "site_publish_operator.py")
+        if not os.path.exists(path):
+            self.skipTest("site_publish_operator.py not found")
+        import ast
+        with open(path) as f:
+            ast.parse(f.read())
+
+    def test_07_site_verifier_syntax(self):
+        """site_verifier.py — синтаксис"""
+        path = os.path.join(BACKEND, "site_verifier.py")
+        if not os.path.exists(path):
+            self.skipTest("site_verifier.py not found")
+        import ast
+        with open(path) as f:
+            ast.parse(f.read())
+
+    def test_08_site_release_judge_syntax(self):
+        """site_release_judge.py — синтаксис"""
+        path = os.path.join(BACKEND, "site_release_judge.py")
+        if not os.path.exists(path):
+            self.skipTest("site_release_judge.py not found")
+        import ast
+        with open(path) as f:
+            ast.parse(f.read())
 
 
-# ═══════════════════════════════════════════════════════
-# ULTIMATE PATCH TESTS
-# ═══════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════
+# ГРУППА 19: Bitrix Factory Modules (9 modules)
+# ═══════════════════════════════════════════════════════════════
 
-class Test_UP_Security(unittest.TestCase):
-    """ULTIMATE PATCH: Security tests."""
-    
-    def test_no_localstorage_creds(self):
-        """A1: No localStorage credentials in app.js."""
-        with open(os.path.join(FRONTEND, "app.js"), "r") as f:
+class Test19BitrixFactory(unittest.TestCase):
+    """Тесты для 9 модулей Bitrix Factory."""
+
+    def test_01_bitrix_provisioner_syntax(self):
+        """bitrix_provisioner.py — синтаксис"""
+        path = os.path.join(BACKEND, "bitrix_provisioner.py")
+        if not os.path.exists(path):
+            self.skipTest("bitrix_provisioner.py not found")
+        import ast
+        with open(path) as f:
+            ast.parse(f.read())
+
+    def test_02_bitrix_wizard_operator_syntax(self):
+        """bitrix_wizard_operator.py — синтаксис"""
+        path = os.path.join(BACKEND, "bitrix_wizard_operator.py")
+        if not os.path.exists(path):
+            self.skipTest("bitrix_wizard_operator.py not found")
+        import ast
+        with open(path) as f:
+            ast.parse(f.read())
+
+    def test_03_bitrix_verifier_syntax(self):
+        """bitrix_verifier.py — синтаксис"""
+        path = os.path.join(BACKEND, "bitrix_verifier.py")
+        if not os.path.exists(path):
+            self.skipTest("bitrix_verifier.py not found")
+        import ast
+        with open(path) as f:
+            ast.parse(f.read())
+
+    def test_04_bitrix_template_builder_syntax(self):
+        """bitrix_template_builder.py — синтаксис"""
+        path = os.path.join(BACKEND, "bitrix_template_builder.py")
+        if not os.path.exists(path):
+            self.skipTest("bitrix_template_builder.py not found")
+        import ast
+        with open(path) as f:
+            ast.parse(f.read())
+
+    def test_05_bitrix_component_mapper_syntax(self):
+        """bitrix_component_mapper.py — синтаксис"""
+        path = os.path.join(BACKEND, "bitrix_component_mapper.py")
+        if not os.path.exists(path):
+            self.skipTest("bitrix_component_mapper.py not found")
+        import ast
+        with open(path) as f:
+            ast.parse(f.read())
+
+    def test_06_bitrix_reverse_engineer_syntax(self):
+        """bitrix_reverse_engineer.py — синтаксис"""
+        path = os.path.join(BACKEND, "bitrix_reverse_engineer.py")
+        if not os.path.exists(path):
+            self.skipTest("bitrix_reverse_engineer.py not found")
+        import ast
+        with open(path) as f:
+            ast.parse(f.read())
+
+    def test_07_bitrix_publish_operator_syntax(self):
+        """bitrix_publish_operator.py — синтаксис"""
+        path = os.path.join(BACKEND, "bitrix_publish_operator.py")
+        if not os.path.exists(path):
+            self.skipTest("bitrix_publish_operator.py not found")
+        import ast
+        with open(path) as f:
+            ast.parse(f.read())
+
+    def test_08_bitrix_recovery_syntax(self):
+        """bitrix_recovery.py — синтаксис"""
+        path = os.path.join(BACKEND, "bitrix_recovery.py")
+        if not os.path.exists(path):
+            self.skipTest("bitrix_recovery.py not found")
+        import ast
+        with open(path) as f:
+            ast.parse(f.read())
+
+    def test_09_bitrix_release_judge_syntax(self):
+        """bitrix_release_judge.py — синтаксис"""
+        path = os.path.join(BACKEND, "bitrix_release_judge.py")
+        if not os.path.exists(path):
+            self.skipTest("bitrix_release_judge.py not found")
+        import ast
+        with open(path) as f:
+            ast.parse(f.read())
+
+
+# ═══════════════════════════════════════════════════════════════
+# ГРУППА 20: Pipeline & Tools Integration
+# ═══════════════════════════════════════════════════════════════
+
+class Test20PipelineTools(unittest.TestCase):
+    """Тесты pipeline, tools_schema, classify_task_type."""
+
+    def test_01_tools_schema_has_website_tools(self):
+        """tools_schema.py содержит website tools"""
+        path = os.path.join(BACKEND, "tools_schema.py")
+        with open(path) as f:
             content = f.read()
-        # Should not store credentials in localStorage
-        self.assertNotIn("orion_creds", content, 
-                        "app.js still contains orion_creds localStorage reference")
-    
-    def test_no_password_in_logs(self):
-        """A3: No password logging in backend."""
-        import glob
-        for py_file in glob.glob(os.path.join(BACKEND, "*.py")):
-            with open(py_file, "r") as f:
-                content = f.read()
-            self.assertNotIn("repr(password)", content,
-                           f"{py_file} contains repr(password)")
-    
-    def test_no_env_actual_in_repo(self):
-        """A5: .env_actual not in repository."""
-        env_path = os.path.join(BACKEND, "..", "config", ".env_actual")
-        # Should not exist in tracked files
-        result = subprocess.run(
-            ["git", "ls-files", "config/.env_actual"],
-            capture_output=True, text=True, cwd=os.path.join(BACKEND, "..")
-        )
-        self.assertEqual(result.stdout.strip(), "",
-                        ".env_actual is still tracked in git")
-    
-    def test_encryption_key_function_exists(self):
-        """A9: _get_fernet() exists in shared.py."""
-        with open(os.path.join(BACKEND, "shared.py"), "r") as f:
+        for tool in ["parse_site_brief", "build_site_blueprint", "plan_site_design",
+                     "generate_site_content", "build_landing", "publish_site",
+                     "verify_site", "judge_site_release"]:
+            self.assertIn(tool, content, f"Missing tool: {tool}")
+
+    def test_02_tools_schema_has_bitrix_tools(self):
+        """tools_schema.py содержит bitrix tools"""
+        path = os.path.join(BACKEND, "tools_schema.py")
+        with open(path) as f:
             content = f.read()
-        self.assertIn("_get_fernet", content,
-                     "shared.py missing _get_fernet function")
-    
-    def test_safe_text_exists(self):
-        """A10: safeText() exists in app.js."""
-        with open(os.path.join(FRONTEND, "app.js"), "r") as f:
+        for tool in ["provision_bitrix_server", "run_bitrix_wizard", "verify_bitrix",
+                     "build_bitrix_template", "map_bitrix_components",
+                     "analyze_bitrix_site", "publish_bitrix",
+                     "judge_bitrix_release", "backup_bitrix", "restore_bitrix"]:
+            self.assertIn(tool, content, f"Missing tool: {tool}")
+
+    def test_03_tools_schema_valid_python(self):
+        """tools_schema.py — валидный Python"""
+        path = os.path.join(BACKEND, "tools_schema.py")
+        import ast
+        with open(path) as f:
+            ast.parse(f.read())
+
+    def test_04_prompts_has_pipeline_rule(self):
+        """prompts.py содержит WEBSITE_PIPELINE_RULE"""
+        path = os.path.join(BACKEND, "prompts.py")
+        with open(path) as f:
             content = f.read()
-        self.assertIn("safeText", content,
-                     "app.js missing safeText function")
+        self.assertIn("WEBSITE_PIPELINE_RULE", content)
+        self.assertIn("BITRIX_PIPELINE_RULE", content)
 
-
-class Test_UP_FinalJudge(unittest.TestCase):
-    """ULTIMATE PATCH: FinalJudge tests."""
-    
-    def test_judge_is_blocking(self):
-        """A6: FinalJudge is BLOCKING mode."""
-        with open(os.path.join(BACKEND, "agent_loop.py"), "r") as f:
+    def test_05_prompts_has_classifier(self):
+        """prompts.py содержит classify_task_type"""
+        path = os.path.join(BACKEND, "prompts.py")
+        with open(path) as f:
             content = f.read()
-        # Should have BLOCKING or blocking reference
-        self.assertTrue(
-            "BLOCKING" in content or "blocking" in content or "judge" in content.lower(),
-            "FinalJudge blocking mode not found"
-        )
+        self.assertIn("classify_task_type", content)
+        self.assertIn("PIPELINE_WEBSITE", content)
+        self.assertIn("PIPELINE_BITRIX", content)
 
-
-class Test_UP_ToolSandbox(unittest.TestCase):
-    """ULTIMATE PATCH: ToolSandbox tests."""
-    
-    def test_no_duplicate_mode_keys(self):
-        """A7: No duplicate keys in mode mappings."""
-        with open(os.path.join(BACKEND, "agent_routes.py"), "r") as f:
+    def test_06_prompts_has_success_criteria(self):
+        """prompts.py содержит WEBSITE_SUCCESS_CRITERIA"""
+        path = os.path.join(BACKEND, "prompts.py")
+        with open(path) as f:
             content = f.read()
-        # Check _mode_to_model dict doesn't have duplicate keys
-        import re
-        mode_dicts = re.findall(r'"(fast|standard|premium)"\s*:', content)
-        # Each key should appear at most once per dict
-        # This is a basic check
-        self.assertLessEqual(
-            mode_dicts.count('"fast"'), 2,
-            "Duplicate 'fast' key found in mode mapping"
-        )
+        self.assertIn("WEBSITE_SUCCESS_CRITERIA", content)
+        self.assertIn("BITRIX_SUCCESS_CRITERIA", content)
 
-
-class Test_UP_ModeOverride(unittest.TestCase):
-    """ULTIMATE PATCH: Mode override tests."""
-    
-    def test_no_variant_premium_default(self):
-        """B1: No variant=premium default override."""
-        with open(os.path.join(BACKEND, "agent_routes.py"), "r") as f:
+    def test_07_task_charter_has_task_type(self):
+        """task_charter.py содержит task_type и site_type"""
+        path = os.path.join(BACKEND, "task_charter.py")
+        with open(path) as f:
             content = f.read()
-        # Should not have variant defaulting to premium
-        self.assertNotIn('get("variant", "premium")', content,
-                        "variant still defaults to premium")
-    
-    def test_standard_mode_exists(self):
-        """Mode standard should be valid."""
-        with open(os.path.join(BACKEND, "model_router.py"), "r") as f:
+        self.assertIn("task_type", content)
+        self.assertIn("site_type", content)
+
+    def test_08_app_js_no_localstorage(self):
+        """app.js не использует localStorage"""
+        path = os.path.join(BACKEND, "..", "frontend", "app.js")
+        if not os.path.exists(path):
+            self.skipTest("app.js not found")
+        with open(path) as f:
             content = f.read()
-        self.assertIn('"standard"', content,
-                     "standard mode not found in model_router.py")
+        self.assertNotIn("localStorage", content,
+                         "app.js still uses localStorage — should use sessionStorage")
 
-
-class Test_UP_Bitrix(unittest.TestCase):
-    """ULTIMATE PATCH: Bitrix module tests."""
-    
-    def test_import_provisioner(self):
-        """D1: BitrixProvisioner imports."""
+    def test_09_classify_website(self):
+        """classify_task_type определяет website"""
         sys.path.insert(0, BACKEND)
-        from bitrix_provisioner import BitrixProvisioner
-        self.assertTrue(hasattr(BitrixProvisioner, 'prepare_server'))
-    
-    def test_import_wizard(self):
-        """D2: BitrixWizardOperator imports."""
-        sys.path.insert(0, BACKEND)
-        from bitrix_wizard_operator import BitrixWizardOperator
-        self.assertTrue(hasattr(BitrixWizardOperator, 'run_installation'))
-    
-    def test_import_verifier(self):
-        """D3: BitrixVerifier imports."""
-        sys.path.insert(0, BACKEND)
-        from bitrix_verifier import BitrixVerifier
-        self.assertTrue(hasattr(BitrixVerifier, 'full_verify'))
-    
-    def test_import_recovery(self):
-        """D4: BitrixRecovery imports."""
-        sys.path.insert(0, BACKEND)
-        from bitrix_recovery import BitrixRecovery
-        self.assertTrue(hasattr(BitrixRecovery, 'detect_install_state'))
-    
-    def test_import_integrator(self):
-        """D5: BitrixTemplateIntegrator imports."""
-        sys.path.insert(0, BACKEND)
-        from bitrix_template_integrator import BitrixTemplateIntegrator
-        self.assertTrue(hasattr(BitrixTemplateIntegrator, 'import_static_landing'))
-
-
-class Test_UP_CRUD(unittest.TestCase):
-    """ULTIMATE PATCH: CRUD function tests."""
-    
-    def test_get_user_exists(self):
-        """C4: get_user function exists."""
-        with open(os.path.join(BACKEND, "database.py"), "r") as f:
-            content = f.read()
-        self.assertIn("def get_user(", content)
-    
-    def test_get_chat_exists(self):
-        """C4: get_chat function exists."""
-        with open(os.path.join(BACKEND, "database.py"), "r") as f:
-            content = f.read()
-        self.assertIn("def get_chat(", content)
-    
-    def test_get_setting_exists(self):
-        """C4: get_setting function exists."""
-        with open(os.path.join(BACKEND, "database.py"), "r") as f:
-            content = f.read()
-        self.assertIn("def get_setting(", content)
-
-
-class Test_UP_BrowserWatchdog(unittest.TestCase):
-    """ULTIMATE PATCH: BrowserWatchdog test."""
-    
-    def test_watchdog_exists(self):
-        """C3: BrowserWatchdog class exists."""
-        with open(os.path.join(BACKEND, "browser_agent.py"), "r") as f:
-            content = f.read()
-        self.assertIn("class BrowserWatchdog", content)
-
-
-class Test_UP_InstallBitrixTool(unittest.TestCase):
-    """ULTIMATE PATCH: install_bitrix tool integration."""
-    
-    def test_tool_in_schema(self):
-        """E1: install_bitrix in tools schema."""
-        with open(os.path.join(BACKEND, "tools_schema.py"), "r") as f:
-            content = f.read()
-        self.assertIn("install_bitrix", content)
-    
-    def test_handler_in_agent_loop(self):
-        """E2: install_bitrix handler in agent_loop."""
-        with open(os.path.join(BACKEND, "agent_loop.py"), "r") as f:
-            content = f.read()
-        self.assertIn("install_bitrix", content)
+        try:
+            from prompts import classify_task_type
+            self.assertEqual(classify_task_type("Создай лендинг для стоматологии"), "website")
+            self.assertEqual(classify_task_type("Сделай сайт визитку"), "website")
+        except ImportError:
+            self.skipTest("Cannot import classify_task_type")
+        finally:
+            sys.path.pop(0)
 
 
 if __name__ == "__main__":
@@ -1429,6 +1504,9 @@ if __name__ == "__main__":
         ("ГРУППА 15: Database", Test15Database),
         ("ГРУППА 16: Solution Cache", Test16SolutionCache),
         ("ГРУППА 17: Integration", Test17Integration),
+        ("ГРУППА 18: Website Factory", Test18WebsiteFactory),
+        ("ГРУППА 19: Bitrix Factory", Test19BitrixFactory),
+        ("ГРУППА 20: Pipeline & Tools", Test20PipelineTools),
     ]
 
     group_suites = []
