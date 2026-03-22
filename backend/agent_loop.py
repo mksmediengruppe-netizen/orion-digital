@@ -4708,6 +4708,83 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);
                             "actions": result.get("actions", [])
                         })
 
+
+                    elif tool_name == "install_bitrix":
+
+                        from bitrix_provisioner import BitrixProvisioner
+
+                        from bitrix_wizard_operator import BitrixWizardOperator
+
+                        from bitrix_verifier import BitrixVerifier
+
+                        provisioner = BitrixProvisioner(self._ssh)
+
+                        config = {
+
+                            "server": self._server_config,
+
+                            "install_path": args.get("install_path"),
+
+                            "db_name": args.get("db_name"),
+
+                            "db_user": args.get("db_user"),
+
+                            "db_password": args.get("db_password"),
+
+                            "site_url": f"http://{args.get('server_host')}"
+
+                        }
+
+                        prep = provisioner.prepare_server(config)
+
+                        if not prep.get("ready"):
+
+                            result = {"success": False, "error": prep.get("errors")}
+
+                        else:
+
+                            wizard = BitrixWizardOperator(self._browser, self._snapshot_store)
+
+                            wizard_result = wizard.run_installation(
+
+                                prep["install_url"],
+
+                                {
+
+                                    "db": {"host": "localhost", "name": args.get("db_name"),
+
+                                           "user": args.get("db_user"), "password": args.get("db_password")},
+
+                                    "admin": {"login": args.get("admin_login", "admin"),
+
+                                              "email": args.get("admin_email"),
+
+                                              "password": args.get("admin_password")}
+
+                                }
+
+                            )
+
+                            if wizard_result.get("success"):
+
+                                verifier = BitrixVerifier(self._ssh, self._browser)
+
+                                verify = verifier.full_verify(config)
+
+                                result = {
+
+                                    "success": verify.get("score", 0) >= 6,
+
+                                    "wizard": wizard_result,
+
+                                    "verification": verify
+
+                                }
+
+                            else:
+
+                                result = {"success": False, "wizard": wizard_result}
+
                     elif event["type"] == "text_complete":
                         break
             except Exception as e:

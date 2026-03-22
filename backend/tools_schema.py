@@ -5,6 +5,25 @@ Extracted from agent_loop.py (TASK 7).
 
 TOOLS_SCHEMA = [
     {
+        "name": "install_bitrix",
+        "description": "Install 1C-Bitrix CMS on a server. Prepares the server, runs the installation wizard, and verifies the result.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "server_host": {"type": "string", "description": "Server IP or domain"},
+                "install_path": {"type": "string", "description": "Installation path, e.g. /var/www/html/site"},
+                "db_name": {"type": "string", "description": "Database name"},
+                "db_user": {"type": "string", "description": "Database user"},
+                "db_password": {"type": "string", "description": "Database password"},
+                "admin_login": {"type": "string", "description": "Bitrix admin login"},
+                "admin_email": {"type": "string", "description": "Admin email"},
+                "admin_password": {"type": "string", "description": "Admin password"},
+                "use_demo": {"type": "boolean", "description": "Install demo data"}
+            },
+            "required": ["server_host", "install_path", "db_name", "db_user", "db_password"]
+        }
+    },
+    {
         "type": "function",
         "function": {
             "name": "ssh_execute",
