@@ -5,6 +5,80 @@ Extracted from agent_loop.py (TASK 7).
 
 TOOLS_SCHEMA = [
     {
+        "name": "generate_site_content",
+        "description": "Generate all text content for a website from blueprint. Returns sections text, meta tags, FAQ, reviews, privacy policy.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "blueprint": {"type": "string", "description": "Blueprint JSON or ID"}
+            },
+            "required": ["blueprint"]
+        }
+    },
+    {
+        "name": "final_site_judge",
+        "description": "Specialized judge for websites. Checks sections, photos, forms, mobile, speed, meta tags, design compliance.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "site_url": {"type": "string", "description": "URL of the deployed site"},
+                "blueprint": {"type": "string", "description": "Blueprint JSON for comparison"}
+            },
+            "required": ["site_url"]
+        }
+    },
+    {
+        "name": "bitrix_reverse_engineer",
+        "description": "Analyze existing Bitrix site. Determines version, template, components, modules.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "site_url": {"type": "string"},
+                "install_path": {"type": "string"},
+                "server_host": {"type": "string"}
+            },
+            "required": ["install_path", "server_host"]
+        }
+    },
+    {
+        "name": "bitrix_build_template",
+        "description": "Build Bitrix template from HTML. Splits into header.php, footer.php, template_styles.css, registers template.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "html_path": {"type": "string", "description": "Path to source HTML on server"},
+                "install_path": {"type": "string", "description": "Bitrix installation path"},
+                "server_host": {"type": "string"}
+            },
+            "required": ["html_path", "install_path", "server_host"]
+        }
+    },
+    {
+        "name": "bitrix_map_components",
+        "description": "Map HTML sections to Bitrix components. Forms, sliders, FAQ, maps, galleries.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "blueprint": {"type": "string"},
+                "install_path": {"type": "string"},
+                "server_host": {"type": "string"}
+            },
+            "required": ["blueprint", "install_path", "server_host"]
+        }
+    },
+    {
+        "name": "bitrix_publish",
+        "description": "Publish and finalize Bitrix site. Clears cache, removes setup files, sets permissions, verifies.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "install_path": {"type": "string"},
+                "server_host": {"type": "string"}
+            },
+            "required": ["install_path", "server_host"]
+        }
+    },
+    {
         "name": "create_site_blueprint",
         "description": "Create a site structure from brief. Call BEFORE writing code. Returns JSON blueprint with sections, photos, forms, design.",
         "parameters": {

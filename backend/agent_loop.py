@@ -5813,6 +5813,46 @@ class MultiAgentLoop(AgentLoop):
 
 
 
+
+# ═══ PIPELINE DEFINITIONS (ULTIMATE PATCH I1) ═══
+
+PIPELINE_WEBSITE = [
+    {"step": "classify", "agent": "gpt54_nano", "action": "classify_task"},
+    {"step": "blueprint", "agent": "gpt54", "action": "create_site_blueprint"},
+    {"step": "design", "agent": "gemini_flash", "action": "design_layout"},
+    {"step": "content", "agent": "gpt54_mini", "action": "generate_site_content"},
+    {"step": "build", "agent": "gpt54_mini", "action": "build_html_css_js"},
+    {"step": "photos", "agent": "gpt54_mini", "action": "generate_photos"},
+    {"step": "deploy", "agent": "mimo", "action": "deploy_site"},
+    {"step": "verify", "agent": "mimo", "action": "check_site_health"},
+    {"step": "judge", "agent": "sonnet", "action": "final_site_judge"}
+]
+
+PIPELINE_BITRIX = [
+    {"step": "classify", "agent": "gpt54_nano", "action": "classify_task"},
+    {"step": "blueprint", "agent": "gpt54", "action": "create_bitrix_blueprint"},
+    {"step": "design", "agent": "gemini_flash", "action": "design_sections"},
+    {"step": "content", "agent": "gpt54_mini", "action": "generate_site_content"},
+    {"step": "provision", "agent": "mimo", "action": "bitrix_provision_server"},
+    {"step": "wizard", "agent": "mimo", "action": "bitrix_run_wizard"},
+    {"step": "template", "agent": "gpt54_mini", "action": "bitrix_build_template"},
+    {"step": "components", "agent": "gpt54_mini", "action": "bitrix_map_components"},
+    {"step": "publish", "agent": "mimo", "action": "bitrix_publish"},
+    {"step": "verify", "agent": "mimo", "action": "bitrix_verify"},
+    {"step": "judge", "agent": "sonnet", "action": "final_site_judge"}
+]
+
+
+def select_pipeline(brief_text: str) -> list:
+    """Select pipeline based on brief content.
+    Nano classifies on first step, but we can pre-select here."""
+    brief_lower = brief_text.lower()
+    bitrix_keywords = ["bitrix", "\u0431\u0438\u0442\u0440\u0438\u043a\u0441", "cms", "1\u0441-\u0431\u0438\u0442\u0440\u0438\u043a\u0441", "1c-bitrix"]
+    if any(kw in brief_lower for kw in bitrix_keywords):
+        return PIPELINE_BITRIX
+    return PIPELINE_WEBSITE
+
+
 # ═══ MODULE-LEVEL UTILITIES (ULTIMATE PATCH) ═══
 
 # SITE BLUEPRINT RULE (ULTIMATE PATCH H4)
