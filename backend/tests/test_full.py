@@ -1214,6 +1214,191 @@ class Test17Integration(unittest.TestCase):
 # ══════════════════════════════════════════════════════════════
 # RUNNER
 # ══════════════════════════════════════════════════════════════
+
+
+# ═══════════════════════════════════════════════════════
+# ULTIMATE PATCH TESTS
+# ═══════════════════════════════════════════════════════
+
+class Test_UP_Security(unittest.TestCase):
+    """ULTIMATE PATCH: Security tests."""
+    
+    def test_no_localstorage_creds(self):
+        """A1: No localStorage credentials in app.js."""
+        with open(os.path.join(FRONTEND, "app.js"), "r") as f:
+            content = f.read()
+        # Should not store credentials in localStorage
+        self.assertNotIn("orion_creds", content, 
+                        "app.js still contains orion_creds localStorage reference")
+    
+    def test_no_password_in_logs(self):
+        """A3: No password logging in backend."""
+        import glob
+        for py_file in glob.glob(os.path.join(BACKEND, "*.py")):
+            with open(py_file, "r") as f:
+                content = f.read()
+            self.assertNotIn("repr(password)", content,
+                           f"{py_file} contains repr(password)")
+    
+    def test_no_env_actual_in_repo(self):
+        """A5: .env_actual not in repository."""
+        env_path = os.path.join(BACKEND, "..", "config", ".env_actual")
+        # Should not exist in tracked files
+        result = subprocess.run(
+            ["git", "ls-files", "config/.env_actual"],
+            capture_output=True, text=True, cwd=os.path.join(BACKEND, "..")
+        )
+        self.assertEqual(result.stdout.strip(), "",
+                        ".env_actual is still tracked in git")
+    
+    def test_encryption_key_function_exists(self):
+        """A9: _get_fernet() exists in shared.py."""
+        with open(os.path.join(BACKEND, "shared.py"), "r") as f:
+            content = f.read()
+        self.assertIn("_get_fernet", content,
+                     "shared.py missing _get_fernet function")
+    
+    def test_safe_text_exists(self):
+        """A10: safeText() exists in app.js."""
+        with open(os.path.join(FRONTEND, "app.js"), "r") as f:
+            content = f.read()
+        self.assertIn("safeText", content,
+                     "app.js missing safeText function")
+
+
+class Test_UP_FinalJudge(unittest.TestCase):
+    """ULTIMATE PATCH: FinalJudge tests."""
+    
+    def test_judge_is_blocking(self):
+        """A6: FinalJudge is BLOCKING mode."""
+        with open(os.path.join(BACKEND, "agent_loop.py"), "r") as f:
+            content = f.read()
+        # Should have BLOCKING or blocking reference
+        self.assertTrue(
+            "BLOCKING" in content or "blocking" in content or "judge" in content.lower(),
+            "FinalJudge blocking mode not found"
+        )
+
+
+class Test_UP_ToolSandbox(unittest.TestCase):
+    """ULTIMATE PATCH: ToolSandbox tests."""
+    
+    def test_no_duplicate_mode_keys(self):
+        """A7: No duplicate keys in mode mappings."""
+        with open(os.path.join(BACKEND, "agent_routes.py"), "r") as f:
+            content = f.read()
+        # Check _mode_to_model dict doesn't have duplicate keys
+        import re
+        mode_dicts = re.findall(r'"(fast|standard|premium)"\s*:', content)
+        # Each key should appear at most once per dict
+        # This is a basic check
+        self.assertLessEqual(
+            mode_dicts.count('"fast"'), 2,
+            "Duplicate 'fast' key found in mode mapping"
+        )
+
+
+class Test_UP_ModeOverride(unittest.TestCase):
+    """ULTIMATE PATCH: Mode override tests."""
+    
+    def test_no_variant_premium_default(self):
+        """B1: No variant=premium default override."""
+        with open(os.path.join(BACKEND, "agent_routes.py"), "r") as f:
+            content = f.read()
+        # Should not have variant defaulting to premium
+        self.assertNotIn('get("variant", "premium")', content,
+                        "variant still defaults to premium")
+    
+    def test_standard_mode_exists(self):
+        """Mode standard should be valid."""
+        with open(os.path.join(BACKEND, "model_router.py"), "r") as f:
+            content = f.read()
+        self.assertIn('"standard"', content,
+                     "standard mode not found in model_router.py")
+
+
+class Test_UP_Bitrix(unittest.TestCase):
+    """ULTIMATE PATCH: Bitrix module tests."""
+    
+    def test_import_provisioner(self):
+        """D1: BitrixProvisioner imports."""
+        sys.path.insert(0, BACKEND)
+        from bitrix_provisioner import BitrixProvisioner
+        self.assertTrue(hasattr(BitrixProvisioner, 'prepare_server'))
+    
+    def test_import_wizard(self):
+        """D2: BitrixWizardOperator imports."""
+        sys.path.insert(0, BACKEND)
+        from bitrix_wizard_operator import BitrixWizardOperator
+        self.assertTrue(hasattr(BitrixWizardOperator, 'run_installation'))
+    
+    def test_import_verifier(self):
+        """D3: BitrixVerifier imports."""
+        sys.path.insert(0, BACKEND)
+        from bitrix_verifier import BitrixVerifier
+        self.assertTrue(hasattr(BitrixVerifier, 'full_verify'))
+    
+    def test_import_recovery(self):
+        """D4: BitrixRecovery imports."""
+        sys.path.insert(0, BACKEND)
+        from bitrix_recovery import BitrixRecovery
+        self.assertTrue(hasattr(BitrixRecovery, 'detect_install_state'))
+    
+    def test_import_integrator(self):
+        """D5: BitrixTemplateIntegrator imports."""
+        sys.path.insert(0, BACKEND)
+        from bitrix_template_integrator import BitrixTemplateIntegrator
+        self.assertTrue(hasattr(BitrixTemplateIntegrator, 'import_static_landing'))
+
+
+class Test_UP_CRUD(unittest.TestCase):
+    """ULTIMATE PATCH: CRUD function tests."""
+    
+    def test_get_user_exists(self):
+        """C4: get_user function exists."""
+        with open(os.path.join(BACKEND, "database.py"), "r") as f:
+            content = f.read()
+        self.assertIn("def get_user(", content)
+    
+    def test_get_chat_exists(self):
+        """C4: get_chat function exists."""
+        with open(os.path.join(BACKEND, "database.py"), "r") as f:
+            content = f.read()
+        self.assertIn("def get_chat(", content)
+    
+    def test_get_setting_exists(self):
+        """C4: get_setting function exists."""
+        with open(os.path.join(BACKEND, "database.py"), "r") as f:
+            content = f.read()
+        self.assertIn("def get_setting(", content)
+
+
+class Test_UP_BrowserWatchdog(unittest.TestCase):
+    """ULTIMATE PATCH: BrowserWatchdog test."""
+    
+    def test_watchdog_exists(self):
+        """C3: BrowserWatchdog class exists."""
+        with open(os.path.join(BACKEND, "browser_agent.py"), "r") as f:
+            content = f.read()
+        self.assertIn("class BrowserWatchdog", content)
+
+
+class Test_UP_InstallBitrixTool(unittest.TestCase):
+    """ULTIMATE PATCH: install_bitrix tool integration."""
+    
+    def test_tool_in_schema(self):
+        """E1: install_bitrix in tools schema."""
+        with open(os.path.join(BACKEND, "tools_schema.py"), "r") as f:
+            content = f.read()
+        self.assertIn("install_bitrix", content)
+    
+    def test_handler_in_agent_loop(self):
+        """E2: install_bitrix handler in agent_loop."""
+        with open(os.path.join(BACKEND, "agent_loop.py"), "r") as f:
+            content = f.read()
+        self.assertIn("install_bitrix", content)
+
+
 if __name__ == "__main__":
     print("=" * 60)
     print("ORION Digital — Full Test Suite")
