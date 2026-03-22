@@ -79,6 +79,8 @@ class TaskCharterStore:
                 -- Метаданные
                 total_iterations INTEGER DEFAULT 0,
                 total_cost REAL DEFAULT 0.0,
+                task_type TEXT DEFAULT 'general',
+                site_type TEXT DEFAULT '',
                 created_at REAL,
                 updated_at REAL
             )
@@ -111,7 +113,9 @@ class TaskCharterStore:
                constraints: List[str] = None,
                deliverables: List[str] = None,
                done_definition: str = "",
-               project_id: str = "") -> Dict:
+               project_id: str = "",
+               task_type: str = "general",
+               site_type: str = "") -> Dict:
         """
         Создать новый Charter для задачи.
         
@@ -145,6 +149,8 @@ class TaskCharterStore:
             "amendments": [],
             "total_iterations": 0,
             "total_cost": 0.0,
+            "task_type": task_type,
+            "site_type": site_type,
             "created_at": now,
             "updated_at": now
         }
@@ -161,8 +167,9 @@ class TaskCharterStore:
                     completed_steps_json, failed_steps_json,
                     amendments_json,
                     total_iterations, total_cost,
+                    task_type, site_type,
                     created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 task_id, chat_id, project_id, 1, "active",
                 objective, objective,
@@ -171,7 +178,7 @@ class TaskCharterStore:
                 json.dumps(deliverables or [], ensure_ascii=False),
                 done_definition,
                 "[]", "", "[]", "[]", "[]",
-                0, 0.0, now, now
+                0, 0.0, task_type, site_type, now, now
             ))
             conn.commit()
             logger.info(f"Charter created: {task_id} | {objective[:80]}")
@@ -250,7 +257,8 @@ class TaskCharterStore:
 
         # Простые текстовые поля
         for field in ["current_objective", "done_definition", "status",
-                       "current_step_id", "project_id"]:
+                       "current_step_id", "project_id",
+                       "task_type", "site_type"]:
             if field in patch:
                 sets.append(f"{field} = ?")
                 vals.append(patch[field])
@@ -414,6 +422,14 @@ class TaskCharterStore:
         parts.append("═══ TASK CHARTER (источник истины) ═══")
         parts.append(f"Цель: {charter['current_objective']}")
 
+        # Pipeline type
+        task_type = charter.get("task_type", "general")
+        if task_type != "general":
+            parts.append(f"Тип задачи: {task_type.upper()}")
+        site_type = charter.get("site_type", "")
+        if site_type:
+            parts.append(f"Тип сайта: {site_type}")
+
         if charter.get("primary_objective") != charter.get("current_objective"):
             parts.append(f"Исходная цель: {charter['primary_objective']}")
 
@@ -517,7 +533,7 @@ class TaskCharterStore:
 
     def _row_to_dict(self, row) -> Dict:
         """Конвертировать строку SQLite в dict."""
-        return {
+        d = {
             "task_id": row[0],
             "chat_id": row[1],
             "project_id": row[2],
@@ -536,6 +552,16 @@ class TaskCharterStore:
             "amendments": json.loads(row[15]) if row[15] else [],
             "total_iterations": row[16],
             "total_cost": row[17],
-            "created_at": row[18],
-            "updated_at": row[19]
         }
+        # New fields (task_type, site_type) — handle both old and new schema
+        if len(row) > 20:
+            d["task_type"] = row[18] or "general"
+            d["site_type"] = row[19] or ""
+            d["created_at"] = row[20]
+            d["updated_at"] = row[21]
+        else:
+            d["task_type"] = "general"
+            d["site_type"] = ""
+            d["created_at"] = row[18]
+            d["updated_at"] = row[19]
+        return d

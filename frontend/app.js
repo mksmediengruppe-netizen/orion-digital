@@ -211,7 +211,7 @@ const API = {
         if (res.status === 401) {
             // BUG-12v4: Cache chats IMMEDIATELY before any logout
             if (state.chats && state.chats.length) {
-                try { localStorage.setItem('orion_chats_cache', JSON.stringify(state.chats)); } catch(e) {}
+                try { sessionStorage.setItem('orion_chats_cache', JSON.stringify(state.chats)); } catch(e) {}
             }
             // Try silent re-login before logout
             const reloginOk = await Auth.silentRelogin();
@@ -262,8 +262,8 @@ const API = {
 /* ── AUTH ─────────────────────────────────────────────────── */
 const Auth = {
     init() {
-        const token = localStorage.getItem('orion_token');
-        const user = localStorage.getItem('orion_user');
+        const token = sessionStorage.getItem('orion_token');
+        const user = sessionStorage.getItem('orion_user');
         if (token && user) {
             state.token = token;
             state.user = JSON.parse(user);
@@ -303,13 +303,13 @@ const Auth = {
         try {
             const data = await API.login(username, password);
             state.token = data.access_token;
-            localStorage.setItem('orion_token', data.access_token);
+            sessionStorage.setItem('orion_token', data.access_token);
             // BUG-12v2: Save creds for silent re-login after server restart
-            localStorage.setItem('orion_creds', JSON.stringify({ email: username, password }));
+            sessionStorage.setItem('orion_creds', JSON.stringify({ email: username, password }));
 
             const me = await API.get('/auth/me');
             state.user = me;
-            localStorage.setItem('orion_user', JSON.stringify(me));
+            sessionStorage.setItem('orion_user', JSON.stringify(me));
 
             this.onLogin();
         } catch (err) {
@@ -328,7 +328,7 @@ const Auth = {
             if (state.user.total_spent !== undefined) state.totalCost = state.user.total_spent;
         }
         // BUG-12v4: Restore cached chats immediately (before API loads)
-        const cachedChats = localStorage.getItem('orion_chats_cache');
+        const cachedChats = sessionStorage.getItem('orion_chats_cache');
         if (cachedChats) {
             try {
                 const parsed = JSON.parse(cachedChats);
@@ -350,13 +350,13 @@ const Auth = {
 
     // BUG-12v2: Silent re-login when session expired (server restart)
     async silentRelogin() {
-        const savedCreds = localStorage.getItem('orion_creds');
+        const savedCreds = sessionStorage.getItem('orion_creds');
         if (!savedCreds) return false;
         try {
             const { email, password } = JSON.parse(savedCreds);
             const data = await API.login(email, password);
             state.token = data.access_token;
-            localStorage.setItem('orion_token', data.access_token);
+            sessionStorage.setItem('orion_token', data.access_token);
             console.log('BUG-12v2: Silent re-login successful');
             return true;
         } catch (e) {
@@ -365,21 +365,21 @@ const Auth = {
         }
     },
 
-    // BUG-12v2: Soft logout — save chats to localStorage, show login
+    // BUG-12v2: Soft logout — save chats to sessionStorage, show login
     softLogout() {
         // BUG-12v4: Always cache chats before any state changes
         if (state.chats && state.chats.length) {
-            try { localStorage.setItem('orion_chats_cache', JSON.stringify(state.chats)); } catch(e) {}
+            try { sessionStorage.setItem('orion_chats_cache', JSON.stringify(state.chats)); } catch(e) {}
             console.log('BUG-12v4: Cached', state.chats.length, 'chats before softLogout');
         }
         state.token = null;
         state.user = null;
         // DON'T clear state.chats — keep them for immediate display after re-login
-        localStorage.removeItem('orion_token');
+        sessionStorage.removeItem('orion_token');
         // Don't remove orion_user — needed for re-login
         this.showAuthScreen();
         // BUG-12v4: Pre-fill login if we have saved creds
-        const savedCreds = localStorage.getItem('orion_creds');
+        const savedCreds = sessionStorage.getItem('orion_creds');
         if (savedCreds) {
             try {
                 const { email } = JSON.parse(savedCreds);
@@ -394,11 +394,11 @@ const Auth = {
     logout() {
         // Save chats cache before full logout
         if (state.chats.length) {
-            localStorage.setItem('orion_chats_cache', JSON.stringify(state.chats));
+            sessionStorage.setItem('orion_chats_cache', JSON.stringify(state.chats));
         }
         // BUG-12v3: Always cache chats before clearing
         if (state.chats && state.chats.length) {
-            try { localStorage.setItem('orion_chats_cache', JSON.stringify(state.chats)); } catch(e) {}
+            try { sessionStorage.setItem('orion_chats_cache', JSON.stringify(state.chats)); } catch(e) {}
         }
         state.token = null;
         state.user = null;
@@ -406,9 +406,9 @@ const Auth = {
         // state.chats = [];  
         state.currentChatId = null;
         state.messages = [];
-        localStorage.removeItem('orion_token');
-        localStorage.removeItem('orion_user');
-        localStorage.removeItem('orion_theme');
+        sessionStorage.removeItem('orion_token');
+        sessionStorage.removeItem('orion_user');
+        sessionStorage.removeItem('orion_theme');
         // Keep orion_creds and orion_chats_cache
         Theme.set('light');
         this.showAuthScreen();
@@ -421,11 +421,11 @@ const Auth = {
 const Theme = {
     init() {
         // One-time migration: reset dark theme preference
-        if (!localStorage.getItem('orion_theme_v2')) {
-            localStorage.removeItem('orion_theme');
-            localStorage.setItem('orion_theme_v2', '1');
+        if (!sessionStorage.getItem('orion_theme_v2')) {
+            sessionStorage.removeItem('orion_theme');
+            sessionStorage.setItem('orion_theme_v2', '1');
         }
-        const saved = localStorage.getItem('orion_theme');
+        const saved = sessionStorage.getItem('orion_theme');
         const theme = saved || 'light';
         this.set(theme);
     },
@@ -435,7 +435,7 @@ const Theme = {
     set(theme) {
         state.theme = theme;
         document.documentElement.setAttribute('data-theme', theme);
-        localStorage.setItem('orion_theme', theme);
+        sessionStorage.setItem('orion_theme', theme);
         const btn = $('btn-theme');
         if (btn) btn.textContent = theme === 'dark' ? '☀️' : '🌙';
         // Toggle highlight.js theme
@@ -447,9 +447,9 @@ const Theme = {
 /* ── UI INIT ──────────────────────────────────────────────── */
 const UI = {
     init() {
-        // ПАТЧ W1-1: Восстановить режим из localStorage
+        // ПАТЧ W1-1: Восстановить режим из sessionStorage
         try {
-            const savedMode = localStorage.getItem('orion_mode');
+            const savedMode = sessionStorage.getItem('orion_mode');
             if (savedMode && ['turbo_basic', 'turbo-basic', 'turbo_standard', 'turbo_premium', 'pro_basic', 'pro-basic', 'pro_standard', 'pro_premium', 'architect', 'smart_turbo'].includes(savedMode)) {
                 state.mode = savedMode;
             }
@@ -531,12 +531,12 @@ const UI = {
         toggle.addEventListener('click', () => {
             state.premiumDesign = !state.premiumDesign;
             toggle.classList.toggle('active', state.premiumDesign);
-            try { localStorage.setItem('orion_premium_design', state.premiumDesign ? '1' : '0'); } catch(e) {}
+            try { sessionStorage.setItem('orion_premium_design', state.premiumDesign ? '1' : '0'); } catch(e) {}
             Toast.show(state.premiumDesign ? '✨ Premium Design включён — Opus + самокритика' : 'Premium Design выключен', 'info');
         });
-        // Restore from localStorage
+        // Restore from sessionStorage
         try {
-            if (localStorage.getItem('orion_premium_design') === '1') {
+            if (sessionStorage.getItem('orion_premium_design') === '1') {
                 state.premiumDesign = true;
                 toggle.classList.add('active');
             }
@@ -563,7 +563,7 @@ const UI = {
 
     setMode(key) {
         state.mode = key;
-        try { localStorage.setItem('orion_mode', key); } catch(e) {}
+        try { sessionStorage.setItem('orion_mode', key); } catch(e) {}
         $$('.mode-btn').forEach(b => b.classList.toggle('active', b.dataset.mode === key));
         this.updateModeDesc();
         this.updateFooterInfo();
@@ -1030,8 +1030,8 @@ const ChatList = {
                 state.chats = _prevChats;
                 console.log('BUG-12v4: API returned 0 chats, keeping', _prevChats.length, 'from state');
             } else {
-                // Try restore from localStorage cache
-                const cached = localStorage.getItem('orion_chats_cache');
+                // Try restore from sessionStorage cache
+                const cached = sessionStorage.getItem('orion_chats_cache');
                 if (cached) {
                     try {
                         const parsedCache = JSON.parse(cached);
@@ -1042,9 +1042,9 @@ const ChatList = {
                     } catch(e) { /* keep empty */ }
                 }
             }
-            // Cache chats in localStorage for resilience
+            // Cache chats in sessionStorage for resilience
             if (state.chats.length) {
-                try { localStorage.setItem('orion_chats_cache', JSON.stringify(state.chats)); } catch(e) {}
+                try { sessionStorage.setItem('orion_chats_cache', JSON.stringify(state.chats)); } catch(e) {}
             }
             // FIX КРИТ-2: Инициализируем totalCost из суммы всех чатов при загрузке
             state.totalCost = state.chats.reduce((sum, c) => sum + (c.total_cost || 0), 0);
@@ -1056,8 +1056,8 @@ const ChatList = {
             if (_prevChats.length > 0) {
                 state.chats = _prevChats;
             } else {
-                // Try localStorage cache as last resort
-                const cached = localStorage.getItem('orion_chats_cache');
+                // Try sessionStorage cache as last resort
+                const cached = sessionStorage.getItem('orion_chats_cache');
                 if (cached) {
                     try { const p = JSON.parse(cached); if (p && p.length) state.chats = p; } catch(e2) {}
                 }
@@ -1076,7 +1076,7 @@ const ChatList = {
 
         if (!chats.length) {
             // BUG-12v4: Last chance — try cache before showing empty
-            const cached = localStorage.getItem('orion_chats_cache');
+            const cached = sessionStorage.getItem('orion_chats_cache');
             if (cached) {
                 try {
                     const parsed = JSON.parse(cached);
@@ -3093,7 +3093,7 @@ const ActivityPanel = {
     },
 
     restoreForChat(chatId) {
-        // ПАТЧ-HIST: восстанавливаем историю из localStorage
+        // ПАТЧ-HIST: восстанавливаем историю из sessionStorage
         const log = $('activity-log');
         if (!log) return;
         // Очищаем текущее содержимое
@@ -3112,7 +3112,7 @@ const ActivityPanel = {
         }
         try {
             const key = 'orion_activity_' + chatId;
-            const saved = JSON.parse(localStorage.getItem(key) || '[]');
+            const saved = JSON.parse(sessionStorage.getItem(key) || '[]');
             if (saved.length === 0) {
                 // Нет истории — показываем заглушку
                 const emptyDiv = document.createElement('div');
@@ -3136,7 +3136,7 @@ const ActivityPanel = {
         } catch(e) {}
     },
     addLineRaw(type, emoji, text, timeStr, detailData) {
-        // Добавляем строку без сохранения в localStorage (для восстановления)
+        // Добавляем строку без сохранения в sessionStorage (для восстановления)
         const log = $('activity-log');
         if (!log) return;
         const emptyEl = log.querySelector('.activity-empty');
@@ -3214,10 +3214,10 @@ const ActivityPanel = {
         if (state.currentChatId) {
             try {
                 const key = 'orion_activity_' + state.currentChatId;
-                const saved = JSON.parse(localStorage.getItem(key) || '[]');
+                const saved = JSON.parse(sessionStorage.getItem(key) || '[]');
                 saved.push(lineData);
                 if (saved.length > 200) saved.splice(0, saved.length - 200);
-                localStorage.setItem(key, JSON.stringify(saved));
+                sessionStorage.setItem(key, JSON.stringify(saved));
             } catch(e) {}
         }
         const logWrap = $('activity-log-wrap');
@@ -3265,15 +3265,15 @@ const ActivityPanel = {
 
         const lineData = { type, emoji, text, time: new Date().toISOString(), detail: detailData };
         state.activityLines.push(lineData);
-        // ПАТЧ-HIST: сохраняем в localStorage
+        // ПАТЧ-HIST: сохраняем в sessionStorage
         if (state.currentChatId) {
             try {
                 const key = 'orion_activity_' + state.currentChatId;
-                const saved = JSON.parse(localStorage.getItem(key) || '[]');
+                const saved = JSON.parse(sessionStorage.getItem(key) || '[]');
                 saved.push(lineData);
                 // Храним максимум 200 событий
                 if (saved.length > 200) saved.splice(0, saved.length - 200);
-                localStorage.setItem(key, JSON.stringify(saved));
+                sessionStorage.setItem(key, JSON.stringify(saved));
             } catch(e) {}
         }
         // Scroll the wrap container for proper scrolling
@@ -3561,16 +3561,16 @@ const ActivityPanel = {
             const badge = this._currentGroup.querySelector('.group-count');
             if (badge) badge.textContent = this._groupItemCount + ' \u0434\u0435\u0439\u0441\u0442\u0432.';
         }
-        // Save to localStorage
+        // Save to sessionStorage
         const lineData = { type, emoji, text, time: new Date().toISOString(), detail: detailData, grouped: true };
         state.activityLines.push(lineData);
         if (state.currentChatId) {
             try {
                 const key = 'orion_activity_' + state.currentChatId;
-                const saved = JSON.parse(localStorage.getItem(key) || '[]');
+                const saved = JSON.parse(sessionStorage.getItem(key) || '[]');
                 saved.push(lineData);
                 if (saved.length > 200) saved.splice(0, saved.length - 200);
-                localStorage.setItem(key, JSON.stringify(saved));
+                sessionStorage.setItem(key, JSON.stringify(saved));
             } catch(e) {}
         }
         // Scroll the wrap container, not the log itself
@@ -3779,7 +3779,7 @@ const Toast = {
 const SSHSettings = {
     servers: [],
     init() {
-        this.servers = JSON.parse(localStorage.getItem('orion_ssh_servers') || '[]');
+        this.servers = JSON.parse(sessionStorage.getItem('orion_ssh_servers') || '[]');
         const addBtn = document.getElementById('btn-add-ssh');
         const saveBtn = document.getElementById('btn-save-ssh');
         const cancelBtn = document.getElementById('btn-cancel-ssh');
@@ -3799,7 +3799,7 @@ const SSHSettings = {
         const password = document.getElementById('ssh-password').value;
         if (!host || !user) { alert('Укажите хост и логин'); return; }
         this.servers.push({ host, user, port, password, id: Date.now().toString() });
-        localStorage.setItem('orion_ssh_servers', JSON.stringify(this.servers));
+        sessionStorage.setItem('orion_ssh_servers', JSON.stringify(this.servers));
         document.getElementById('ssh-add-form').classList.add('hidden');
         document.getElementById('ssh-host').value = '';
         document.getElementById('ssh-user').value = '';
@@ -3809,7 +3809,7 @@ const SSHSettings = {
     },
     removeServer(id) {
         this.servers = this.servers.filter(s => s.id !== id);
-        localStorage.setItem('orion_ssh_servers', JSON.stringify(this.servers));
+        sessionStorage.setItem('orion_ssh_servers', JSON.stringify(this.servers));
         this.render();
     },
     render() {
@@ -4398,7 +4398,7 @@ document.addEventListener('DOMContentLoaded', () => {
         };
         modeSelectEl.addEventListener('change', modeSelectEl._modeHandler);
         // Also sync the select value with saved mode
-        const savedMode = localStorage.getItem('orion_mode');
+        const savedMode = sessionStorage.getItem('orion_mode');
         if (savedMode && modeSelectEl.querySelector('option[value="' + savedMode + '"]')) {
             modeSelectEl.value = savedMode;
         }
@@ -4432,14 +4432,14 @@ function initResizable() {
                 handle.classList.remove('active');
                 document.removeEventListener('mousemove', onMouseMove);
                 document.removeEventListener('mouseup', onMouseUp);
-                localStorage.setItem('orion_' + targetId + '_width', target.style.width);
+                sessionStorage.setItem('orion_' + targetId + '_width', target.style.width);
             };
             document.addEventListener('mousemove', onMouseMove);
             document.addEventListener('mouseup', onMouseUp);
         });
     });
     ['sidebar', 'activity-panel'].forEach(id => {
-        const saved = localStorage.getItem('orion_' + id + '_width');
+        const saved = sessionStorage.getItem('orion_' + id + '_width');
         const el = document.getElementById(id);
         if (saved && el) { el.style.width = saved; el.style.minWidth = saved; }
     });
@@ -4760,9 +4760,9 @@ const MultiSSH = {
     servers: [],
 
     init() {
-        // Загрузить из localStorage
+        // Загрузить из sessionStorage
         try {
-            this.servers = JSON.parse(localStorage.getItem('orion_ssh_servers') || '[]');
+            this.servers = JSON.parse(sessionStorage.getItem('orion_ssh_servers') || '[]');
         } catch { this.servers = []; }
     },
 
@@ -4796,7 +4796,7 @@ const MultiSSH = {
     },
 
     save() {
-        localStorage.setItem('orion_ssh_servers', JSON.stringify(this.servers));
+        sessionStorage.setItem('orion_ssh_servers', JSON.stringify(this.servers));
     },
 
     // Для отправки с сообщением — активный сервер

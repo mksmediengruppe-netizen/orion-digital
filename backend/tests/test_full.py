@@ -1214,6 +1214,266 @@ class Test17Integration(unittest.TestCase):
 # ══════════════════════════════════════════════════════════════
 # RUNNER
 # ══════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════
+# ГРУППА 18: Website Factory Modules (8 modules)
+# ═══════════════════════════════════════════════════════════════
+
+class Test18WebsiteFactory(unittest.TestCase):
+    """Тесты для 8 модулей Website Factory."""
+
+    def test_01_site_brief_parser_syntax(self):
+        """site_brief_parser.py — синтаксис"""
+        path = os.path.join(BACKEND, "site_brief_parser.py")
+        if not os.path.exists(path):
+            self.skipTest("site_brief_parser.py not found")
+        import ast
+        with open(path) as f:
+            ast.parse(f.read())
+
+    def test_02_site_blueprint_builder_syntax(self):
+        """site_blueprint_builder.py — синтаксис"""
+        path = os.path.join(BACKEND, "site_blueprint_builder.py")
+        if not os.path.exists(path):
+            self.skipTest("site_blueprint_builder.py not found")
+        import ast
+        with open(path) as f:
+            ast.parse(f.read())
+
+    def test_03_site_content_generator_syntax(self):
+        """site_content_generator.py — синтаксис"""
+        path = os.path.join(BACKEND, "site_content_generator.py")
+        if not os.path.exists(path):
+            self.skipTest("site_content_generator.py not found")
+        import ast
+        with open(path) as f:
+            ast.parse(f.read())
+
+    def test_04_site_design_planner_syntax(self):
+        """site_design_planner.py — синтаксис"""
+        path = os.path.join(BACKEND, "site_design_planner.py")
+        if not os.path.exists(path):
+            self.skipTest("site_design_planner.py not found")
+        import ast
+        with open(path) as f:
+            ast.parse(f.read())
+
+    def test_05_landing_builder_syntax(self):
+        """landing_builder.py — синтаксис"""
+        path = os.path.join(BACKEND, "landing_builder.py")
+        if not os.path.exists(path):
+            self.skipTest("landing_builder.py not found")
+        import ast
+        with open(path) as f:
+            ast.parse(f.read())
+
+    def test_06_site_publish_operator_syntax(self):
+        """site_publish_operator.py — синтаксис"""
+        path = os.path.join(BACKEND, "site_publish_operator.py")
+        if not os.path.exists(path):
+            self.skipTest("site_publish_operator.py not found")
+        import ast
+        with open(path) as f:
+            ast.parse(f.read())
+
+    def test_07_site_verifier_syntax(self):
+        """site_verifier.py — синтаксис"""
+        path = os.path.join(BACKEND, "site_verifier.py")
+        if not os.path.exists(path):
+            self.skipTest("site_verifier.py not found")
+        import ast
+        with open(path) as f:
+            ast.parse(f.read())
+
+    def test_08_site_release_judge_syntax(self):
+        """site_release_judge.py — синтаксис"""
+        path = os.path.join(BACKEND, "site_release_judge.py")
+        if not os.path.exists(path):
+            self.skipTest("site_release_judge.py not found")
+        import ast
+        with open(path) as f:
+            ast.parse(f.read())
+
+
+# ═══════════════════════════════════════════════════════════════
+# ГРУППА 19: Bitrix Factory Modules (9 modules)
+# ═══════════════════════════════════════════════════════════════
+
+class Test19BitrixFactory(unittest.TestCase):
+    """Тесты для 9 модулей Bitrix Factory."""
+
+    def test_01_bitrix_provisioner_syntax(self):
+        """bitrix_provisioner.py — синтаксис"""
+        path = os.path.join(BACKEND, "bitrix_provisioner.py")
+        if not os.path.exists(path):
+            self.skipTest("bitrix_provisioner.py not found")
+        import ast
+        with open(path) as f:
+            ast.parse(f.read())
+
+    def test_02_bitrix_wizard_operator_syntax(self):
+        """bitrix_wizard_operator.py — синтаксис"""
+        path = os.path.join(BACKEND, "bitrix_wizard_operator.py")
+        if not os.path.exists(path):
+            self.skipTest("bitrix_wizard_operator.py not found")
+        import ast
+        with open(path) as f:
+            ast.parse(f.read())
+
+    def test_03_bitrix_verifier_syntax(self):
+        """bitrix_verifier.py — синтаксис"""
+        path = os.path.join(BACKEND, "bitrix_verifier.py")
+        if not os.path.exists(path):
+            self.skipTest("bitrix_verifier.py not found")
+        import ast
+        with open(path) as f:
+            ast.parse(f.read())
+
+    def test_04_bitrix_template_builder_syntax(self):
+        """bitrix_template_builder.py — синтаксис"""
+        path = os.path.join(BACKEND, "bitrix_template_builder.py")
+        if not os.path.exists(path):
+            self.skipTest("bitrix_template_builder.py not found")
+        import ast
+        with open(path) as f:
+            ast.parse(f.read())
+
+    def test_05_bitrix_component_mapper_syntax(self):
+        """bitrix_component_mapper.py — синтаксис"""
+        path = os.path.join(BACKEND, "bitrix_component_mapper.py")
+        if not os.path.exists(path):
+            self.skipTest("bitrix_component_mapper.py not found")
+        import ast
+        with open(path) as f:
+            ast.parse(f.read())
+
+    def test_06_bitrix_reverse_engineer_syntax(self):
+        """bitrix_reverse_engineer.py — синтаксис"""
+        path = os.path.join(BACKEND, "bitrix_reverse_engineer.py")
+        if not os.path.exists(path):
+            self.skipTest("bitrix_reverse_engineer.py not found")
+        import ast
+        with open(path) as f:
+            ast.parse(f.read())
+
+    def test_07_bitrix_publish_operator_syntax(self):
+        """bitrix_publish_operator.py — синтаксис"""
+        path = os.path.join(BACKEND, "bitrix_publish_operator.py")
+        if not os.path.exists(path):
+            self.skipTest("bitrix_publish_operator.py not found")
+        import ast
+        with open(path) as f:
+            ast.parse(f.read())
+
+    def test_08_bitrix_recovery_syntax(self):
+        """bitrix_recovery.py — синтаксис"""
+        path = os.path.join(BACKEND, "bitrix_recovery.py")
+        if not os.path.exists(path):
+            self.skipTest("bitrix_recovery.py not found")
+        import ast
+        with open(path) as f:
+            ast.parse(f.read())
+
+    def test_09_bitrix_release_judge_syntax(self):
+        """bitrix_release_judge.py — синтаксис"""
+        path = os.path.join(BACKEND, "bitrix_release_judge.py")
+        if not os.path.exists(path):
+            self.skipTest("bitrix_release_judge.py not found")
+        import ast
+        with open(path) as f:
+            ast.parse(f.read())
+
+
+# ═══════════════════════════════════════════════════════════════
+# ГРУППА 20: Pipeline & Tools Integration
+# ═══════════════════════════════════════════════════════════════
+
+class Test20PipelineTools(unittest.TestCase):
+    """Тесты pipeline, tools_schema, classify_task_type."""
+
+    def test_01_tools_schema_has_website_tools(self):
+        """tools_schema.py содержит website tools"""
+        path = os.path.join(BACKEND, "tools_schema.py")
+        with open(path) as f:
+            content = f.read()
+        for tool in ["parse_site_brief", "build_site_blueprint", "plan_site_design",
+                     "generate_site_content", "build_landing", "publish_site",
+                     "verify_site", "judge_site_release"]:
+            self.assertIn(tool, content, f"Missing tool: {tool}")
+
+    def test_02_tools_schema_has_bitrix_tools(self):
+        """tools_schema.py содержит bitrix tools"""
+        path = os.path.join(BACKEND, "tools_schema.py")
+        with open(path) as f:
+            content = f.read()
+        for tool in ["provision_bitrix_server", "run_bitrix_wizard", "verify_bitrix",
+                     "build_bitrix_template", "map_bitrix_components",
+                     "analyze_bitrix_site", "publish_bitrix",
+                     "judge_bitrix_release", "backup_bitrix", "restore_bitrix"]:
+            self.assertIn(tool, content, f"Missing tool: {tool}")
+
+    def test_03_tools_schema_valid_python(self):
+        """tools_schema.py — валидный Python"""
+        path = os.path.join(BACKEND, "tools_schema.py")
+        import ast
+        with open(path) as f:
+            ast.parse(f.read())
+
+    def test_04_prompts_has_pipeline_rule(self):
+        """prompts.py содержит WEBSITE_PIPELINE_RULE"""
+        path = os.path.join(BACKEND, "prompts.py")
+        with open(path) as f:
+            content = f.read()
+        self.assertIn("WEBSITE_PIPELINE_RULE", content)
+        self.assertIn("BITRIX_PIPELINE_RULE", content)
+
+    def test_05_prompts_has_classifier(self):
+        """prompts.py содержит classify_task_type"""
+        path = os.path.join(BACKEND, "prompts.py")
+        with open(path) as f:
+            content = f.read()
+        self.assertIn("classify_task_type", content)
+        self.assertIn("PIPELINE_WEBSITE", content)
+        self.assertIn("PIPELINE_BITRIX", content)
+
+    def test_06_prompts_has_success_criteria(self):
+        """prompts.py содержит WEBSITE_SUCCESS_CRITERIA"""
+        path = os.path.join(BACKEND, "prompts.py")
+        with open(path) as f:
+            content = f.read()
+        self.assertIn("WEBSITE_SUCCESS_CRITERIA", content)
+        self.assertIn("BITRIX_SUCCESS_CRITERIA", content)
+
+    def test_07_task_charter_has_task_type(self):
+        """task_charter.py содержит task_type и site_type"""
+        path = os.path.join(BACKEND, "task_charter.py")
+        with open(path) as f:
+            content = f.read()
+        self.assertIn("task_type", content)
+        self.assertIn("site_type", content)
+
+    def test_08_app_js_no_localstorage(self):
+        """app.js не использует localStorage"""
+        path = os.path.join(BACKEND, "..", "frontend", "app.js")
+        if not os.path.exists(path):
+            self.skipTest("app.js not found")
+        with open(path) as f:
+            content = f.read()
+        self.assertNotIn("localStorage", content,
+                         "app.js still uses localStorage — should use sessionStorage")
+
+    def test_09_classify_website(self):
+        """classify_task_type определяет website"""
+        sys.path.insert(0, BACKEND)
+        try:
+            from prompts import classify_task_type
+            self.assertEqual(classify_task_type("Создай лендинг для стоматологии"), "website")
+            self.assertEqual(classify_task_type("Сделай сайт визитку"), "website")
+        except ImportError:
+            self.skipTest("Cannot import classify_task_type")
+        finally:
+            sys.path.pop(0)
+
+
 if __name__ == "__main__":
     print("=" * 60)
     print("ORION Digital — Full Test Suite")
@@ -1244,6 +1504,9 @@ if __name__ == "__main__":
         ("ГРУППА 15: Database", Test15Database),
         ("ГРУППА 16: Solution Cache", Test16SolutionCache),
         ("ГРУППА 17: Integration", Test17Integration),
+        ("ГРУППА 18: Website Factory", Test18WebsiteFactory),
+        ("ГРУППА 19: Bitrix Factory", Test19BitrixFactory),
+        ("ГРУППА 20: Pipeline & Tools", Test20PipelineTools),
     ]
 
     group_suites = []
