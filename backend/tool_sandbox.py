@@ -97,8 +97,8 @@ PERM_ORDER = [PERM_READ, PERM_WRITE, PERM_EXECUTE, PERM_DEPLOY, PERM_ADMIN]
 
 # Какие уровни разрешены для каждого режима ORION
 MODE_PERMISSIONS: Dict[str, Set[str]] = {
-    "turbo_standard": {PERM_READ, PERM_WRITE, PERM_EXECUTE},
-    "turbo_premium":  {PERM_READ, PERM_WRITE, PERM_EXECUTE, PERM_DEPLOY},
+    "fast": {PERM_READ, PERM_WRITE, PERM_EXECUTE},
+    "fast":  {PERM_READ, PERM_WRITE, PERM_EXECUTE, PERM_DEPLOY},
     "pro":            {PERM_READ, PERM_WRITE, PERM_EXECUTE, PERM_DEPLOY},
     "architect":      {PERM_READ, PERM_WRITE, PERM_EXECUTE, PERM_DEPLOY, PERM_ADMIN},
     "budget":         {PERM_READ, PERM_WRITE},
@@ -155,7 +155,7 @@ class ToolSandbox:
         Настроить sandbox для сессии.
         
         Args:
-            orion_mode: режим ORION (turbo_standard, pro, architect, ...)
+            orion_mode: режим ORION (fast, standard, premium, ...)
             autonomy_mode: уровень автономности (full, standard, cautious, readonly)
             explicit_allows: список явно разрешённых инструментов
             explicit_denies: список явно запрещённых инструментов

@@ -1,4 +1,15 @@
 
+// Queue handler for busy workers
+function handleBusyResponse(response) {
+    if (response.status === 429 || (response.data && response.data.status === 'busy')) {
+        const pos = response.data?.queue_position || '?';
+        const wait = response.data?.estimated_wait || '~3';
+        showNotification(`⏳ Все воркеры заняты. Ваша задача в очереди. Позиция: ${pos}. Ожидание ${wait} мин.`, 'warning');
+        return true;
+    }
+    return false;
+}
+
 /* ── PROJECT TEMPLATES ────────────────────────────────── */
 const PROJECT_TEMPLATES = [
     { icon: '🏪', name: 'Интернет-магазин', prompt: 'Создай интернет-магазин с каталогом товаров, корзиной, оформлением заказа и интеграцией платёжной системы' },
@@ -22,28 +33,28 @@ const API_BASE = '/api';
 const SSE_TIMEOUT = 120000;
 
 const MODES = {
-    'turbo-basic':     { label: 'Turbo',        tag: 'TURBO', desc: 'MiniMax думает + MiMo действует. Быстро и экономично.' },
-    'turbo_standard':  { label: 'Turbo',        tag: 'TURBO', desc: 'MiniMax думает + MiMo действует. Быстро и экономично.' },
-    'turbo_premium':   { label: 'Turbo Premium', tag: 'TURBO', desc: 'MiniMax M2.5 + MiMo Flash. Быстро и экономично.' },
-    'pro-basic':       { label: 'Pro',          tag: 'PRO',   desc: 'Claude Sonnet 4.6. Планирование, code review, качество.' },
-    'pro_standard':    { label: 'Pro Standard', tag: 'PRO',   desc: 'Claude Sonnet 4.6. Планирование, code review, качество.' },
-    'pro_premium':     { label: 'Pro Premium',  tag: 'PRO',   desc: 'Claude Sonnet 4.6. Премиум дизайн и копирайтинг.' },
-    'architect':       { label: 'Architect',    tag: 'OPUS',  desc: 'Claude Opus 4. Архитектура, глубокий анализ, аудит кода.' },
-    'smart_turbo':     { label: 'Smart Turbo', tag: 'SMART', desc: 'Opus план + MiniMax код + MiMo деплой. Один вызов Opus, остальное дёшево.' }
+    'fast':     { label: 'Turbo',        tag: 'TURBO', desc: 'MiniMax думает + MiMo действует. Быстро и экономично.' },
+    'fast':  { label: 'Turbo',        tag: 'TURBO', desc: 'MiniMax думает + MiMo действует. Быстро и экономично.' },
+    'fast':   { label: 'Turbo Premium', tag: 'TURBO', desc: 'MiniMax M2.5 + MiMo Flash. Быстро и экономично.' },
+    'standard':       { label: 'Pro',          tag: 'PRO',   desc: 'Claude Sonnet 4.6. Планирование, code review, качество.' },
+    'standard':    { label: 'Pro Standard', tag: 'PRO',   desc: 'Claude Sonnet 4.6. Планирование, code review, качество.' },
+    'premium':     { label: 'Pro Premium',  tag: 'PRO',   desc: 'Claude Sonnet 4.6. Премиум дизайн и копирайтинг.' },
+    'premium':       { label: 'Architect',    tag: 'OPUS',  desc: 'Claude Opus 4. Архитектура, глубокий анализ, аудит кода.' },
+    'standard':     { label: 'Smart Turbo', tag: 'SMART', desc: 'Opus план + MiniMax код + MiMo деплой. Один вызов Opus, остальное дёшево.' }
 };
 
 /* ── MODE_INFO (УЛУЧ-3) ──────────────────────────────────── */
 const MODE_INFO = {
-    'turbo-basic':    { text: 'MiniMax M2.5 + MiMo Flash · Быстро и экономично', icon: '⚡' },
+    'fast':    { text: 'MiniMax M2.5 + MiMo Flash · Быстро и экономично', icon: '⚡' },
     'turbo_basic':    { text: 'MiniMax M2.5 + MiMo Flash · Быстро и экономично', icon: '⚡' },
-    'turbo_standard': { text: 'MiniMax M2.5 + MiMo Flash · Быстро и экономично', icon: '⚡' },
-    'pro-basic':      { text: 'Claude Sonnet 4.6 · Планирование и качество', icon: '🧠' },
+    'fast': { text: 'MiniMax M2.5 + MiMo Flash · Быстро и экономично', icon: '⚡' },
+    'standard':      { text: 'Claude Sonnet 4.6 · Планирование и качество', icon: '🧠' },
     'pro_basic':      { text: 'Claude Sonnet 4.6 · Планирование и качество', icon: '🧠' },
-    'pro_standard':   { text: 'Claude Sonnet 4.6 · Планирование и качество', icon: '🧠' },
-    'turbo_premium':  { text: 'MiniMax M2.5 + MiMo Flash · Быстро и экономично', icon: '⚡' },
-    'pro-premium':    { text: 'Claude Sonnet 4.6 · Премиум дизайн и копирайтинг', icon: '🚀' },
-    'pro_premium':    { text: 'Claude Sonnet 4.6 · Премиум дизайн и копирайтинг', icon: '🚀' },
-    'architect':      { text: 'Claude Opus 4 · Архитектор · Для сложных задач', icon: '🏛' },
+    'standard':   { text: 'Claude Sonnet 4.6 · Планирование и качество', icon: '🧠' },
+    'fast':  { text: 'MiniMax M2.5 + MiMo Flash · Быстро и экономично', icon: '⚡' },
+    'premium':    { text: 'Claude Sonnet 4.6 · Премиум дизайн и копирайтинг', icon: '🚀' },
+    'premium':    { text: 'Claude Sonnet 4.6 · Премиум дизайн и копирайтинг', icon: '🚀' },
+    'premium':      { text: 'Claude Opus 4 · Архитектор · Для сложных задач', icon: '🏛' },
 };
 
 const WELCOME_CHIPS = [
@@ -71,7 +82,7 @@ const state = {
     chats: [],
     currentChatId: null,
     messages: [],
-    mode: 'turbo-basic',
+    mode: 'fast',
     premiumDesign: false,
     theme: 'light',
     isStreaming: false,
@@ -450,7 +461,7 @@ const UI = {
         // ПАТЧ W1-1: Восстановить режим из localStorage
         try {
             const savedMode = localStorage.getItem('orion_mode');
-            if (savedMode && ['turbo_basic', 'turbo-basic', 'turbo_standard', 'turbo_premium', 'pro_basic', 'pro-basic', 'pro_standard', 'pro_premium', 'architect', 'smart_turbo'].includes(savedMode)) {
+            if (savedMode && ['turbo_basic', 'fast', 'fast', 'fast', 'pro_basic', 'standard', 'standard', 'premium', 'premium', 'standard'].includes(savedMode)) {
                 state.mode = savedMode;
             }
         } catch(e) {}
@@ -573,16 +584,16 @@ const UI = {
         if (modeInfo) Toast.show(modeInfo.icon + ' ' + (MODES[key]?.label || key) + ': ' + modeInfo.text, 'info');
         // Improvement 3: Update model label on mode switch
         const MODEL_LABELS = {
-            'turbo-basic': 'MiniMax + MiMo',
+            'fast': 'MiniMax + MiMo',
             'turbo_basic': 'MiniMax + MiMo',
-            'turbo_standard': 'MiniMax + MiMo',
-            'turbo_premium': 'MiniMax + MiMo',
-            'pro-basic': 'Claude Sonnet',
+            'fast': 'MiniMax + MiMo',
+            'fast': 'MiniMax + MiMo',
+            'standard': 'Claude Sonnet',
             'pro_basic': 'Claude Sonnet',
-            'pro_standard': 'Claude Sonnet',
-            'pro-premium': 'Claude Sonnet 4.6',
-            'pro_premium': 'Claude Sonnet 4.6',
-            'architect': 'Claude Opus 4'
+            'standard': 'Claude Sonnet',
+            'premium': 'Claude Sonnet 4.6',
+            'premium': 'Claude Sonnet 4.6',
+            'premium': 'Claude Opus 4'
         };
         const modelLabel = document.querySelector('.header-model, .model-label, [data-model]');
         if (modelLabel) modelLabel.textContent = MODEL_LABELS[key] || MODEL_LABELS[key.replace('-','_')] || 'ORION AI';

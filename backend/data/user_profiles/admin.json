@@ -1,6 +1,6 @@
 {
   "user_id": "admin",
-  "chat_count": 871,
+  "chat_count": 890,
   "facts": [
     "Пользователя зовут Тестер5",
     "Работает с Elixir и Phoenix",
@@ -230,7 +230,12 @@
     "форма_заявки": true,
     "design": "Современный дизайн с градиентами и анимациями при скролле",
     "approach": "Mobile-first адаптивный дизайн",
-    "structure": "Одностраничный лендинг с секциями Hero, О компании, Услуги, Контакты"
+    "structure": "Одностраничный лендинг с секциями Hero, О компании, Услуги, Контакты",
+    "cms": "1С-Битрикс",
+    "php_version": "8.3.6",
+    "mysql_version": "8.0.45",
+    "database": "MySQL 8.0.45",
+    "web_server": "Nginx"
   },
   "expertise_level": "unknown"
 }

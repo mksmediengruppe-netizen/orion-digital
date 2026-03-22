@@ -166,8 +166,8 @@ class Test03ModelRouter(unittest.TestCase):
         import model_router
         cls.mr = model_router
 
-    def test_models_minimax_id(self):
-        self.assertEqual(self.mr.MODELS["minimax"]["id"], "minimax/minimax-m2.5")
+    def test_models_gpt54_mini_id(self):
+        self.assertEqual(self.mr.MODELS["gpt54_mini"]["id"], "openai/gpt-5.4-mini")
 
     def test_models_mimo_id(self):
         self.assertEqual(self.mr.MODELS["mimo"]["id"], "xiaomi/mimo-v2-flash")
@@ -179,39 +179,39 @@ class Test03ModelRouter(unittest.TestCase):
         self.assertIn("opus", self.mr.MODELS["opus"]["id"])
 
     def test_turbo_orchestrator(self):
-        result = self.mr.get_model_for_agent("orchestrator", "turbo_standard")
-        self.assertIn("minimax", result.get("id", ""))
+        result = self.mr.get_model_for_agent("orchestrator", "fast")
+        self.assertIn("gpt-5.4", result.get("id", ""))
 
     def test_turbo_developer(self):
-        result = self.mr.get_model_for_agent("developer", "turbo_standard")
-        self.assertIn("mimo", result.get("id", ""))
+        result = self.mr.get_model_for_agent("developer", "fast")
+        self.assertIn("gpt-5.4", result.get("id", ""))
 
     def test_turbo_designer(self):
-        result = self.mr.get_model_for_agent("designer", "turbo_standard")
-        self.assertIn("minimax", result.get("id", ""))
+        result = self.mr.get_model_for_agent("designer", "fast")
+        self.assertIn("gemini", result.get("id", ""))
 
     def test_pro_orchestrator(self):
-        result = self.mr.get_model_for_agent("orchestrator", "pro_standard")
-        self.assertIn("sonnet", result.get("id", ""))
+        result = self.mr.get_model_for_agent("orchestrator", "standard")
+        self.assertIn("gpt-5.4", result.get("id", ""))
 
-    def test_architect_orchestrator(self):
-        result = self.mr.get_model_for_agent("orchestrator", "architect")
-        self.assertIn("opus", result.get("id", ""))
+    def test_premium_orchestrator(self):
+        result = self.mr.get_model_for_agent("orchestrator", "premium")
+        self.assertIn("gpt-5.4", result.get("id", ""))
 
     def test_cost_limit_turbo(self):
-        cost = self.mr.get_max_cost("turbo_standard")
+        cost = self.mr.get_max_cost("fast")
         self.assertLessEqual(cost, 3.0)
 
     def test_cost_limit_pro(self):
-        cost = self.mr.get_max_cost("pro_standard")
+        cost = self.mr.get_max_cost("standard")
         self.assertLessEqual(cost, 15.0)
 
-    def test_cost_limit_architect(self):
-        cost = self.mr.get_max_cost("architect")
+    def test_cost_limit_premium(self):
+        cost = self.mr.get_max_cost("premium")
         self.assertLessEqual(cost, 25.0)
 
     def test_fallback_chain_exists(self):
-        chain = self.mr._get_fallback_chain("minimax")
+        chain = self.mr._get_fallback_chain("gpt54_mini")
         self.assertTrue(len(chain) > 0)
 
     def test_fallback_chain_mimo(self):
@@ -578,8 +578,8 @@ class Test07ToolSandbox(unittest.TestCase):
         r = sb.check("ssh_execute")
         self.assertTrue(r.get("allowed", False))
 
-    def test_06_architect_all_allowed(self):
-        sb = self._make_sandbox(orion_mode="architect", autonomy_mode="full")
+    def test_06_premium_all_allowed(self):
+        sb = self._make_sandbox(orion_mode="premium", autonomy_mode="full")
         r = sb.check("ssh_execute")
         self.assertTrue(r.get("allowed", False))
 
@@ -708,7 +708,7 @@ class Test09Scorecard(unittest.TestCase):
             task_id=self.task_id,
             chat_id="chat-sc-1",
             user_id="user-1",
-            orion_mode="turbo_standard",
+            orion_mode="fast",
             objective="Test task"
         )
         sc = self.store.get(self.task_id)

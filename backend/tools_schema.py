@@ -733,3 +733,131 @@ TOOLS_SCHEMA = [
 ]
 
 
+
+
+# ═══════════════════════════════════════════════════════════
+# MEGA PATCH Part 7.2: 7 Critical Operator Tools
+# ═══════════════════════════════════════════════════════════
+
+OPERATOR_TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "fix_bug",
+            "description": "Parse traceback, read source, generate and apply fix via SSH",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "error_log": {"type": "string", "description": "Full traceback or error description"},
+                    "project_path": {"type": "string", "description": "Path to the project on server"},
+                },
+                "required": ["error_log", "project_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "create_backup",
+            "description": "Create tar.gz backup before dangerous operations",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "project_path": {"type": "string", "description": "Path to backup"},
+                },
+                "required": ["project_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "rollback_deploy",
+            "description": "Restore project from backup and reload nginx",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "project_path": {"type": "string", "description": "Path to restore"},
+                    "backup_path": {"type": "string", "description": "Path to backup tar.gz"},
+                },
+                "required": ["project_path", "backup_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "check_server_ready",
+            "description": "Check server has PHP, MySQL, nginx, disk space, memory",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "requirements": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "List of required software: php, mysql, nginx",
+                    },
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "run_project_qa",
+            "description": "Run project tests (pytest, npm test, phpunit)",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "project_path": {"type": "string", "description": "Path to project"},
+                },
+                "required": ["project_path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "analyze_traceback",
+            "description": "Parse error traceback, find root cause and fix command",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "error_log": {"type": "string", "description": "Full traceback text"},
+                },
+                "required": ["error_log"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "replan_task",
+            "description": "Generate alternative plan when current approach is blocked",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "current_plan": {"type": "array", "items": {"type": "string"}, "description": "Current plan phases"},
+                    "blocker": {"type": "string", "description": "What blocked the current approach"},
+                    "charter": {"type": "string", "description": "Original task charter"},
+                },
+                "required": ["current_plan", "blocker", "charter"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "check_responsive_layout",
+            "description": "Take screenshots at 5 viewports and check for layout issues",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": {"type": "string", "description": "URL to check"},
+                },
+                "required": ["url"],
+            },
+        },
+    },
+]

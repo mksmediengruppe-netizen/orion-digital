@@ -108,7 +108,7 @@ Return JSON:
         try:
             response = self.call_ai_fn(
                 [{"role": "user", "content": prompt}],
-                model="minimax/minimax-m2.5"
+                model="openai/gpt-5.4-mini"
             )
             # Parse JSON from response
             text = response.strip()

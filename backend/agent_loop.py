@@ -113,9 +113,9 @@ BRAIN_TOOLS = frozenset([
     "search_web", "read_url", "python_exec",
 ])
 
-TURBO_BRAIN_MODEL = "minimax/minimax-m2.5"
+TURBO_BRAIN_MODEL = "gpt54_mini/gpt54_mini-m2.5"
 TURBO_HANDS_MODEL = "xiaomi/mimo-v2-flash"
-TURBO_FALLBACK_MODEL = "minimax/minimax-m2.5"  # PATCH fix: real model ID
+TURBO_FALLBACK_MODEL = "gpt54_mini/gpt54_mini-m2.5"  # PATCH fix: real model ID
 
 
 def _get_dual_brain_model(tool_name: str, orion_mode: str, base_model: str) -> str:
@@ -126,7 +126,7 @@ def _get_dual_brain_model(tool_name: str, orion_mode: str, base_model: str) -> s
     - Остальные → MiniMax M2.5 (по умолчанию думает)
     Для Pro/Architect — возвращает base_model без изменений.
     """
-    if orion_mode not in ("turbo_standard", "turbo_premium", "smart_turbo"):
+    if orion_mode not in ("fast", "fast", "standard"):
         return base_model
     if tool_name in HANDS_TOOLS:
         return TURBO_HANDS_MODEL
@@ -170,37 +170,37 @@ AGENT_ZONES = {
     "orchestrator": {
         "tools": ["store_memory", "recall_memory", "canvas_create", "task_complete"],
         "description": "Планирование, память, координация",
-        "models": {"turbo_standard": "minimax", "turbo_premium": "minimax",  # PATCH fix
-                   "pro_standard": "sonnet", "pro_premium": "sonnet"}
+        "models": {"fast": "gpt54_mini", "fast": "gpt54_mini",  # PATCH fix
+                   "standard": "sonnet", "premium": "sonnet"}
     },
     "designer": {
         "tools": ["generate_design", "generate_image", "edit_image",
                   "create_artifact", "browser_navigate", "browser_get_text"],
         "description": "UI/UX, дизайн, визуальный контент",
-        "models": {"turbo_standard": "gemini", "turbo_premium": "gemini",
-                   "pro_standard": "gemini", "pro_premium": "gemini"}
+        "models": {"fast": "gemini", "fast": "gemini",
+                   "standard": "gemini", "premium": "gemini"}
     },
     "developer": {
         "tools": ["ssh_execute", "file_write", "file_read",
                   "code_interpreter", "generate_file"],
         "description": "Код, разработка, файлы",
-        "models": {"turbo_standard": "mimo", "turbo_premium": "mimo",  # PATCH fix: hands
-                   "pro_standard": "mimo", "pro_premium": "mimo"}
+        "models": {"fast": "mimo", "fast": "mimo",  # PATCH fix: hands
+                   "standard": "mimo", "premium": "mimo"}
     },
     "devops": {
         "tools": ["ssh_execute", "file_write", "file_read",
                   "browser_check_site", "browser_check_api",
                   "ftp_upload", "ftp_download", "ftp_list"],
         "description": "Серверы, деплой, инфраструктура, FTP",
-        "models": {"turbo_standard": "mimo", "turbo_premium": "mimo",  # PATCH fix: hands
-                   "pro_standard": "mimo", "pro_premium": "mimo"}
+        "models": {"fast": "mimo", "fast": "mimo",  # PATCH fix: hands
+                   "standard": "mimo", "premium": "mimo"}
     },
     "analyst": {
         "tools": ["web_search", "web_fetch", "code_interpreter",
                   "generate_chart", "generate_report", "read_any_file"],
         "description": "Анализ данных, исследования, отчёты",
-        "models": {"turbo_standard": "minimax", "turbo_premium": "minimax",  # PATCH fix: brain
-                   "pro_standard": "minimax", "pro_premium": "sonnet"}
+        "models": {"fast": "gpt54_mini", "fast": "gpt54_mini",  # PATCH fix: brain
+                   "standard": "gpt54_mini", "premium": "sonnet"}
     },
     "tester": {
         "tools": ["browser_navigate", "browser_get_text", "browser_check_site",
@@ -208,15 +208,15 @@ AGENT_ZONES = {
                   "browser_submit", "browser_select", "browser_ask_auth",
                   "code_interpreter", "ssh_execute"],
         "description": "Тестирование, QA, проверка, браузерная автоматизация",
-        "models": {"turbo_standard": "minimax", "turbo_premium": "minimax",  # PATCH fix: brain
-                   "pro_standard": "minimax", "pro_premium": "minimax"}
+        "models": {"fast": "gpt54_mini", "fast": "gpt54_mini",  # PATCH fix: brain
+                   "standard": "gpt54_mini", "premium": "gpt54_mini"}
     },
     "integrator": {
         "tools": ["ssh_execute", "file_write", "file_read",
                   "browser_check_api", "code_interpreter", "web_fetch"],
         "description": "Интеграции, API, вебхуки",
-        "models": {"turbo_standard": "mimo", "turbo_premium": "mimo",  # PATCH fix: hands
-                   "pro_standard": "mimo", "pro_premium": "mimo"}
+        "models": {"fast": "mimo", "fast": "mimo",  # PATCH fix: hands
+                   "standard": "mimo", "premium": "mimo"}
     },
 }
 
@@ -508,12 +508,12 @@ class AgentLoop:
         try:
             from model_router import MODELS
             # Найти модель по ID
-            model_key = "minimax"  # PATCH fix: minimax as default
+            model_key = "gpt54_mini"  # PATCH fix: gpt54_mini as default
             for k, m in MODELS.items():
                 if m["id"] == model_id:
                     model_key = k
                     break
-            model_cfg = MODELS.get(model_key, MODELS["minimax"])  # PATCH fix
+            model_cfg = MODELS.get(model_key, MODELS["gpt54_mini"])  # PATCH fix
             cost = (tokens_in * model_cfg["input_price"] / 1_000_000 +
                     tokens_out * model_cfg["output_price"] / 1_000_000)
             # cost = 0.0  # КРИТ-2: REMOVED — now tracking real cost
@@ -639,8 +639,8 @@ class AgentLoop:
         # ПАТЧ A2: model_override — использовать переопределённую модель если задана
         _model = self.model_override if self.model_override else self.model
         # DUAL-BRAIN: для Turbo режима выбираем модель по следующему tool call
-        _orion_mode = getattr(self, 'orion_mode', 'turbo_standard')
-        if _orion_mode in ("turbo_standard", "turbo_premium") and not self.model_override:
+        _orion_mode = getattr(self, 'orion_mode', 'fast')
+        if _orion_mode in ("fast", "fast") and not self.model_override:
             # Определяем следующий tool call из последнего assistant сообщения
             _next_tool = None
             for _msg in reversed(messages):
@@ -654,7 +654,7 @@ class AgentLoop:
                 logging.debug(f"[DUAL-BRAIN] tool={_next_tool} → model={_model}")
             else:
                 # Нет tool call → думаем → MiniMax
-                if _orion_mode in ("turbo_standard", "turbo_premium"):
+                if _orion_mode in ("fast", "fast"):
                     _model = TURBO_BRAIN_MODEL
 
         payload = {
@@ -892,8 +892,8 @@ class AgentLoop:
                     _log.warning(f"[agent_loop] Retry with cleaned messages also failed: {_cl_e}")
             
             # ── FALLBACK 2: try different model ──
-            _orion_mode_fb = getattr(self, 'orion_mode', 'turbo_standard')
-            if _orion_mode_fb in ("turbo_standard", "turbo_premium"):
+            _orion_mode_fb = getattr(self, 'orion_mode', 'fast')
+            if _orion_mode_fb in ("fast", "fast"):
                 # Dual-brain fallback: если HANDS упал → BRAIN, если BRAIN упал → FALLBACK
                 if _model == TURBO_HANDS_MODEL:
                     _fallback_model_id = TURBO_BRAIN_MODEL
@@ -902,7 +902,7 @@ class AgentLoop:
                 else:
                     _fallback_model_id = TURBO_FALLBACK_MODEL
             else:
-                _fallback_model_id = "minimax/minimax-m2.5"  # PATCH fix: real model ID
+                _fallback_model_id = "gpt54_mini/gpt54_mini-m2.5"  # PATCH fix: real model ID
             if self.model != _fallback_model_id and _model != _fallback_model_id:
                 _log.warning(f"[agent_loop] Trying fallback model {_fallback_model_id}")
                 try:
@@ -1611,7 +1611,13 @@ class AgentLoop:
            context="ssh_execute")
     def _ssh_execute_with_retry(self, host, username, password, command):
         ssh = ssh_pool.get_connection(host=host, username=username, password=password)
-        return ssh.execute_command(command, timeout=90)
+        # ══ PATCH: Smart timeout — 300s for downloads, 90s for normal commands ══
+        _download_patterns = ('wget ', 'curl -o', 'curl -sL -o', 'curl -O', 'tar ', 'unzip ', 'apt-get install', 'apt install', 'pip install', 'npm install', 'composer install')
+        _is_download = any(p in command for p in _download_patterns)
+        _timeout = 600 if _is_download else 90
+        if _is_download:
+            logger.info(f"[SSH] Download detected, using extended timeout {_timeout}s: {command[:100]}")
+        return ssh.execute_command(command, timeout=_timeout)
 
     @retry(max_attempts=3, base_delay=2.0, max_delay=15.0, jitter=1.0,
            retryable_exceptions=(ConnectionError, TimeoutError, OSError, IOError, EOFError),
@@ -3601,9 +3607,9 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);
         _task_start_time = _time_mod.time()
         _task_cost = 0.0
         _task_cost_prev = self._session_cost  # baseline before this task
-        _task_mode = getattr(self, 'orion_mode', 'turbo_standard') or 'turbo_standard'
+        _task_mode = getattr(self, 'orion_mode', 'fast') or 'fast'
         # Per-task limits: Turbo=$3, Pro=$5, Architect=$15
-        _TASK_LIMITS = {'turbo_standard': 3.0, 'pro_standard': 5.0, 'pro_premium': 5.0, 'architect': 15.0}
+        _TASK_LIMITS = {'fast': 3.0, 'standard': 5.0, 'premium': 5.0, 'premium': 15.0}
         _task_limit = _TASK_LIMITS.get(_task_mode, 5.0)
         _task_budget_warned = False  # 80% warning sent
         # ── CHECKPOINT: init ──────────────────────────────────────────────────
@@ -4233,7 +4239,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);
                                for a in self.actions_log[-3:]]
                 if len(_last_tools) == 3 and len(set(_last_tools)) == 1:
                     # Three identical tool calls in a row — loop detected
-                    _loop_mode = getattr(self, 'orion_mode', 'turbo_standard')
+                    _loop_mode = getattr(self, 'orion_mode', 'fast')
                     if _loop_mode in PRO_MODES:
                         # Pro/Architect: warn the model to try different approach
                         messages.append({"role": "system", "content":
@@ -4717,14 +4723,14 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);
 
 class MultiAgentLoop(AgentLoop):
     """
-    Extended agent loop with multi-agent architecture:
+    Extended agent loop with multi-agent premiumure:
     Architect -> Coder -> Reviewer -> QA
     Each agent has its own system prompt and can use tools.
     Inherits retry, idempotency, and self-healing from AgentLoop.
     """
 
     AGENTS = {
-        "architect": {
+        "premium": {
             "name": "Архитектор",
             "emoji": "🏗️",
             "prompt_suffix": """Ты — Архитектор. Проанализируй задачу и создай план:
@@ -4832,7 +4838,7 @@ class MultiAgentLoop(AgentLoop):
             
             # Switch model for this phase agent
             # For Pro/Architect: keep ONE model for entire pipeline (no switching)
-            _current_orion_mode = getattr(self, 'orion_mode', getattr(self, '_orion_mode', 'turbo_standard'))
+            _current_orion_mode = getattr(self, 'orion_mode', getattr(self, '_orion_mode', 'fast'))
             if _current_orion_mode in PRO_MODES:
                 _plog.info(f"[Pipeline] Pro/Architect mode: keeping model {self.model} (no switch)")
             else:
@@ -4874,7 +4880,7 @@ class MultiAgentLoop(AgentLoop):
                 pass
             
             # Build messages for this phase
-            system_prompt = get_system_prompt(getattr(self, "orion_mode", "turbo_standard"))
+            system_prompt = get_system_prompt(getattr(self, "orion_mode", "fast"))
             if agent_prompt_extra:
                 system_prompt += "\n\n" + agent_prompt_extra
             if hasattr(self, '_orchestrator_prompt') and self._orchestrator_prompt:
@@ -5013,7 +5019,7 @@ class MultiAgentLoop(AgentLoop):
                 yield self._sse({"type": "content", "text": "\n\n✨ **Premium QC v2**: MiniMax создаёт → Opus проверяет → MiniMax исправляет\n", "agent": "Premium QC"})
                 _pqc_api_key = self.api_key
                 _pqc_headers = {"Authorization": f"Bearer {_pqc_api_key}", "Content-Type": "application/json", "HTTP-Referer": "https://orion.mksitdev.ru"}
-                _pqc_minimax_model = "minimax/minimax-m2.5"
+                _pqc_gpt54_mini_model = "gpt54_mini/gpt54_mini-m2.5"
                 _pqc_opus_model = "anthropic/claude-opus-4"
                 _pqc_html_content = _qc_html_content if '_qc_html_content' in dir() else None
                 _pqc_site_url = f"http://{_qc_host}"
@@ -5048,7 +5054,7 @@ class MultiAgentLoop(AgentLoop):
                     yield self._sse({"type": "content", "text": "  📝 Шаг 1/4: MiniMax создаёт полный HTML...\n", "agent": "Premium QC"})
                     if not _pqc_html_content:
                         _mm_create = _pqc_req.post(self.api_url, headers=_pqc_headers, json={
-                            "model": _pqc_minimax_model,
+                            "model": _pqc_gpt54_mini_model,
                             "messages": [{"role": "user", "content": (
                                 "Create a complete, stunning single-page HTML website. "
                                 "Requirements: Tailwind CSS CDN, modern gradients, smooth animations, "
@@ -5097,7 +5103,7 @@ class MultiAgentLoop(AgentLoop):
                         if _score < 9 and _pqc_html_content:
                             yield self._sse({"type": "content", "text": "  🔧 Шаг 4/4: MiniMax исправляет по списку Opus...\n", "agent": "Premium QC"})
                             _mm_fix = _pqc_req.post(self.api_url, headers=_pqc_headers, json={
-                                "model": _pqc_minimax_model,
+                                "model": _pqc_gpt54_mini_model,
                                 "messages": [{"role": "user", "content": (
                                     f"Fix this HTML based on these design issues:\n{_opus_issues}\n\n"
                                     "Apply ALL fixes. Return ONLY complete fixed HTML starting with <!DOCTYPE html>.\n\n"
@@ -5237,7 +5243,7 @@ class MultiAgentLoop(AgentLoop):
                             "X-Title": "ORION Digital v1.0"
                         }
                         _review_payload = {
-                            "model": "minimax/minimax-m2.5",
+                            "model": "gpt54_mini/gpt54_mini-m2.5",
                             "messages": _review_messages,
                             "temperature": 0.1,
                             "max_tokens": 800,
@@ -5281,7 +5287,7 @@ class MultiAgentLoop(AgentLoop):
 
                     try:
                         _fix_payload = {
-                            "model": "minimax/minimax-m2.5",
+                            "model": "gpt54_mini/gpt54_mini-m2.5",
                             "messages": _fix_messages,
                             "temperature": 0.3,
                             "max_tokens": 16000,
@@ -5447,7 +5453,7 @@ class MultiAgentLoop(AgentLoop):
         emojis = {
             'devops': '🔧', 'designer': '🎨', 'developer': '💻',
             'tester': '🧪', 'analyst': '📊', 'copywriter': '✍️',
-            'architect': '🏗️'
+            'premium': '💎'
         }
         return emojis.get(agent_key, '🤖')
 

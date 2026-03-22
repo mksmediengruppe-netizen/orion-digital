@@ -93,7 +93,7 @@ class SSHExecutor:
     def is_connected(self):
         return self._connected and self.client is not None
 
-    def execute_command(self, command, timeout=60):
+    def execute_command(self, command, timeout=120):
         """Execute a command on the remote server and return output."""
         if not self.is_connected:
             conn = self.connect()

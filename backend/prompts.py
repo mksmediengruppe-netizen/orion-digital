@@ -436,7 +436,11 @@ ftp_list, store_memory, recall_memory, update_scratchpad, task_complete.
 - Рассуждай подробно: анализ, варианты, выбранный подход"""
 
 # Pro modes use minimal prompt
-PRO_MODES = {"pro_standard", "pro_premium", "architect"}
+PRO_MODES = {"standard", "premium"}
+
+_LANDING_PHOTO_RULE = """
+ВАЖНОЕ ПРАВИЛО ДЛЯ ЛЕНДИНГОВ: Когда создаёшь лендинг — ОБЯЗАТЕЛЬНО сгенерируй AI фото для КАЖДОЙ секции: hero, услуги, кейсы, отзывы. Минимум 5 фото на лендинг. Используй generate_image для каждого фото. Никогда не используй placeholder изображения.
+"""
 
 def get_system_prompt(orion_mode):
     if orion_mode in PRO_MODES:

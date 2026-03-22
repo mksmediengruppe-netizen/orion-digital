@@ -13,3 +13,10 @@ generated/
 .env
 *.bak*
 
+
+# Large binary files
+backend/data/backups/
+backend/data/qdrant_storage/
+backend/data/database.sqlite
+*.sqlite
+
