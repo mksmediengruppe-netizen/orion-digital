@@ -113,9 +113,9 @@ BRAIN_TOOLS = frozenset([
     "search_web", "read_url", "python_exec",
 ])
 
-TURBO_BRAIN_MODEL = "gpt54_mini/gpt54_mini-m2.5"
+TURBO_BRAIN_MODEL = "openai/gpt-5.4-mini"
 TURBO_HANDS_MODEL = "xiaomi/mimo-v2-flash"
-TURBO_FALLBACK_MODEL = "gpt54_mini/gpt54_mini-m2.5"  # PATCH fix: real model ID
+TURBO_FALLBACK_MODEL = "openai/gpt-5.4-mini"  # PATCH fix: real model ID
 
 
 def _get_dual_brain_model(tool_name: str, orion_mode: str, base_model: str) -> str:
@@ -903,7 +903,7 @@ class AgentLoop:
                 else:
                     _fallback_model_id = TURBO_FALLBACK_MODEL
             else:
-                _fallback_model_id = "gpt54_mini/gpt54_mini-m2.5"  # PATCH fix: real model ID
+                _fallback_model_id = "openai/gpt-5.4-mini"  # PATCH fix: real model ID
             if self.model != _fallback_model_id and _model != _fallback_model_id:
                 _log.warning(f"[agent_loop] Trying fallback model {_fallback_model_id}")
                 try:
@@ -5097,7 +5097,7 @@ class MultiAgentLoop(AgentLoop):
                 yield self._sse({"type": "content", "text": "\n\n✨ **Premium QC v2**: MiniMax создаёт → Opus проверяет → MiniMax исправляет\n", "agent": "Premium QC"})
                 _pqc_api_key = self.api_key
                 _pqc_headers = {"Authorization": f"Bearer {_pqc_api_key}", "Content-Type": "application/json", "HTTP-Referer": "https://orion.mksitdev.ru"}
-                _pqc_gpt54_mini_model = "gpt54_mini/gpt54_mini-m2.5"
+                _pqc_gpt54_mini_model = "openai/gpt-5.4-mini"
                 _pqc_opus_model = "anthropic/claude-opus-4"
                 _pqc_html_content = _qc_html_content if '_qc_html_content' in dir() else None
                 _pqc_site_url = f"http://{_qc_host}"
@@ -5321,7 +5321,7 @@ class MultiAgentLoop(AgentLoop):
                             "X-Title": "ORION Digital v1.0"
                         }
                         _review_payload = {
-                            "model": "gpt54_mini/gpt54_mini-m2.5",
+                            "model": "openai/gpt-5.4-mini",
                             "messages": _review_messages,
                             "temperature": 0.1,
                             "max_tokens": 800,
@@ -5365,7 +5365,7 @@ class MultiAgentLoop(AgentLoop):
 
                     try:
                         _fix_payload = {
-                            "model": "gpt54_mini/gpt54_mini-m2.5",
+                            "model": "openai/gpt-5.4-mini",
                             "messages": _fix_messages,
                             "temperature": 0.3,
                             "max_tokens": 16000,

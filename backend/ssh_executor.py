@@ -70,6 +70,7 @@ class SSHExecutor:
             #    (RejectPolicy would break first-time connections to new servers)
             self.client.set_missing_host_key_policy(StrictHostKeyPolicy())
             import logging
+logger = logging.getLogger("ssh_executor")
             _ssh_logger = logging.getLogger("ssh_executor")
             logging.getLogger("paramiko").setLevel(logging.WARNING)
 
