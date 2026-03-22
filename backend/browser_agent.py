@@ -198,7 +198,7 @@ def _get_pw_page_impl(url: str = None, width: int = 1280, height: int = 800):
         if _pw_page is None or _pw_page.is_closed():
             _pw_page = _pw_context.new_page()
         if url:
-            _pw_page.goto(url, timeout=90000, wait_until="domcontentloaded")
+            _pw_page.goto(url, timeout=_get_timeout(url), wait_until="domcontentloaded")
             # Ждём загрузки SPA-фреймворков
             try:
                 _pw_page.wait_for_load_state("networkidle", timeout=90000)
@@ -242,7 +242,7 @@ def _get_pw_page_impl(url: str = None, width: int = 1280, height: int = 800):
                 _pw_context.set_default_timeout(30000)
                 _pw_page = _pw_context.new_page()
                 if url:
-                    _pw_page.goto(url, timeout=90000, wait_until="domcontentloaded")
+                    _pw_page.goto(url, timeout=_get_timeout(url), wait_until="domcontentloaded")
                     try:
                         _pw_page.wait_for_load_state("networkidle", timeout=90000)
                     except Exception:
@@ -636,6 +636,20 @@ def _get_pw_page(url: str = None, width: int = 1280, height: int = 800):
     except Exception as e:
         logger.error(f"[PW] _get_pw_page thread wrapper error: {e}")
         return None, None, None, None
+
+
+# B2: Heavy page timeout patterns
+HEAVY_PAGE_PATTERNS = [
+    "install", "setup", "wizard", "bitrix", "bitrixsetup",
+    "wp-admin/install", "phpmyadmin"
+]
+
+def _get_timeout(url):
+    url_lower = url.lower()
+    for pattern in HEAVY_PAGE_PATTERNS:
+        if pattern in url_lower:
+            return 300000  # 5 minutes
+    return 90000  # 90 seconds default
 
 
 class BrowserAgent:

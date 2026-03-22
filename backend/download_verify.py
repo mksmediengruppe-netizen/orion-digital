@@ -1,40 +1,43 @@
-"""
-MEGA PATCH Bug 3.2: Download verification utilities
-"""
+
+"""B3: wget download verification utility."""
 import re
 import logging
 
-logger = logging.getLogger("download_verify")
+logger = logging.getLogger("wget_verify")
 
-
-def verify_download_size(command, ssh_conn, min_size=1000):
-    """After wget/curl, verify file was downloaded correctly.
-    Returns (ok, filepath, size)"""
-    if not ssh_conn:
-        return True, None, 0
-
-    filepath = None
-    # Extract output path from wget -O or curl -o
-    match = re.search(r'(?:-O|--output-document[= ]|-o)\s*["\'"]?([^\s"\']+)', command)
-    if match:
-        filepath = match.group(1)
+def verify_wget_download(command, tool_result, ssh_executor, server_config):
+    """Verify wget downloaded file has reasonable size."""
+    if "wget " not in str(command):
+        return tool_result
+    
+    if not tool_result.get("success"):
+        return tool_result
+    
+    match = re.search(r'-O\s+(\S+)', command)
+    if not match:
+        return tool_result
+    
+    filepath = match.group(1)
+    size_result = ssh_executor.execute(
+        f"stat -c%s {filepath} 2>/dev/null || echo 0",
+        server_config
+    )
+    size = int(size_result.get("output", "0").strip())
+    
+    if size < 1000:
+        logger.warning(f"[B3] wget file too small: {filepath} = {size} bytes, retrying")
+        retry_cmd = command.replace("wget ", "wget -c ")
+        ssh_executor.execute(retry_cmd, server_config)
+        # Re-check
+        size_result = ssh_executor.execute(
+            f"stat -c%s {filepath} 2>/dev/null || echo 0",
+            server_config
+        )
+        new_size = int(size_result.get("output", "0").strip())
+        tool_result["wget_verified"] = True
+        tool_result["file_size"] = new_size
     else:
-        # Try to extract from wget URL (last path component)
-        url_match = re.search(r'(?:wget|curl)\s+.*?(https?://\S+)', command)
-        if url_match:
-            url = url_match.group(1).split('?')[0]
-            filepath = url.split('/')[-1]
-
-    if not filepath:
-        return True, None, 0
-
-    try:
-        _, check_out, _ = ssh_conn.exec_command(f"stat -c%s {filepath} 2>/dev/null || echo 0")
-        size = int(check_out.read().decode().strip())
-        if size < min_size:
-            logger.warning(f"Download appears failed: {filepath} = {size} bytes")
-            return False, filepath, size
-        return True, filepath, size
-    except Exception as e:
-        logger.warning(f"Download verify failed: {e}")
-        return True, filepath, 0
+        tool_result["wget_verified"] = True
+        tool_result["file_size"] = size
+    
+    return tool_result
