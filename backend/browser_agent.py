@@ -45,6 +45,39 @@ _pw_contexts = {}  # {chat_id: {"context": ctx, "page": page, "last_used": float
 _pw_lock = _pw_threading.Lock()
 _MAX_BROWSER_CONTEXTS = 5
 
+
+import threading as _threading_watchdog
+
+class BrowserWatchdog:
+    """C3: Kill hung Playwright contexts after timeout."""
+    
+    def __init__(self, timeout=300):
+        self._timeout = timeout
+        self._timer = None
+    
+    def start(self, chat_id):
+        self.cancel()
+        self._timer = _threading_watchdog.Timer(
+            self._timeout, 
+            self._kill, 
+            args=[chat_id]
+        )
+        self._timer.daemon = True
+        self._timer.start()
+    
+    def cancel(self):
+        if self._timer:
+            self._timer.cancel()
+            self._timer = None
+    
+    def _kill(self, chat_id):
+        logger.warning(f"Browser watchdog: killing context for {chat_id}")
+        try:
+            close_browser_context(chat_id)
+        except Exception as e:
+            logger.error(f"Watchdog kill failed: {e}")
+
+
 def get_browser_page(chat_id, pw_browser=None):
     """Get or create a Playwright page for a specific chat."""
     with _pw_lock:
