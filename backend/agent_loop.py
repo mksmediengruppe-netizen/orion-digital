@@ -76,6 +76,7 @@ _tool_sandbox = get_tool_sandbox()
 # ═══ TASK 7: Extracted modules ═══
 from tools_schema import TOOLS_SCHEMA
 from prompts import AgentState, AGENT_SYSTEM_PROMPT, AGENT_SYSTEM_PROMPT_PRO, get_system_prompt, PRO_MODES
+from prompts import WEBSITE_PIPELINE_RULE, BITRIX_PIPELINE_RULE, classify_task_type, WEBSITE_SUCCESS_CRITERIA, BITRIX_SUCCESS_CRITERIA
 try:
     from project_brain import get_project_brain
     _HAS_PROJECT_BRAIN = True
@@ -1598,6 +1599,133 @@ class AgentLoop:
             elif tool_name == "task_complete":  # PATCH 12 bug13: removed duplicate update_scratchpad handler
                 summary = args.get("summary", "Task completed")
                 return {"success": True, "completed": True, "summary": summary}
+
+            # ═══ WEBSITE FACTORY TOOLS ═══
+            elif tool_name == "parse_site_brief":
+                from site_brief_parser import parse_brief
+                brief_text = args.get("brief_text", "")
+                result = parse_brief(brief_text)
+                return {"success": True, "parsed_brief": result}
+
+            elif tool_name == "build_site_blueprint":
+                from site_blueprint_builder import build_blueprint
+                parsed_brief = args.get("parsed_brief", {})
+                result = build_blueprint(parsed_brief)
+                return {"success": True, "blueprint": result}
+
+            elif tool_name == "plan_site_design":
+                from site_design_planner import plan_design
+                blueprint = args.get("blueprint", {})
+                style_preferences = args.get("style_preferences", "")
+                result = plan_design(blueprint, style_preferences)
+                return {"success": True, "design_plan": result}
+
+            elif tool_name == "generate_site_content":
+                from site_content_generator import generate_content
+                blueprint = args.get("blueprint", {})
+                design_plan = args.get("design_plan", {})
+                result = generate_content(blueprint, design_plan)
+                return {"success": True, "content": result}
+
+            elif tool_name == "build_landing":
+                from landing_builder import build_landing
+                blueprint = args.get("blueprint", {})
+                design_plan = args.get("design_plan", {})
+                content = args.get("content", {})
+                result = build_landing(blueprint, design_plan, content)
+                return {"success": True, "html_files": result}
+
+            elif tool_name == "publish_site":
+                from site_publish_operator import publish_site
+                html_files = args.get("html_files", {})
+                domain = args.get("domain", "")
+                ssh_creds = args.get("ssh_credentials", self.ssh_credentials)
+                result = publish_site(html_files, domain, ssh_creds)
+                return {"success": True, "publish_result": result}
+
+            elif tool_name == "verify_site":
+                from site_verifier import verify_site
+                url = args.get("url", "")
+                result = verify_site(url)
+                return {"success": True, "verification": result}
+
+            elif tool_name == "judge_site_release":
+                from site_release_judge import judge_release
+                url = args.get("url", "")
+                brief = args.get("original_brief", "")
+                blueprint = args.get("blueprint", {})
+                result = judge_release(url, brief, blueprint)
+                return {"success": True, "verdict": result}
+
+            # ═══ BITRIX FACTORY TOOLS ═══
+            elif tool_name == "provision_bitrix_server":
+                from bitrix_provisioner import provision_server
+                ssh_creds = args.get("ssh_credentials", self.ssh_credentials)
+                result = provision_server(ssh_creds)
+                return {"success": True, "provision_result": result}
+
+            elif tool_name == "run_bitrix_wizard":
+                from bitrix_wizard_operator import run_wizard
+                url = args.get("url", "")
+                db_config = args.get("db_config", {})
+                result = run_wizard(url, db_config)
+                return {"success": True, "wizard_result": result}
+
+            elif tool_name == "verify_bitrix":
+                from bitrix_verifier import verify_bitrix
+                url = args.get("url", "")
+                ssh_creds = args.get("ssh_credentials", self.ssh_credentials)
+                result = verify_bitrix(url, ssh_creds)
+                return {"success": True, "verification": result}
+
+            elif tool_name == "build_bitrix_template":
+                from bitrix_template_builder import build_template
+                design_plan = args.get("design_plan", {})
+                html_content = args.get("html_content", "")
+                result = build_template(design_plan, html_content)
+                return {"success": True, "template": result}
+
+            elif tool_name == "map_bitrix_components":
+                from bitrix_component_mapper import map_components
+                blueprint = args.get("blueprint", {})
+                result = map_components(blueprint)
+                return {"success": True, "component_map": result}
+
+            elif tool_name == "analyze_bitrix_site":
+                from bitrix_reverse_engineer import analyze_site
+                url = args.get("url", "")
+                ssh_creds = args.get("ssh_credentials", self.ssh_credentials)
+                result = analyze_site(url, ssh_creds)
+                return {"success": True, "analysis": result}
+
+            elif tool_name == "publish_bitrix":
+                from bitrix_publish_operator import publish_bitrix
+                template = args.get("template", {})
+                components = args.get("components", {})
+                ssh_creds = args.get("ssh_credentials", self.ssh_credentials)
+                result = publish_bitrix(template, components, ssh_creds)
+                return {"success": True, "publish_result": result}
+
+            elif tool_name == "judge_bitrix_release":
+                from bitrix_release_judge import judge_release
+                url = args.get("url", "")
+                brief = args.get("original_brief", "")
+                result = judge_release(url, brief)
+                return {"success": True, "verdict": result}
+
+            elif tool_name == "backup_bitrix":
+                from bitrix_recovery import backup_bitrix
+                ssh_creds = args.get("ssh_credentials", self.ssh_credentials)
+                site_path = args.get("site_path", "/var/www/html")
+                result = backup_bitrix(ssh_creds, site_path)
+                return {"success": True, "backup_result": result}
+
+            elif tool_name == "restore_bitrix":
+                from bitrix_recovery import restore_bitrix
+                ssh_creds = args.get("ssh_credentials", self.ssh_credentials)
+                backup_id = args.get("backup_id", "")
+                result = restore_bitrix(ssh_creds, backup_id)
+                return {"success": True, "restore_result": result}
 
             else:
                 return {"success": False, "error": f"Unknown tool: {tool_name}"}
@@ -3385,8 +3513,19 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);
 """
             self._force_file_save = False
 
+        # ═══ PIPELINE INJECTION: classify task and inject pipeline rules ═══
+        try:
+            _task_type = classify_task_type(user_message if isinstance(user_message, str) else str(user_message))
+            if _task_type == "website":
+                _effective_system_prompt += "\n\n" + WEBSITE_PIPELINE_RULE
+                logger.info(f"[PIPELINE] Injected WEBSITE pipeline rule")
+            elif _task_type == "bitrix":
+                _effective_system_prompt += "\n\n" + BITRIX_PIPELINE_RULE
+                logger.info(f"[PIPELINE] Injected BITRIX pipeline rule")
+        except Exception as _pipeline_err:
+            logger.warning(f"[PIPELINE] classify_task_type failed: {_pipeline_err}")
 
-        # ── AutoSummary: загрузить ВСЕ резюме прошлых чатов (без фильтра по query) ──
+        # ── AutoSummary: загрузить ВСЕ резюме прошлых чатов (без фильтра по query) ───
         _project_summaries = ""
         if self.memory:
             try:
