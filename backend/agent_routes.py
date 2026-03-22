@@ -529,7 +529,7 @@ def send_message(chat_id):
 
     # Get user settings
     user_settings = db["users"].get(request.user_id, {}).get("settings", {})
-    variant = user_settings.get("variant", "premium")
+    variant = orion_mode  # FIX: orion_mode is single source of truth
     enhanced = user_settings.get("enhanced_mode", False)
     self_check_level = user_settings.get("self_check_level", "none")  # none | light | medium | deep
     chat_model = user_settings.get("chat_model", "qwen3")
@@ -572,7 +572,7 @@ def send_message(chat_id):
     # Auto-title from first message — generate smart title via LLM (using orchestrator model)
     if len(chat["messages"]) == 1 and chat["title"] == "Новый чат":
         try:
-            _title_config = MODEL_CONFIGS.get(variant, MODEL_CONFIGS["premium"])
+            _title_config = MODEL_CONFIGS.get(orion_mode, MODEL_CONFIGS.get("standard", list(MODEL_CONFIGS.values())[0]))  # FIX: use orion_mode
             _title_model = _title_config["tools"]["model"]  # Используем модель оркестратора (DeepSeek V3.2)
             _title_resp = http_requests.post(
                 OPENROUTER_BASE_URL,
@@ -604,7 +604,7 @@ def send_message(chat_id):
     db_write(db)
 
     # Determine which model to use
-    config = MODEL_CONFIGS.get(variant, MODEL_CONFIGS["premium"])
+    config = MODEL_CONFIGS.get(orion_mode, MODEL_CONFIGS.get("standard", list(MODEL_CONFIGS.values())[0]))  # FIX: use orion_mode
     model = config["coding"]["model"]
     model_name = config["coding"]["name"]
     # Separate model for Agent Mode (must support OpenAI tool calling)
@@ -617,12 +617,10 @@ def send_message(chat_id):
     try:
         from model_router import MODELS as _MR_MODELS
         _mode_to_model = {
-            "fast": ("google/gemini-2.5-flash", "Gemini 2.5 Flash"),
-            "fast":  ("google/gemini-2.5-flash", "Gemini 2.5 Flash"),
-            "standard":   (_MR_MODELS["sonnet"]["id"], _MR_MODELS["sonnet"]["name"]),
-            "premium":    (_MR_MODELS["sonnet"]["id"], _MR_MODELS["sonnet"]["name"]),
-            "premium":      (_MR_MODELS["opus"]["id"], _MR_MODELS["opus"]["name"]),
-            "standard":    ("google/gemini-2.5-flash", "Gemini 2.5 Flash"),
+            # FIX: no duplicate keys - each mode maps to exactly one model
+            "fast":     (_MR_MODELS.get("gpt54_mini", {}).get("id", "openai/gpt-4o-mini"), _MR_MODELS.get("gpt54_mini", {}).get("name", "GPT-5.4 Mini")),
+            "standard": (_MR_MODELS.get("gpt54", {}).get("id", "openai/gpt-4o"),           _MR_MODELS.get("gpt54", {}).get("name", "GPT-5.4")),
+            "premium":  (_MR_MODELS.get("opus", {}).get("id", "anthropic/claude-opus-4"),  _MR_MODELS.get("opus", {}).get("name", "Claude Opus 4")),
         }
         if orion_mode in _mode_to_model:
             agent_model, agent_model_name = _mode_to_model[orion_mode]
