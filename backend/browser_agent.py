@@ -380,6 +380,11 @@ def _pw_navigate(url, width=1280, height=800):
                 # Extract page info
                 page_info = {}
                 try:
+                    # Wait for page to settle before evaluating JS (prevents 'Execution context was destroyed')
+                    try:
+                        page.wait_for_load_state("domcontentloaded", timeout=5000)
+                    except Exception:
+                        pass
                     page_info = {
                         "url": page.url,
                         "title": title,
@@ -391,8 +396,16 @@ def _pw_navigate(url, width=1280, height=800):
                     # Get visible text
                     try:
                         page_info["text"] = page.evaluate("() => document.body?.innerText?.substring(0, 5000) || ''")
-                    except Exception:
-                        page_info["text"] = ""
+                    except Exception as _eval_err:
+                        if "context was destroyed" in str(_eval_err).lower() or "navigation" in str(_eval_err).lower():
+                            # Page navigated during evaluate - wait and retry once
+                            try:
+                                page.wait_for_load_state("domcontentloaded", timeout=5000)
+                                page_info["text"] = page.evaluate("() => document.body?.innerText?.substring(0, 5000) || ''")
+                            except Exception:
+                                page_info["text"] = ""
+                        else:
+                            page_info["text"] = ""
                     # Get forms
                     try:
                         page_info["forms"] = page.evaluate("""() => {
