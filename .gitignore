@@ -21,3 +21,5 @@ __pycache__/
 *.sqlite
 uploads/
 venv/
+.cache/
+backend/data/golden_paths.db
