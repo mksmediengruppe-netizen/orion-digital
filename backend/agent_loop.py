@@ -1844,6 +1844,57 @@ class AgentLoop:
                 result = restore_backup(ssh_creds, backup_id)
                 return {"success": True, "restore_result": result}
 
+            elif tool_name == "install_bitrix":
+                # ═══ PIPELINE V2: Full CLI-based Bitrix installation ═══
+                from install_bitrix_pipeline import install_bitrix_pipeline
+                _ssh_host = self.ssh_credentials.get("host", args.get("server_host", host))
+                _ssh_user = self.ssh_credentials.get("username", self.ssh_credentials.get("user", username))
+                _ssh_pass = self.ssh_credentials.get("password", password)
+                if not _ssh_host:
+                    _ssh_host = host
+                if not _ssh_pass:
+                    _ssh_pass = password
+                if _ssh_host and _ssh_pass:
+                    def _pipeline_ssh_fn(cmd, _h=_ssh_host, _u=_ssh_user, _p=_ssh_pass):
+                        _r = self._ssh_execute_with_retry(_h, _u, _p, cmd)
+                        if isinstance(_r, dict):
+                            return _r.get("stdout", "") or _r.get("stderr", "")
+                        return str(_r)
+                    _install_path = args.get("install_path", "/var/www/html")
+                    _url_prefix = ""
+                    if _install_path != "/var/www/html" and "/var/www/html/" in _install_path:
+                        _url_prefix = "/" + _install_path.split("/var/www/html/")[-1]
+                    pipeline_result = install_bitrix_pipeline(
+                        ssh_fn=_pipeline_ssh_fn,
+                        install_path=_install_path,
+                        db_host=args.get("db_host", "localhost"),
+                        db_name=args.get("db_name", "bitrix_db"),
+                        db_user=args.get("db_user", "bitrix_user"),
+                        db_password=args.get("db_password", ""),
+                        admin_login=args.get("admin_login", "admin"),
+                        admin_email=args.get("admin_email", "admin@example.com"),
+                        admin_password=args.get("admin_password", "Admin123!"),
+                        site_name=args.get("site_name", "My Bitrix Site"),
+                        site_url=args.get("site_url", f"http://{_ssh_host}{_url_prefix}"),
+                        edition=args.get("edition", "start"),
+                        url_prefix=_url_prefix,
+                        use_demo=args.get("use_demo", True),
+                    )
+                    _verdict = pipeline_result.get("verdict", "FAILED")
+                    logger.info(f"[install_bitrix] Pipeline verdict={_verdict}")
+                    return {
+                        "success": _verdict in ("SUCCESS", "PARTIAL_SUCCESS"),
+                        "verdict": _verdict,
+                        "install_result": pipeline_result.get("result", {}),
+                        "verification": pipeline_result.get("verification", {}),
+                        "metrics": pipeline_result.get("metrics", {}),
+                        "checkpoints": pipeline_result.get("checkpoints", []),
+                        "errors": pipeline_result.get("errors", []),
+                        "warnings": pipeline_result.get("warnings", []),
+                    }
+                else:
+                    return {"success": False, "error": "No SSH credentials available for install_bitrix pipeline"}
+
             else:
                 return {"success": False, "error": f"Unknown tool: {tool_name}"}
 
@@ -4632,6 +4683,23 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);
                             logger.info(f"[BLOCK3-GK] Warnings for {tool_name}: {_b3_gk_warnings[:100]}")
                     except Exception as _b3_gk_err:
                         logger.debug(f'[BLOCK3-GK] Error: {_b3_gk_err}')
+                # ═══ SOFT BLUEPRINT GUARD (Variant C) ═══
+                # Мягкое напоминание создать план перед первым HTML/PHP файлом
+                if (tool_name == "file_write"
+                        and isinstance(tool_args, dict)
+                        and any(tool_args.get("path", "").endswith(ext) for ext in (".html", ".php"))
+                        and not any(
+                            a.get("tool") in ("update_task_charter", "update_scratchpad")
+                            for a in self.actions_log
+                        )
+                        and len(self.actions_log) < 3):
+                    _blueprint_hint = (
+                        "Ты начинаешь писать код, но ещё не создал план. "
+                        "Рекомендуется сначала вызвать update_task_charter с blueprint "
+                        "(секции, стиль, контент). Это сэкономит время и деньги."
+                    )
+                    messages.append({"role": "system", "content": _blueprint_hint})
+                    logger.info("[BLUEPRINT-GUARD] Soft hint injected before first HTML/PHP write")
                 # Execute the tool
                 start_time = time.time()
                 result = self._execute_tool(tool_name, tool_args_str)
@@ -5079,81 +5147,52 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);
 
 
                     elif tool_name == "install_bitrix":
-
-                        from bitrix_provisioner import BitrixProvisioner
-
-                        from bitrix_wizard_operator import BitrixWizardOperator
-
-                        from bitrix_verifier import BitrixVerifier
-
-                        provisioner = BitrixProvisioner(self._ssh)
-
-                        config = {
-
-                            "server": self._server_config,
-
-                            "install_path": args.get("install_path"),
-
-                            "db_name": args.get("db_name"),
-
-                            "db_user": args.get("db_user"),
-
-                            "db_password": args.get("db_password"),
-
-                            "site_url": f"http://{args.get('server_host')}"
-
-                        }
-
-                        prep = provisioner.prepare_server(config)
-
-                        if not prep.get("ready"):
-
-                            result = {"success": False, "error": prep.get("errors")}
-
-                        else:
-
-                            wizard = BitrixWizardOperator(self._browser, self._snapshot_store)
-
-                            wizard_result = wizard.run_installation(
-
-                                prep["install_url"],
-
-                                {
-
-                                    "db": {"host": "localhost", "name": args.get("db_name"),
-
-                                           "user": args.get("db_user"), "password": args.get("db_password")},
-
-                                    "admin": {"login": args.get("admin_login", "admin"),
-
-                                              "email": args.get("admin_email"),
-
-                                              "password": args.get("admin_password")}
-
-                                }
-
+                        # ═══ PIPELINE V2: Full CLI-based Bitrix installation ═══
+                        from install_bitrix_pipeline import install_bitrix_pipeline
+                        from bitrix_install_verifier import verify_bitrix_install
+                        _ssh_host = self.ssh_credentials.get("host", args.get("server_host", ""))
+                        _ssh_user = self.ssh_credentials.get("username", self.ssh_credentials.get("user", "root"))
+                        _ssh_pass = self.ssh_credentials.get("password", "")
+                        if _ssh_host and _ssh_pass:
+                            def _pipeline_ssh_fn(cmd, _h=_ssh_host, _u=_ssh_user, _p=_ssh_pass):
+                                _r = self._ssh_execute_with_retry(_h, _u, _p, cmd)
+                                if isinstance(_r, dict):
+                                    return _r.get("stdout", "") or _r.get("stderr", "")
+                                return str(_r)
+                            _install_path = args.get("install_path", "/var/www/html")
+                            _url_prefix = ""
+                            if _install_path != "/var/www/html" and "/var/www/html/" in _install_path:
+                                _url_prefix = "/" + _install_path.split("/var/www/html/")[-1]
+                            pipeline_result = install_bitrix_pipeline(
+                                ssh_fn=_pipeline_ssh_fn,
+                                install_path=_install_path,
+                                db_host=args.get("db_host", "localhost"),
+                                db_name=args.get("db_name", "bitrix_db"),
+                                db_user=args.get("db_user", "bitrix_user"),
+                                db_password=args.get("db_password", ""),
+                                admin_login=args.get("admin_login", "admin"),
+                                admin_email=args.get("admin_email", "admin@example.com"),
+                                admin_password=args.get("admin_password", "Admin123!"),
+                                site_name=args.get("site_name", "My Bitrix Site"),
+                                site_url=args.get("site_url", f"http://{_ssh_host}{_url_prefix}"),
+                                edition=args.get("edition", "start"),
+                                url_prefix=_url_prefix,
+                                use_demo=args.get("use_demo", True),
                             )
-
-                            if wizard_result.get("success"):
-
-                                verifier = BitrixVerifier(self._ssh, self._browser)
-
-                                verify = verifier.full_verify(config)
-
-                                result = {
-
-                                    "success": verify.get("score", 0) >= 6,
-
-                                    "wizard": wizard_result,
-
-                                    "verification": verify
-
-                                }
-
-                            else:
-
-                                result = {"success": False, "wizard": wizard_result}
-
+                            _verdict = pipeline_result.get("verdict", "FAILED")
+                            result = {
+                                "success": _verdict in ("SUCCESS", "PARTIAL_SUCCESS"),
+                                "verdict": _verdict,
+                                "install_result": pipeline_result.get("result", {}),
+                                "verification": pipeline_result.get("verification", {}),
+                                "metrics": pipeline_result.get("metrics", {}),
+                                "checkpoints": pipeline_result.get("checkpoints", []),
+                                "errors": pipeline_result.get("errors", []),
+                                "warnings": pipeline_result.get("warnings", []),
+                            }
+                            logger.info(f"[install_bitrix] Pipeline verdict={_verdict}, result={pipeline_result.get('result', {})}")
+                        else:
+                            result = {"success": False, "error": "No SSH credentials available for install_bitrix pipeline"}
                     elif event["type"] == "text_complete":
                         break
             except Exception as e:
