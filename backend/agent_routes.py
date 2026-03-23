@@ -125,8 +125,14 @@ def _parse_ssh_from_message(message):
         elif rest:
             # Just one word after IP — treat as password
             word = rest.split()[0]
-            return {"host": host, "username": "root", "password": word}
+            # Skip path-like tokens (путь, /, etc.)
+            if not word.startswith('/') and word.lower() not in ('путь', 'path', 'в', 'на', 'по', 'dir'):
+                return {"host": host, "username": "root", "password": word}
 
+    # SSH_HOST_ONLY: if IP found anywhere in message but no password, return host for memory fallback
+    _ip_anywhere = re.search(r'(\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3})', message)
+    if _ip_anywhere:
+        return {"host": _ip_anywhere.group(1), "username": "root", "password": None}
     return None
 
 
@@ -557,6 +563,38 @@ def send_message(chat_id):
         if ssh_from_msg.get("password"):
             ssh_credentials["password"] = ssh_from_msg["password"]
 
+
+    # ── SSH MEMORY FALLBACK: if host found but password missing, check user memory ──
+    # BUG FIX: handles "Создай лендинг... Сервер: 45.67.57.175 путь: /var/www/"
+    # where IP is in the message but password was given in a previous chat
+    if ssh_credentials.get("host") and not ssh_credentials.get("password"):
+        try:
+            from memory import get_user_profile as _get_mem_profile
+            _mem_profile = _get_mem_profile(request.user_id)
+            _mem_prefs = _mem_profile.get("prefs", {}) if _mem_profile else {}
+            _mem_facts = _mem_profile.get("facts", []) if _mem_profile else []
+            # Check prefs for stored SSH password
+            _mem_ssh_pass = (_mem_prefs.get("ssh_password") or
+                             _mem_prefs.get("server_password") or
+                             _mem_prefs.get("ssh_pass"))
+            _mem_ssh_user = (_mem_prefs.get("ssh_user") or
+                             _mem_prefs.get("server_user") or
+                             _mem_prefs.get("ssh_username"))
+            if _mem_ssh_pass:
+                ssh_credentials["password"] = _mem_ssh_pass
+                if _mem_ssh_user and not ssh_credentials.get("username"):
+                    ssh_credentials["username"] = _mem_ssh_user
+                logging.info(f"[SSH_MEMORY_FALLBACK] Restored SSH password from user memory prefs")
+            else:
+                # Search facts for SSH password patterns like "пароль: X" or "password: X"
+                for _fact in _mem_facts:
+                    _pw_m = re.search(r'(?:пароль|password|passwd)[:\s]+([\S]+)', _fact, re.IGNORECASE)
+                    if _pw_m:
+                        ssh_credentials["password"] = _pw_m.group(1)
+                        logging.info(f"[SSH_MEMORY_FALLBACK] Restored SSH password from user memory facts")
+                        break
+        except Exception as _mem_err:
+            logging.debug(f"[SSH_MEMORY_FALLBACK] Could not load memory: {_mem_err}")
     # Save user message
     now = datetime.now(timezone.utc).isoformat()
     user_msg = {
