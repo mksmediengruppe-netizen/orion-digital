@@ -49,6 +49,15 @@ const PROJECT_TEMPLATES = [
 
 /* ── CONSTANTS ────────────────────────────────────────────── */
 const API_BASE = '/api';
+// A9: In-memory store (replaces browser storage)
+window._orionStore = {
+    theme: 'light',
+    mode: null,
+    premiumDesign: false,
+    chatsCache: null,
+    drafts: {},
+    themeV2: false,
+};
 const SSE_TIMEOUT = 120000;
 
 const MODES = {
@@ -222,7 +231,7 @@ const Utils = {
 const API = {
     async request(method, path, body, isFormData = false) {
         const headers = {};
-        if (state.token) headers['Authorization'] = 'Bearer ' + state.token;
+        // A2: Auth via httpOnly cookie only (credentials: 'include')
         if (!isFormData && body) headers['Content-Type'] = 'application/json';
 
         const opts = { method, headers };
@@ -233,13 +242,12 @@ const API = {
         if (res.status === 401) {
             // BUG-12v4: Cache chats IMMEDIATELY before any logout
             if (state.chats && state.chats.length) {
-                try { sessionStorage.setItem('orion_chats_cache', JSON.stringify(state.chats)); } catch(e) {}
+                window._orionStore.chatsCache = JSON.stringify(state.chats);
             }
             // Try silent re-login before logout
             const reloginOk = await Auth.silentRelogin();
             if (reloginOk) {
                 // Retry the original request with new token
-                headers['Authorization'] = 'Bearer ' + state.token;
                 const retry = await fetch(API_BASE + path, { method, headers, body: opts.body, credentials: 'include' });
                 if (retry.ok) return retry.json();
             }
@@ -269,8 +277,7 @@ const API = {
             throw new Error(err.error || err.detail || 'Неверный логин или пароль');
         }
         const data = await res.json();
-        // Normalize: backend returns {token, user}, frontend expects {access_token}
-        if (data.token && !data.access_token) data.access_token = data.token;
+        // A2: No token in response — auth via httpOnly cookie only
         return data;
     },
 
@@ -284,17 +291,25 @@ const API = {
 /* ── AUTH ─────────────────────────────────────────────────── */
 const Auth = {
     init() {
-        const token = null; // token in httpOnly cookie
-        const user = null; // fetched from /api/auth/me
-        if (token && user) {
-            state.token = token;
-            state.user = JSON.parse(user);
-            this.onLogin();
-        } else {
+        // A2+A9: Check auth via /api/auth/me (cookie-based)
+        this.checkSession();
+    },
+
+    async checkSession() {
+        try {
+            const me = await fetch(API_BASE + '/auth/me', { credentials: 'include' });
+            if (me.ok) {
+                const data = await me.json();
+                window._orionUser = data;
+                state.user = data;
+                this.onLogin();
+            } else {
+                this.showAuthScreen();
+            }
+        } catch(e) {
             this.showAuthScreen();
         }
     },
-
     showAuthScreen() {
         $('auth-screen').classList.remove('hidden');
         $('app').classList.add('hidden');
@@ -324,14 +339,13 @@ const Auth = {
 
         try {
             const data = await API.login(username, password);
-            state.token = data.access_token;
-            // token now in httpOnly cookie
+            // A2: Auth via httpOnly cookie — no token stored in JS
             // BUG-12v2: Save creds for silent re-login after server restart
             // credentials not stored in browser
 
             const me = await API.get('/auth/me');
             state.user = me;
-            // user info fetched from /api/auth/me
+            window._orionUser = me;
 
             this.onLogin();
         } catch (err) {
@@ -350,7 +364,7 @@ const Auth = {
             if (state.user.total_spent !== undefined) state.totalCost = state.user.total_spent;
         }
         // BUG-12v4: Restore cached chats immediately (before API loads)
-        const cachedChats = sessionStorage.getItem('orion_chats_cache');
+        const cachedChats = window._orionStore.chatsCache;
         if (cachedChats) {
             try {
                 const parsed = JSON.parse(cachedChats);
@@ -372,13 +386,12 @@ const Auth = {
 
     // BUG-12v2: Silent re-login when session expired (server restart)
     async silentRelogin() {
-        const savedCreds = null; // no creds in browser
+        const savedCreds = null; // A9: no creds stored
         if (!savedCreds) return false;
         try {
             const { email, password } = JSON.parse(savedCreds);
             const data = await API.login(email, password);
-            state.token = data.access_token;
-            // token now in httpOnly cookie
+            // A2: Auth via httpOnly cookie — no token stored in JS
             console.log('BUG-12v2: Silent re-login successful');
             return true;
         } catch (e) {
@@ -387,21 +400,21 @@ const Auth = {
         }
     },
 
-    // BUG-12v2: Soft logout — save chats to sessionStorage, show login
+    // BUG-12v2: Soft logout — cache chats in memory, show login
     softLogout() {
         // BUG-12v4: Always cache chats before any state changes
         if (state.chats && state.chats.length) {
-            try { sessionStorage.setItem('orion_chats_cache', JSON.stringify(state.chats)); } catch(e) {}
+            window._orionStore.chatsCache = JSON.stringify(state.chats);
             console.log('BUG-12v4: Cached', state.chats.length, 'chats before softLogout');
         }
-        state.token = null;
         state.user = null;
+        window._orionUser = null;
         // DON'T clear state.chats — keep them for immediate display after re-login
-        sessionStorage.removeItem('orion_token');
+        // A9: token in httpOnly cookie only
         // Don't remove orion_user — needed for re-login
         this.showAuthScreen();
         // BUG-12v4: Pre-fill login if we have saved creds
-        const savedCreds = null; // no creds in browser
+        const savedCreds = null; // A9: no creds stored
         if (savedCreds) {
             try {
                 const { email } = JSON.parse(savedCreds);
@@ -416,21 +429,21 @@ const Auth = {
     logout() {
         // Save chats cache before full logout
         if (state.chats.length) {
-            sessionStorage.setItem('orion_chats_cache', JSON.stringify(state.chats));
+            window._orionStore.chatsCache = JSON.stringify(state.chats);
         }
         // BUG-12v3: Always cache chats before clearing
         if (state.chats && state.chats.length) {
-            try { sessionStorage.setItem('orion_chats_cache', JSON.stringify(state.chats)); } catch(e) {}
+            window._orionStore.chatsCache = JSON.stringify(state.chats);
         }
-        state.token = null;
         state.user = null;
+        window._orionUser = null;
         // BUG-12v3: Do NOT clear chats — they will be restored from cache
         // state.chats = [];  
         state.currentChatId = null;
         state.messages = [];
-        sessionStorage.removeItem('orion_token');
-        sessionStorage.removeItem('orion_user');
-        sessionStorage.removeItem('orion_theme');
+        // A9: token in httpOnly cookie only
+        // A9: user in memory only
+        window._orionStore.theme = 'light';
         // Keep orion_creds and orion_chats_cache
         Theme.set('light');
         this.showAuthScreen();
@@ -443,11 +456,11 @@ const Auth = {
 const Theme = {
     init() {
         // One-time migration: reset dark theme preference
-        if (!sessionStorage.getItem('orion_theme_v2')) {
-            sessionStorage.removeItem('orion_theme');
-            sessionStorage.setItem('orion_theme_v2', '1');
+        if (!window._orionStore.themeV2) {
+            window._orionStore.theme = 'light';
+            window._orionStore.themeV2 = true;
         }
-        const saved = sessionStorage.getItem('orion_theme');
+        const saved = window._orionStore.theme;
         const theme = saved || 'light';
         this.set(theme);
     },
@@ -457,7 +470,7 @@ const Theme = {
     set(theme) {
         state.theme = theme;
         document.documentElement.setAttribute('data-theme', theme);
-        sessionStorage.setItem('orion_theme', theme);
+        window._orionStore.theme = theme;
         const btn = $('btn-theme');
         if (btn) btn.textContent = theme === 'dark' ? '☀️' : '🌙';
         // Toggle highlight.js theme
@@ -469,13 +482,11 @@ const Theme = {
 /* ── UI INIT ──────────────────────────────────────────────── */
 const UI = {
     init() {
-        // ПАТЧ W1-1: Восстановить режим из sessionStorage
-        try {
-            const savedMode = sessionStorage.getItem('orion_mode');
-            if (savedMode && ['turbo_basic', 'turbo-basic', 'turbo_standard', 'turbo_premium', 'pro_basic', 'pro-basic', 'pro_standard', 'pro_premium', 'architect', 'smart_turbo'].includes(savedMode)) {
-                state.mode = savedMode;
-            }
-        } catch(e) {}
+        // Restore mode from memory
+        // A9: Restore mode from in-memory store
+        if (window._orionStore.mode) {
+            state.mode = window._orionStore.mode;
+        }
         this.renderModes();
         this.renderWelcome();
         this.bindEvents();
@@ -553,16 +564,14 @@ const UI = {
         toggle.addEventListener('click', () => {
             state.premiumDesign = !state.premiumDesign;
             toggle.classList.toggle('active', state.premiumDesign);
-            try { sessionStorage.setItem('orion_premium_design', state.premiumDesign ? '1' : '0'); } catch(e) {}
+            window._orionStore.premiumDesign = state.premiumDesign;
             Toast.show(state.premiumDesign ? '✨ Premium Design включён — Opus + самокритика' : 'Premium Design выключен', 'info');
         });
-        // Restore from sessionStorage
-        try {
-            if (sessionStorage.getItem('orion_premium_design') === '1') {
-                state.premiumDesign = true;
-                toggle.classList.add('active');
-            }
-        } catch(e) {}
+        // Restore from memory
+        if (window._orionStore.premiumDesign) {
+            state.premiumDesign = true;
+            toggle.classList.add('active');
+        }
         grid.parentElement.insertBefore(toggle, grid.nextSibling);
     },
 
@@ -585,7 +594,7 @@ const UI = {
 
     setMode(key) {
         state.mode = key;
-        try { sessionStorage.setItem('orion_mode', key); } catch(e) {}
+        window._orionStore.mode = key;
         $$('.mode-btn').forEach(b => b.classList.toggle('active', b.dataset.mode === key));
         this.updateModeDesc();
         this.updateFooterInfo();
@@ -842,13 +851,13 @@ const UI = {
             });
             textarea.addEventListener('input', () => {
                 this.autoResize(textarea);
-                // ══ DRAFT PERSISTENCE: save draft to sessionStorage ══
+                // ══ DRAFT PERSISTENCE: save draft to memory ══
                 if (state.currentChatId) {
                     const val = textarea.value;
                     if (val) {
-                        sessionStorage.setItem('draft_' + state.currentChatId, val);
+                        window._orionStore.drafts[state.currentChatId] = val;
                     } else {
-                        sessionStorage.removeItem('draft_' + state.currentChatId);
+                        delete window._orionStore.drafts[state.currentChatId];
                     }
                 }
             });
@@ -1045,8 +1054,8 @@ const ChatList = {
                 state.chats = _prevChats;
                 console.log('BUG-12v4: API returned 0 chats, keeping', _prevChats.length, 'from state');
             } else {
-                // Try restore from sessionStorage cache
-                const cached = sessionStorage.getItem('orion_chats_cache');
+                // Try restore from memory cache
+                const cached = window._orionStore.chatsCache;
                 if (cached) {
                     try {
                         const parsedCache = JSON.parse(cached);
@@ -1057,9 +1066,9 @@ const ChatList = {
                     } catch(e) { /* keep empty */ }
                 }
             }
-            // Cache chats in sessionStorage for resilience
+            // Cache chats in memory for resilience
             if (state.chats.length) {
-                try { sessionStorage.setItem('orion_chats_cache', JSON.stringify(state.chats)); } catch(e) {}
+                window._orionStore.chatsCache = JSON.stringify(state.chats);
             }
             // FIX КРИТ-2: Инициализируем totalCost из суммы всех чатов при загрузке
             state.totalCost = state.chats.reduce((sum, c) => sum + (c.total_cost || 0), 0);
@@ -1071,8 +1080,8 @@ const ChatList = {
             if (_prevChats.length > 0) {
                 state.chats = _prevChats;
             } else {
-                // Try sessionStorage cache as last resort
-                const cached = sessionStorage.getItem('orion_chats_cache');
+                // Try memory cache as last resort
+                const cached = window._orionStore.chatsCache;
                 if (cached) {
                     try { const p = JSON.parse(cached); if (p && p.length) state.chats = p; } catch(e2) {}
                 }
@@ -1091,7 +1100,7 @@ const ChatList = {
 
         if (!chats.length) {
             // BUG-12v4: Last chance — try cache before showing empty
-            const cached = sessionStorage.getItem('orion_chats_cache');
+            const cached = window._orionStore.chatsCache;
             if (cached) {
                 try {
                     const parsed = JSON.parse(cached);
@@ -1361,10 +1370,10 @@ const Chat = {
         state.currentChatCost = chat?.total_cost || 0;
         UI.updateFooterInfo();
 
-        // Restore draft from sessionStorage
+        // Restore draft from memory
         const textarea = $('message-input');
         if (textarea) {
-            const draft = sessionStorage.getItem('draft_' + chatId);
+            const draft = (window._orionStore.drafts || {})[chatId] || null;
             if (draft) {
                 textarea.value = draft;
                 UI.autoResize(textarea);
@@ -1481,7 +1490,7 @@ const Chat = {
                 const interruptAttachments = [...state.attachments];
                 state.attachments = [];
                 Attachments.renderPreviews();
-                sessionStorage.removeItem('draft_' + state.currentChatId);
+                if (window._orionStore.drafts) delete window._orionStore.drafts[state.currentChatId];
                 // Stop current agent, then send new message
                 try {
                     await API.post('/chats/' + state.currentChatId + '/stop');
@@ -1503,7 +1512,7 @@ const Chat = {
                 UI.autoResize(textarea);
                 state.attachments = [];
                 Attachments.renderPreviews();
-                sessionStorage.removeItem('draft_' + state.currentChatId);
+                if (window._orionStore.drafts) delete window._orionStore.drafts[state.currentChatId];
                 // Show user message in chat
                 const appendMsg = { id: Utils.generateId(), role: 'user', content: text, attachments: [], created_at: new Date().toISOString() };
                 state.messages.push(appendMsg);
@@ -1521,7 +1530,7 @@ const Chat = {
                 state.messageQueue.push(queueItem);
                 UI.showQueueIndicator(state.messageQueue.length);
                 Toast.show('⏳ Сообщение добавлено в очередь', 'info');
-                sessionStorage.removeItem('draft_' + state.currentChatId);
+                if (window._orionStore.drafts) delete window._orionStore.drafts[state.currentChatId];
                 textarea.value = '';
                 UI.autoResize(textarea);
                 state.attachments = [];
@@ -1536,7 +1545,7 @@ const Chat = {
         state.attachments = [];
         Attachments.renderPreviews();
         // Clear draft on send
-        if (state.currentChatId) sessionStorage.removeItem('draft_' + state.currentChatId);
+        if (state.currentChatId) if (window._orionStore.drafts) delete window._orionStore.drafts[state.currentChatId];
 
         await this._doSend(text, attachments);
     },
@@ -1605,7 +1614,7 @@ const Chat = {
                         fd.append('file', att.file, att.name);
                         const uploadRes = await fetch(API_BASE + '/api/upload', { credentials: 'include',
                             method: 'POST',
-                            credentials: 'include', headers: { 'Authorization': 'Bearer ' + state.token },
+                            credentials: 'include', headers: {},
                             body: fd
                         });
                         if (uploadRes.ok) {
@@ -1647,7 +1656,7 @@ const Chat = {
                 credentials: 'include',
                 headers: {
                     'Content-Type': 'application/json',
-                    'Authorization': 'Bearer ' + state.token
+                    // A2: Auth via cookie
                 },
                 body: JSON.stringify(body),
                 signal: controller.signal
@@ -2358,7 +2367,7 @@ const Chat = {
 
             const res = await fetch(API_BASE + '/chats/' + chatId + '/reconnect', { credentials: 'include',
                 method: 'GET',
-                credentials: 'include', headers: { 'Authorization': 'Bearer ' + state.token },
+                credentials: 'include', headers: {},
                 signal: controller.signal
             });
 
@@ -2455,7 +2464,7 @@ const Chat = {
         try {
             const res = await fetch(API_BASE + '/chat/quick', { credentials: 'include',
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + state.token },
+                headers: { 'Content-Type': 'application/json', // A2: Auth via cookie },
                 body: JSON.stringify({
                     message: 'Придумай короткое название (3-5 слов) для чата где пользователь спросил: "' + userMessage.substring(0, 100) + '". Ответь ТОЛЬКО названием, без кавычек и пояснений.',
                     model: 'deepseek/deepseek-v3.2'
@@ -3108,7 +3117,7 @@ const ActivityPanel = {
     },
 
     restoreForChat(chatId) {
-        // ПАТЧ-HIST: восстанавливаем историю из sessionStorage
+        // Restore history from memory
         const log = $('activity-log');
         if (!log) return;
         // Очищаем текущее содержимое
@@ -3127,7 +3136,7 @@ const ActivityPanel = {
         }
         try {
             const key = 'orion_activity_' + chatId;
-            const saved = JSON.parse(sessionStorage.getItem(key) || '[]');
+            const saved = JSON.parse((window._orionStore._hist || {})[key] || '[]');
             if (saved.length === 0) {
                 // Нет истории — показываем заглушку
                 const emptyDiv = document.createElement('div');
@@ -3151,7 +3160,7 @@ const ActivityPanel = {
         } catch(e) {}
     },
     addLineRaw(type, emoji, text, timeStr, detailData) {
-        // Добавляем строку без сохранения в sessionStorage (для восстановления)
+        // Add line without saving to memory
         const log = $('activity-log');
         if (!log) return;
         const emptyEl = log.querySelector('.activity-empty');
@@ -3229,10 +3238,10 @@ const ActivityPanel = {
         if (state.currentChatId) {
             try {
                 const key = 'orion_activity_' + state.currentChatId;
-                const saved = JSON.parse(sessionStorage.getItem(key) || '[]');
+                const saved = JSON.parse((window._orionStore._hist || {})[key] || '[]');
                 saved.push(lineData);
                 if (saved.length > 200) saved.splice(0, saved.length - 200);
-                sessionStorage.setItem(key, JSON.stringify(saved));
+                if (!window._orionStore._hist) window._orionStore._hist = {}; window._orionStore._hist[key] = JSON.stringify(saved);
             } catch(e) {}
         }
         const logWrap = $('activity-log-wrap');
@@ -3280,15 +3289,15 @@ const ActivityPanel = {
 
         const lineData = { type, emoji, text, time: new Date().toISOString(), detail: detailData };
         state.activityLines.push(lineData);
-        // ПАТЧ-HIST: сохраняем в sessionStorage
+        // Save to memory
         if (state.currentChatId) {
             try {
                 const key = 'orion_activity_' + state.currentChatId;
-                const saved = JSON.parse(sessionStorage.getItem(key) || '[]');
+                const saved = JSON.parse((window._orionStore._hist || {})[key] || '[]');
                 saved.push(lineData);
                 // Храним максимум 200 событий
                 if (saved.length > 200) saved.splice(0, saved.length - 200);
-                sessionStorage.setItem(key, JSON.stringify(saved));
+                if (!window._orionStore._hist) window._orionStore._hist = {}; window._orionStore._hist[key] = JSON.stringify(saved);
             } catch(e) {}
         }
         // Scroll the wrap container for proper scrolling
@@ -3576,16 +3585,16 @@ const ActivityPanel = {
             const badge = this._currentGroup.querySelector('.group-count');
             if (badge) badge.textContent = this._groupItemCount + ' \u0434\u0435\u0439\u0441\u0442\u0432.';
         }
-        // Save to sessionStorage
+        // Save to memory
         const lineData = { type, emoji, text, time: new Date().toISOString(), detail: detailData, grouped: true };
         state.activityLines.push(lineData);
         if (state.currentChatId) {
             try {
                 const key = 'orion_activity_' + state.currentChatId;
-                const saved = JSON.parse(sessionStorage.getItem(key) || '[]');
+                const saved = JSON.parse((window._orionStore._hist || {})[key] || '[]');
                 saved.push(lineData);
                 if (saved.length > 200) saved.splice(0, saved.length - 200);
-                sessionStorage.setItem(key, JSON.stringify(saved));
+                if (!window._orionStore._hist) window._orionStore._hist = {}; window._orionStore._hist[key] = JSON.stringify(saved);
             } catch(e) {}
         }
         // Scroll the wrap container, not the log itself
@@ -3794,7 +3803,7 @@ const Toast = {
 const SSHSettings = {
     servers: [],
     init() {
-        this.servers = JSON.parse(sessionStorage.getItem('orion_ssh_servers') || '[]');
+        this.servers = window._orionStore.sshServers || [];
         const addBtn = document.getElementById('btn-add-ssh');
         const saveBtn = document.getElementById('btn-save-ssh');
         const cancelBtn = document.getElementById('btn-cancel-ssh');
@@ -3814,7 +3823,7 @@ const SSHSettings = {
         const password = document.getElementById('ssh-password').value;
         if (!host || !user) { alert('Укажите хост и логин'); return; }
         this.servers.push({ host, user, port, password, id: Date.now().toString() });
-        sessionStorage.setItem('orion_ssh_servers', JSON.stringify(this.servers));
+        window._orionStore.sshServers = [...this.servers];
         document.getElementById('ssh-add-form').classList.add('hidden');
         document.getElementById('ssh-host').value = '';
         document.getElementById('ssh-user').value = '';
@@ -3824,7 +3833,7 @@ const SSHSettings = {
     },
     removeServer(id) {
         this.servers = this.servers.filter(s => s.id !== id);
-        sessionStorage.setItem('orion_ssh_servers', JSON.stringify(this.servers));
+        window._orionStore.sshServers = [...this.servers];
         this.render();
     },
     render() {
@@ -4413,7 +4422,7 @@ document.addEventListener('DOMContentLoaded', () => {
         };
         modeSelectEl.addEventListener('change', modeSelectEl._modeHandler);
         // Also sync the select value with saved mode
-        const savedMode = sessionStorage.getItem('orion_mode');
+        const savedMode = window._orionStore.mode;
         if (savedMode && modeSelectEl.querySelector('option[value="' + savedMode + '"]')) {
             modeSelectEl.value = savedMode;
         }
@@ -4447,14 +4456,14 @@ function initResizable() {
                 handle.classList.remove('active');
                 document.removeEventListener('mousemove', onMouseMove);
                 document.removeEventListener('mouseup', onMouseUp);
-                sessionStorage.setItem('orion_' + targetId + '_width', target.style.width);
+                if (!window._orionStore._widths) window._orionStore._widths = {}; window._orionStore._widths['orion_' + targetId + '_width'] = target.style.width;
             };
             document.addEventListener('mousemove', onMouseMove);
             document.addEventListener('mouseup', onMouseUp);
         });
     });
     ['sidebar', 'activity-panel'].forEach(id => {
-        const saved = sessionStorage.getItem('orion_' + id + '_width');
+        const saved = (window._orionStore._widths || {})['orion_' + id + '_width'];
         const el = document.getElementById(id);
         if (saved && el) { el.style.width = saved; el.style.minWidth = saved; }
     });
@@ -4775,9 +4784,9 @@ const MultiSSH = {
     servers: [],
 
     init() {
-        // Загрузить из sessionStorage
+        // Load from memory
         try {
-            this.servers = JSON.parse(sessionStorage.getItem('orion_ssh_servers') || '[]');
+            this.servers = window._orionStore.sshServers || [];
         } catch { this.servers = []; }
     },
 
@@ -4811,7 +4820,7 @@ const MultiSSH = {
     },
 
     save() {
-        sessionStorage.setItem('orion_ssh_servers', JSON.stringify(this.servers));
+        window._orionStore.sshServers = [...this.servers];
     },
 
     // Для отправки с сообщением — активный сервер
