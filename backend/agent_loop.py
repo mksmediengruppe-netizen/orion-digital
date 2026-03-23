@@ -430,6 +430,9 @@ class AgentLoop:
         self._ask_user_pending = None # Патч 5: ожидание ответа пользователя
         self._intent_result = None    # Результат intent clarifier
         self._session_cost = 0.0      # Текущая стоимость сессии
+        self._last_iter_cost = 0.0    # SCORECARD FIX: last iteration cost
+        self._last_iter_tokens_in = 0
+        self._last_iter_tokens_out = 0
 
         # ПАТЧ A2: model_override и system_prompt_override
         self.model_override = kwargs.get('model_override', None)
@@ -597,9 +600,12 @@ class AgentLoop:
             cost = (tokens_in * model_cfg["input_price"] / 1_000_000 +
                     tokens_out * model_cfg["output_price"] / 1_000_000)
             self._session_cost += cost
+            self._last_iter_cost = cost  # SCORECARD FIX: track per-iteration cost
+            self._last_iter_tokens_in = tokens_in
+            self._last_iter_tokens_out = tokens_out
             add_session_cost(self.session_id, cost)
             log_cost(
-                user_id=getattr(self, "user_id", "unknown"),
+                user_id=getattr(self, "_user_id", "") or getattr(self, "user_id", ""),
                 model_id=model_id,
                 tokens_in=tokens_in,
                 tokens_out=tokens_out,
@@ -3515,8 +3521,8 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);
                 if _sc_task_id:
                     self._scorecard_store.start(
                         task_id=_sc_task_id,
-                        chat_id=getattr(self, 'chat_id', ''),
-                        user_id=getattr(self, 'user_id', ''),
+                        chat_id=getattr(self, "_chat_id", "") or getattr(self, "chat_id", ""),
+                        user_id=getattr(self, "_user_id", "") or getattr(self, "user_id", ""),
                         orion_mode=getattr(self, 'orion_mode', 'default'),
                         objective=str(user_message)[:500] if user_message else '',
                         max_iterations=getattr(self, 'max_iterations', 30)
@@ -3981,7 +3987,10 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);
                 try:
                     _sc_task_id = getattr(self, '_current_task_id', None)
                     if _sc_task_id:
-                        self._scorecard_store.record_iteration(_sc_task_id)
+                        _iter_cost = getattr(self, '_last_iter_cost', 0.0)
+                        _iter_tin = getattr(self, '_last_iter_tokens_in', 0)
+                        _iter_tout = getattr(self, '_last_iter_tokens_out', 0)
+                        self._scorecard_store.record_iteration(_sc_task_id, cost=_iter_cost, input_tokens=_iter_tin, output_tokens=_iter_tout)
                 except Exception:
                     pass
             # ═══ BLOCK 4: AutonomyManager — check iteration limit ═══
