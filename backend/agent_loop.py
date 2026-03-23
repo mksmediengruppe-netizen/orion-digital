@@ -382,6 +382,7 @@ class AgentLoop:
         self.total_tokens_out = 0
         self.actions_log = []
         self._current_phase = "start"  # [PIPELINE] phase state tracker
+        self._browser_check_count = 0  # [COST-OPT] browser_check_site call counter
         self._extra_credentials = {}  # ПАТЧ 1: FTP, админка и др.
         self._solution_cache = None  # ПАТЧ 9: Solution Cache
         self._stop_requested = False
@@ -3495,6 +3496,33 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);
                 return ''
         except Exception:
             return ''
+    def _trim_context(self, messages):
+        """[COST-OPT] Сжать старые tool results для экономии токенов.
+        Оставляет последние 10 сообщений нетронутыми.
+        Старые tool-сообщения длиннее 200 символов — обрезает до 200 + [trimmed].
+        """
+        try:
+            if len(messages) <= 20:
+                return messages
+            cutoff = len(messages) - 10
+            for i, msg in enumerate(messages):
+                if i >= cutoff:
+                    break
+                if msg.get("role") == "tool":
+                    content = msg.get("content", "")
+                    if isinstance(content, str) and len(content) > 200:
+                        msg["content"] = content[:200] + "... [trimmed]"
+                    elif isinstance(content, list):
+                        # Handle list-format content (tool result blocks)
+                        for block in content:
+                            if isinstance(block, dict) and block.get("type") == "text":
+                                text = block.get("text", "")
+                                if len(text) > 200:
+                                    block["text"] = text[:200] + "... [trimmed]"
+        except Exception as _trim_err:
+            logger.debug(f"[COST-OPT] _trim_context error: {_trim_err}")
+        return messages
+
     def run_stream(self, user_message, chat_history=None, file_content=None, ssh_credentials=None):
         """
         Run the agent loop with streaming.
@@ -4105,6 +4133,10 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);
 
             # ── BUG-1 FIX: before_iteration (GoalAnchor + Compaction) ──
             logger.info(f"[DEBUG-IT] iteration={iteration}, about to call before_iteration")
+            # ── COST-OPT: trim old tool results to reduce context size ──
+            if iteration > 5:
+                messages = self._trim_context(messages)
+                logger.debug(f"[COST-OPT] _trim_context applied at iteration {iteration}")
             if self.memory:
                 try:
                     messages = self.memory.before_iteration(messages, iteration, self.MAX_ITERATIONS)
@@ -4696,6 +4728,21 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);
                             logger.info(f"[BLOCK3-GK] Warnings for {tool_name}: {_b3_gk_warnings[:100]}")
                     except Exception as _b3_gk_err:
                         logger.debug(f'[BLOCK3-GK] Error: {_b3_gk_err}')
+                # ═══ BROWSER_CHECK_SITE COST LIMITER ═══
+                # Мягкое предупреждение после 3 вызовов browser_check_site
+                if tool_name == "browser_check_site":
+                    self._browser_check_count = getattr(self, "_browser_check_count", 0) + 1
+                    logger.info(f"[COST-OPT] browser_check_site call #{self._browser_check_count}")
+                    if self._browser_check_count > 3:
+                        messages.append({
+                            "role": "system",
+                            "content": (
+                                f"Ты уже проверил сайт {self._browser_check_count - 1} раз. "
+                                "Используй ssh_execute для точечных проверок "
+                                "(curl, grep) — это дешевле."
+                            )
+                        })
+                        logger.info(f"[COST-OPT] browser_check_site soft warning injected (count={self._browser_check_count})")
                 # ═══ SOFT BLUEPRINT GUARD (Variant C, v2) ═══
                 # Мягкое напоминание — только для full_build без плана
                 if (tool_name == "file_write"
