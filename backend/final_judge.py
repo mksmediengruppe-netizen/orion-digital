@@ -64,6 +64,10 @@ class JudgeResult:
             "timestamp": self.timestamp
         }
 
+    def get(self, key, default=None):
+        """Dict-compatible .get() for backward compatibility."""
+        return self.to_dict().get(key, default)
+
     def format_for_user(self) -> str:
         """Форматирует результат для показа пользователю."""
         emoji = {"PASS": "✅", "PARTIAL": "⚠️", "FAIL": "❌", "SKIP": "⏭️"}.get(self.verdict, "?")

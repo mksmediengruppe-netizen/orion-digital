@@ -4930,14 +4930,14 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);
                     })
 
                 # ═══ SSH_EARLY_EXIT_V2: Force completion for simple SSH tasks ═══
-                if tool_name == "ssh_execute" and result.get("success", False) and iteration >= 2:
+                if tool_name == "ssh_execute" and result.get("success", False) and iteration >= 2 and not any(a.get("tool","").startswith("browser") for a in (self.actions_log or [])[-50:]):
                     _orig_msg = (user_message or "").lower()
                     _simple_kw = ["создай файл", "create file", "mkdir", "touch", "echo ",
                                   "cat ", "ls ", "uname", "whoami", "hostname", "df ",
                                   "free ", "uptime", "date", "pwd", "id ", "head ",
                                   "tail ", "wc ", "du ", "ps ", "выполни команду",
                                   "покажи", "проверь версию", "version", "info"]
-                    if any(kw in _orig_msg for kw in _simple_kw) or iteration >= 5:
+                    if any(kw in _orig_msg for kw in _simple_kw) or iteration >= 10:
                         logger.info(f"[SSH_EARLY_EXIT_V2] iter={iteration}, forcing task_complete")
                         messages.append({
                             "role": "system",
