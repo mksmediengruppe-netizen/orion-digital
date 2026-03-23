@@ -2464,7 +2464,7 @@ const Chat = {
         try {
             const res = await fetch(API_BASE + '/chat/quick', { credentials: 'include',
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json', // A2: Auth via cookie },
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     message: 'Придумай короткое название (3-5 слов) для чата где пользователь спросил: "' + userMessage.substring(0, 100) + '". Ответь ТОЛЬКО названием, без кавычек и пояснений.',
                     model: 'deepseek/deepseek-v3.2'
