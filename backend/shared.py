@@ -28,13 +28,11 @@ def _get_fernet():
     """Get Fernet cipher from ORION_ENCRYPT_KEY env var."""
     key = os.environ.get("ORION_ENCRYPT_KEY", "")
     if not key:
-        # Auto-generate and save to .env if missing
-        key = Fernet.generate_key().decode()
-        env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
-        with open(env_path, "a") as ef:
-            ef.write(f"\nORION_ENCRYPT_KEY={key}\n")
-        os.environ["ORION_ENCRYPT_KEY"] = key
-        logger.info("[SECURITY] Generated and saved ORION_ENCRYPT_KEY")
+        raise RuntimeError(
+            "ORION_ENCRYPT_KEY not set! Generate:\n"
+            "python3 -c 'from cryptography.fernet import Fernet; "
+            "print(Fernet.generate_key().decode())'"
+        )
     return Fernet(key.encode() if isinstance(key, str) else key)
 
 _SECRET_SETTINGS_KEYS = {"ssh_password", "github_token", "n8n_api_key"}

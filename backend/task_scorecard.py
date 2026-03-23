@@ -95,6 +95,11 @@ class TaskScorecard:
                 quality_score    REAL DEFAULT 0.0,
                 final_answer_len INTEGER DEFAULT 0,
                 
+                -- E7: Agent behavior metrics
+                search_fallback_used INTEGER DEFAULT 0,
+                approaches_tried     INTEGER DEFAULT 0,
+                repeated_failures    INTEGER DEFAULT 0,
+                
                 -- Метаданные
                 objective        TEXT DEFAULT '',
                 status           TEXT DEFAULT 'running',
@@ -145,6 +150,17 @@ class TaskScorecard:
                   max_iterations, objective[:500], now, now))
             conn.commit()
         finally:
+
+            # E7: Add new columns if missing
+            for col, default in [
+                ('search_fallback_used', '0'),
+                ('approaches_tried', '0'),
+                ('repeated_failures', '0'),
+            ]:
+                try:
+                    conn.execute(f'ALTER TABLE task_scorecards ADD COLUMN {col} INTEGER DEFAULT {default}')
+                except Exception:
+                    pass  # Column already exists
             if not _USE_UNIFIED_DB:
                 conn.close()
 
@@ -441,3 +457,30 @@ def get_scorecard_store() -> TaskScorecard:
         _singleton_store = TaskScorecard()
     return _singleton_store
 
+
+# ═══ A6: PASS/FAIL Classification ═══
+HARD_FAIL_PATTERNS = [
+    "402 Payment Required",
+    "500 Internal Server Error",
+    "Response ended prematurely",
+]
+
+def classify_task_result(status_code=None, task_status=None, tokens_in=0, tokens_out=0, elapsed=0, is_final=True):
+    """Classify task result with context awareness."""
+    # Hard FAIL
+    if task_status and task_status != "SUCCESS":
+        return "FAIL", "task_status != SUCCESS"
+    if status_code and status_code >= 500:
+        return "FAIL", f"HTTP {status_code}"
+    if status_code == 402:
+        return "FAIL", "HTTP 402 Payment Required"
+    if tokens_in == 0 and tokens_out == 0 and elapsed > 30:
+        return "FAIL", "zero tokens after 30s"
+    # Contextual
+    if status_code == 404 and not is_final:
+        return "OK", "404 as intermediate check"
+    if status_code == 404 and is_final:
+        return "FAIL", "404 on final result"
+    if status_code == 401 and not is_final:
+        return "OK", "401 as auth flow check"
+    return "PASS", "all checks passed"

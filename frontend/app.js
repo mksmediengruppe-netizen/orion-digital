@@ -1,4 +1,16 @@
 
+// ═══ SECURITY: DOMPurify sanitization ═══
+function safeHTML(html) {
+    if (typeof DOMPurify !== 'undefined') return DOMPurify.sanitize(html);
+    return html;
+}
+
+// ═══ SECURITY: All API calls use httpOnly cookie ═══
+window._orionFetch = async function(url, opts = {}) {
+    opts.credentials = 'include';
+    return fetch(url, opts);
+};
+
 // A10: XSS protection
 function safeText(text) {
     const div = document.createElement('div');
@@ -272,8 +284,8 @@ const API = {
 /* ── AUTH ─────────────────────────────────────────────────── */
 const Auth = {
     init() {
-        const token = sessionStorage.getItem('orion_token');
-        const user = sessionStorage.getItem('orion_user');
+        const token = null; // token in httpOnly cookie
+        const user = null; // fetched from /api/auth/me
         if (token && user) {
             state.token = token;
             state.user = JSON.parse(user);
@@ -313,13 +325,13 @@ const Auth = {
         try {
             const data = await API.login(username, password);
             state.token = data.access_token;
-            sessionStorage.setItem('orion_token', data.access_token);
+            // token now in httpOnly cookie
             // BUG-12v2: Save creds for silent re-login after server restart
-            sessionStorage.setItem('orion_creds', JSON.stringify({ email: username, password }));
+            // credentials not stored in browser
 
             const me = await API.get('/auth/me');
             state.user = me;
-            sessionStorage.setItem('orion_user', JSON.stringify(me));
+            // user info fetched from /api/auth/me
 
             this.onLogin();
         } catch (err) {
@@ -360,13 +372,13 @@ const Auth = {
 
     // BUG-12v2: Silent re-login when session expired (server restart)
     async silentRelogin() {
-        const savedCreds = sessionStorage.getItem('orion_creds');
+        const savedCreds = null; // no creds in browser
         if (!savedCreds) return false;
         try {
             const { email, password } = JSON.parse(savedCreds);
             const data = await API.login(email, password);
             state.token = data.access_token;
-            sessionStorage.setItem('orion_token', data.access_token);
+            // token now in httpOnly cookie
             console.log('BUG-12v2: Silent re-login successful');
             return true;
         } catch (e) {
@@ -389,7 +401,7 @@ const Auth = {
         // Don't remove orion_user — needed for re-login
         this.showAuthScreen();
         // BUG-12v4: Pre-fill login if we have saved creds
-        const savedCreds = sessionStorage.getItem('orion_creds');
+        const savedCreds = null; // no creds in browser
         if (savedCreds) {
             try {
                 const { email } = JSON.parse(savedCreds);

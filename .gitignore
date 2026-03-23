@@ -23,3 +23,5 @@ uploads/
 venv/
 .cache/
 backend/data/golden_paths.db
+
+source/

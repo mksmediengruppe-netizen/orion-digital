@@ -1,3 +1,4 @@
+from tool_sandbox import is_url_safe
 """
 Browser Agent Module v2 — Универсальная автоматизация любых веб-панелей.
 Playwright для реального браузера + механизм передачи управления пользователю.
@@ -176,7 +177,8 @@ def _get_nav_timeout(url: str) -> int:
             return 180000
     return 90000
 
-_pw_thread_pool = concurrent.futures.ThreadPoolExecutor(max_workers=1, thread_name_prefix="pw")
+PLAYWRIGHT_MAX_WORKERS = int(os.environ.get("PLAYWRIGHT_MAX_WORKERS", "2"))
+_pw_thread_pool = concurrent.futures.ThreadPoolExecutor(max_workers=PLAYWRIGHT_MAX_WORKERS, thread_name_prefix="pw")
 
 
 # ══ SECURITY FIX 4: SSL verification with exceptions ══

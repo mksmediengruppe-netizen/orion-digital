@@ -120,7 +120,7 @@ def login():
     # ══ SECURITY FIX 2: HttpOnly cookie ══
     from flask import make_response as _make_resp
     resp_data = {
-        "token": token,
+        # "token": removed — httpOnly cookie only
         "user": {
             "id": user_id,
             "email": user["email"],
@@ -144,7 +144,7 @@ def login():
 @require_auth
 def logout():
     """Invalidate session."""
-    token = request.headers.get("Authorization", "").replace("Bearer ", "")
+    token = request.cookies.get("orion_token") or request.headers.get("Authorization", "").replace("Bearer ", "")
     db = db_read()
     db["sessions"].pop(token, None)
     db_write(db)

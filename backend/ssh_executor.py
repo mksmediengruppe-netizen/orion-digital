@@ -22,6 +22,16 @@ KNOWN_HOSTS_PATH = os.path.join(
     'known_hosts'
 )
 
+SSH_HOST_POLICY = os.environ.get("SSH_HOST_POLICY", "bootstrap")
+
+class StrictOnlyPolicy(paramiko.MissingHostKeyPolicy):
+    """Strict mode: reject unknown hosts."""
+    def missing_host_key(self, client, hostname, key):
+        raise paramiko.SSHException(
+            f"Host {hostname} not in known_hosts. "
+            f"Add manually or use SSH_HOST_POLICY=bootstrap"
+        )
+
 class StrictHostKeyPolicy(paramiko.MissingHostKeyPolicy):
     """Strict host key verification with known_hosts file."""
     
@@ -71,7 +81,10 @@ class SSHExecutor:
                     pass  # corrupted file — start fresh
             # 2. Use AutoAddPolicy but log + save new keys
             #    (RejectPolicy would break first-time connections to new servers)
-            self.client.set_missing_host_key_policy(StrictHostKeyPolicy())
+            if SSH_HOST_POLICY == "strict":
+                self.client.set_missing_host_key_policy(StrictOnlyPolicy())
+            else:
+                self.client.set_missing_host_key_policy(StrictHostKeyPolicy())
             import logging
             _ssh_logger = logging.getLogger("ssh_executor")
             logging.getLogger("paramiko").setLevel(logging.WARNING)
@@ -290,14 +303,21 @@ class SSHConnectionPool:
 
     def __init__(self):
         self._connections = {}
-        self._lock = threading.Lock()
+        self._global_lock = threading.Lock()
+        self._host_locks = {}  # per-host locks for parallel connections
+
+    def _get_host_lock(self, key):
+        with self._global_lock:
+            if key not in self._host_locks:
+                self._host_locks[key] = threading.Lock()
+            return self._host_locks[key]
 
     def get_connection(self, host, username="root", password=None, port=22, key_path=None):
         import logging as _log
-        _log.getLogger("ssh_debug").info(f"[SSH_DEBUG] Connecting to {username}@{host} password_len={len(password or '')}...")  # PATCH 12 bug8: removed password_repr from logs
-        """Get or create SSH connection."""
+        """Get or create SSH connection (per-host lock for parallel support)."""
         key = f"{username}@{host}:{port}"
-        with self._lock:
+        host_lock = self._get_host_lock(key)
+        with host_lock:
             if key in self._connections:
                 conn = self._connections[key]
                 if conn.is_connected:
@@ -315,7 +335,7 @@ class SSHConnectionPool:
 
     def release_all(self):
         """Close all connections."""
-        with self._lock:
+        with self._global_lock:
             for conn in self._connections.values():
                 conn.disconnect()
             self._connections.clear()

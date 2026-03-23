@@ -136,7 +136,7 @@ def _get_dual_brain_model(tool_name: str, orion_mode: str, base_model: str) -> s
     - Остальные → MiniMax M2.5 (по умолчанию думает)
     Для Pro/Architect — возвращает base_model без изменений.
     """
-    if orion_mode not in ("fast", "fast", "standard"):
+    if orion_mode not in ("fast", "standard", "premium"):
         return base_model
     if tool_name in HANDS_TOOLS:
         return TURBO_HANDS_MODEL
@@ -180,21 +180,21 @@ AGENT_ZONES = {
     "orchestrator": {
         "tools": ["store_memory", "recall_memory", "canvas_create", "task_complete"],
         "description": "Планирование, память, координация",
-        "models": {"fast": "gpt54_mini", "fast": "gpt54_mini",  # PATCH fix
+        "models": {"fast": "gpt54_mini",  # PATCH fix
                    "standard": "sonnet", "premium": "sonnet"}
     },
     "designer": {
         "tools": ["generate_design", "generate_image", "edit_image",
                   "create_artifact", "browser_navigate", "browser_get_text"],
         "description": "UI/UX, дизайн, визуальный контент",
-        "models": {"fast": "gemini", "fast": "gemini",
+        "models": {"fast": "gemini",
                    "standard": "gemini", "premium": "gemini"}
     },
     "developer": {
         "tools": ["ssh_execute", "file_write", "file_read",
                   "code_interpreter", "generate_file"],
         "description": "Код, разработка, файлы",
-        "models": {"fast": "mimo", "fast": "mimo",  # PATCH fix: hands
+        "models": {"fast": "mimo",  # PATCH fix: hands
                    "standard": "mimo", "premium": "mimo"}
     },
     "devops": {
@@ -202,14 +202,14 @@ AGENT_ZONES = {
                   "browser_check_site", "browser_check_api",
                   "ftp_upload", "ftp_download", "ftp_list"],
         "description": "Серверы, деплой, инфраструктура, FTP",
-        "models": {"fast": "mimo", "fast": "mimo",  # PATCH fix: hands
+        "models": {"fast": "mimo",  # PATCH fix: hands
                    "standard": "mimo", "premium": "mimo"}
     },
     "analyst": {
         "tools": ["web_search", "web_fetch", "code_interpreter",
                   "generate_chart", "generate_report", "read_any_file"],
         "description": "Анализ данных, исследования, отчёты",
-        "models": {"fast": "gpt54_mini", "fast": "gpt54_mini",  # PATCH fix: brain
+        "models": {"fast": "gpt54_mini",  # PATCH fix: brain
                    "standard": "gpt54_mini", "premium": "sonnet"}
     },
     "tester": {
@@ -218,14 +218,14 @@ AGENT_ZONES = {
                   "browser_submit", "browser_select", "browser_ask_auth",
                   "code_interpreter", "ssh_execute"],
         "description": "Тестирование, QA, проверка, браузерная автоматизация",
-        "models": {"fast": "gpt54_mini", "fast": "gpt54_mini",  # PATCH fix: brain
+        "models": {"fast": "gpt54_mini",  # PATCH fix: brain
                    "standard": "gpt54_mini", "premium": "gpt54_mini"}
     },
     "integrator": {
         "tools": ["ssh_execute", "file_write", "file_read",
                   "browser_check_api", "code_interpreter", "web_fetch"],
         "description": "Интеграции, API, вебхуки",
-        "models": {"fast": "mimo", "fast": "mimo",  # PATCH fix: hands
+        "models": {"fast": "mimo",  # PATCH fix: hands
                    "standard": "mimo", "premium": "mimo"}
     },
     "website_builder": {
@@ -442,6 +442,11 @@ class AgentLoop:
         self._orchestrator_prompt = ""
         self._orchestrator_plan = None
 
+        # ═══ E1: Bounded search tracking ═══
+        self._search_count_per_subtask = 0
+        self._search_queries_used = set()
+        # ═══ E3: Attempt history ═══
+        self._attempt_history = []
         # BUG-1 FIX: memory_v9 engine
         self.memory = None
 
@@ -4353,9 +4358,10 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);
                             if hasattr(self, '_charter_store') and self._current_task_id:
                                 _fj_charter = self._charter_store.get(self._current_task_id)
                             _fj_verdict = self._final_judge.judge(
-                                charter=_fj_charter,
-                                final_answer=summary,
-                                actions_log=self.actions_log[-30:]
+                                task_charter=_fj_charter,
+                                agent_final_answer=summary,
+                                artifacts=getattr(self, '_artifacts', []) or [],
+                                ssh_results=[a for a in (self.actions_log or [])[-30:] if a.get('tool') == 'ssh_execute']
                             )
                             _fj_v = _fj_verdict.get("verdict", "SKIP")
                             _fj_s = float(_fj_verdict.get("score", 0))
@@ -4393,7 +4399,9 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);
                                 })
                                 _fj_gate_passed = False
                         except Exception as _fj_err:
-                            logger.warning(f"[BLOCK4] FinalJudge error (non-blocking): {_fj_err}")
+                            logger.error(f"[BLOCK4] FinalJudge error: {_fj_err}")
+                            self._last_fj_verdict = "NEEDS_REVIEW"
+                            self._last_fj_score = 0.0
                     # ── If gate failed, skip all post-complete logic and continue loop ──
                     if not _fj_gate_passed:
                         continue
@@ -4579,7 +4587,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);
                         logging.warning(f"[ANTI-LOOP] Pro mode loop detected: {_last_tools[0][0]}")
                     else:
                         # Turbo: escalate to Sonnet
-                        self.model = "anthropic/claude-sonnet-4"
+                        self.model = "anthropic/claude-sonnet-4.6"
                         messages.append({"role": "system", "content":
                             "Предыдущий подход не сработал. Ты переключен на более "
                             "умную модель. Проанализируй что пошло не так и "
@@ -6036,7 +6044,7 @@ class MultiAgentLoop(AgentLoop):
                     _repeat_count = self._loop_counter[_tc_hash]
                     if _repeat_count >= 3:
                         _current_model = self.model
-                        _fallback = ["anthropic/claude-sonnet-4-5", "anthropic/claude-opus-4-5", "openai/gpt-4o"]
+                        _fallback = ["anthropic/claude-sonnet-4.6", "anthropic/claude-opus-4", "openai/gpt-4o"]
                         _new_model = next((m for m in _fallback if m != _current_model), _fallback[0])
                         logging.warning("[AntiLoop] " + tool_name + " repeated " + str(_repeat_count) + "x! Switching model " + _current_model + " -> " + _new_model)
                         self.model = _new_model
@@ -6053,7 +6061,7 @@ class MultiAgentLoop(AgentLoop):
                         logger.warning(f"[ANTI-LOOP-PIPELINE] Phase {phase_idx+1} agent {agent_key}: {tool_name} called {_ph_count}x. Loop: {_phase_consecutive_loops}")
                         if _phase_consecutive_loops >= 3 and _phase_model_escalation == 0:
                             _phase_model_escalation = 1
-                            self.model = "anthropic/claude-sonnet-4-5"
+                            self.model = "anthropic/claude-sonnet-4.6"
                             logger.warning(f"[ANTI-LOOP-PIPELINE] Escalating to Sonnet")
                             yield self._sse({"type": "info", "message": f"🔄 Переключаю на Sonnet для выхода из цикла в фазе {phase_idx+1}..."})
                             messages.append({"role": "system", "content": (
@@ -6062,7 +6070,7 @@ class MultiAgentLoop(AgentLoop):
                             )})
                         elif _phase_consecutive_loops >= 5 and _phase_model_escalation == 1:
                             _phase_model_escalation = 2
-                            self.model = "anthropic/claude-opus-4-5"
+                            self.model = "anthropic/claude-opus-4"
                             logger.warning(f"[ANTI-LOOP-PIPELINE] Escalating to Opus")
                             yield self._sse({"type": "info", "message": f"🔄 Переключаю на Claude Opus для выхода из цикла..."})
                         elif _phase_consecutive_loops >= 7:

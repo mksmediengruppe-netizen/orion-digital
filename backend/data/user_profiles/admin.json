@@ -1,6 +1,6 @@
 {
   "user_id": "admin",
-  "chat_count": 950,
+  "chat_count": 1128,
   "facts": [
     "Пользователя зовут Тестер5",
     "Работает с Elixir и Phoenix",
@@ -181,7 +181,7 @@
     "база_данных": "SQLite",
     "language": "Python",
     "task_type": "system_monitoring",
-    "format": "tar.gz",
+    "format": "User prefers answers as a single number for simple arithmetic questions.",
     "stack": "HTML/CSS/JS (одностраничный лендинг)",
     "containerization": "Docker Compose",
     "backend_language": "Python",
@@ -245,7 +245,10 @@
     "site_name": "dimydiv — реклама у блогеров",
     "admin_login": "admin",
     "admin_email": "dimydiv@gmail.com",
-    "AI-фото": "красивый закат над морем"
+    "AI-фото": "красивый закат над морем",
+    "краткость_ответа": true,
+    "requests_ssh_command": "Пользователь попросил выполнить команду `hostname && uptime` по SSH на сервере root@45.67.57.175.",
+    "ssh_access_details": "Пользователь предоставил SSH-доступ к серверу root@45.67.57.175 с логином root и паролем 00!DS467PKs0."
   },
   "expertise_level": "unknown"
 }

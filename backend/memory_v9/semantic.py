@@ -1,3 +1,20 @@
+
+# ═══ D1: Qdrant healthcheck ═══
+def check_qdrant():
+    """Check if Qdrant is available."""
+    try:
+        import requests as _req
+        resp = _req.get("http://localhost:6333/health", timeout=5)
+        if resp.status_code == 200:
+            import logging
+            logging.getLogger("memory_v9").info("[QDRANT] Connected OK")
+            return True
+    except Exception:
+        pass
+    import logging
+    logging.getLogger("memory_v9").warning("[QDRANT] Not available — using in-memory fallback")
+    return False
+
 """
 L3: Semantic Memory — нейросетевые эмбеддинги + Qdrant persistent.
 Fallback на TF-IDF если sentence-transformers не установлен.

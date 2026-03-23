@@ -1,3 +1,4 @@
+import os
 #!/usr/bin/env python3
 """
 ORION Digital — Full Test Suite (test_full.py)
@@ -7,7 +8,7 @@ Run: cd /var/www/orion/backend && python3 tests/test_full.py
 """
 import sys, os, ast, time, json, sqlite3, unittest, importlib, glob, re
 
-BACKEND = "/var/www/orion/backend"
+BACKEND = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if BACKEND not in sys.path:
     sys.path.insert(0, BACKEND)
 os.chdir(BACKEND)

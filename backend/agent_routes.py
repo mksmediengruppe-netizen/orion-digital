@@ -620,7 +620,7 @@ def send_message(chat_id):
             # FIX: no duplicate keys - each mode maps to exactly one model
             "fast":     (_MR_MODELS.get("gpt54_mini", {}).get("id", "openai/gpt-4o-mini"), _MR_MODELS.get("gpt54_mini", {}).get("name", "GPT-5.4 Mini")),
             "standard": (_MR_MODELS.get("gpt54", {}).get("id", "openai/gpt-4o"),           _MR_MODELS.get("gpt54", {}).get("name", "GPT-5.4")),
-            "premium":  (_MR_MODELS.get("opus", {}).get("id", "anthropic/claude-opus-4"),  _MR_MODELS.get("opus", {}).get("name", "Claude Opus 4")),
+            "premium":  (_MR_MODELS.get("gpt54", {}).get("id", "openai/gpt-5.4"),  _MR_MODELS.get("gpt54", {}).get("name", "GPT-5.4")),  # PATCHED: was opus, now gpt54
         }
         if orion_mode in _mode_to_model:
             agent_model, agent_model_name = _mode_to_model[orion_mode]
@@ -715,8 +715,8 @@ def send_message(chat_id):
     # ═══ ФИНАЛЬНАЯ АРХИТЕКТУРА: Pro/Architect bypass — один агент, без pipeline ═══
     if orion_mode in ("standard", "premium"):
         if orion_mode == "premium":
-            _pro_agent_model = "anthropic/claude-opus-4"
-            _pro_model_name = "Claude Opus 4"
+            _pro_agent_model = "openai/gpt-5.4"  # PATCHED: was opus, now gpt54
+            _pro_model_name = "GPT-5.4"
         elif orion_mode == "standard":
             _pro_agent_model = "openai/gpt-5.4"
             _pro_model_name = "GPT-5.4"
@@ -973,8 +973,11 @@ def send_message(chat_id):
                 
                 # Переопределить модель если нужно
                 _pm = _orch_plan_send.get("primary_model", "")
-                if _pm and _pm in MODEL_MAP:
-                    agent_model = MODEL_MAP[_pm]
+                # PATCHED: Do NOT override agent_model from orchestrator primary_model
+                # The model is already correctly set by _mode_to_model based on orion_mode
+                # Orchestrator primary_model was causing wrong models (deepseek, opus) to be used
+                if _pm:
+                    logging.info(f"[ORCH] primary_model={_pm} (ignored, using mode-based model)")
                     
             except Exception as _oe:
                 logging.warning(f"Orchestrator in send_message: {_oe}"); import traceback; logging.warning(f"Orchestrator traceback: {traceback.format_exc()}")
@@ -995,7 +998,8 @@ def send_message(chat_id):
                 api_key=OPENROUTER_API_KEY,
                 api_url=OPENROUTER_BASE_URL,
                 ssh_credentials={},  # No SSH needed for file generation
-                user_id=_saved_user_id  # BUG-5 FIX
+                user_id=_saved_user_id,  # BUG-5 FIX
+                orion_mode=orion_mode,  # FIX: pass orion_mode for correct model selection
             )
             agent._chat_id = chat_id  # BUG-5 FIX
             agent._verify_enabled = data.get("verify", False)  # ПАТЧ 7
@@ -1122,10 +1126,16 @@ def send_message(chat_id):
                     api_url=OPENROUTER_BASE_URL,
                     ssh_credentials=ssh_credentials,
                     user_id=_saved_user_id,  # BUG-5 FIX
+                    orion_mode=orion_mode,  # FIX: pass orion_mode for correct model selection
                     model_override=_sm_model_override,
                     system_prompt_override=_sm_extra_prompt
                 )
                 agent._chat_id = chat_id  # BUG-5 FIX: передаём chat_id
+                # CAP MAX_ITERATIONS for fast mode to prevent runaway loops
+                if orion_mode == "fast":
+                    agent.MAX_ITERATIONS = 15
+                elif orion_mode == "standard":
+                    agent.MAX_ITERATIONS = 25
 
             # BUG-8 FIX 2: Pass orchestrator plan to SSH agent
             if _orch_plan_send:
@@ -1176,7 +1186,7 @@ def send_message(chat_id):
                         logging.warning(f"SSE parse error: {_sse_err}")
                 # Send done event after loop finishes
                 try:
-                    yield "data: " + json.dumps({"type": "done", "tokens_in": agent.total_tokens_in, "tokens_out": agent.total_tokens_out, "cost": agent.total_cost, "model": getattr(agent, "model", "")}) + "\n\n"
+                    yield "data: " + json.dumps({"type": "done", "tokens_in": agent.total_tokens_in, "tokens_out": agent.total_tokens_out, "cost": getattr(agent, "_session_cost", 0.0), "model": getattr(agent, "model", "")}) + "\n\n"
                 except GeneratorExit:
                     pass
                 except Exception as _done_err:
@@ -1466,9 +1476,20 @@ def send_message(chat_id):
                         logging.warning(f"Self-check failed: {e}")
                         yield f"data: {json.dumps({'type': 'self_check', 'status': 'error', 'error': str(e)[:100]})}\n\n"
 
-        # Calculate cost using routed model prices
-        _active_input_price = routed.get("input_price", config["coding"]["input_price"])
-        _active_output_price = routed.get("output_price", config["coding"]["output_price"])
+        # Calculate cost using AGENT model prices (not routed model)
+        # For fast mode: agent_model=gpt-5.4-mini, routed_model=gpt-5.4 (wrong if using routed)
+        from model_router import MODELS as _MODELS
+        _agent_model_key = None
+        for _k, _m in _MODELS.items():
+            if _m["id"] == agent_model:
+                _agent_model_key = _k
+                break
+        if _agent_model_key:
+            _active_input_price = _MODELS[_agent_model_key]["input_price"]
+            _active_output_price = _MODELS[_agent_model_key]["output_price"]
+        else:
+            _active_input_price = routed.get("input_price", config["coding"]["input_price"])
+            _active_output_price = routed.get("output_price", config["coding"]["output_price"])
         cost_in = (tokens_in / 1_000_000) * _active_input_price
         cost_out = (tokens_out / 1_000_000) * _active_output_price
         total_cost = round(cost_in + cost_out, 6)
@@ -1626,7 +1647,7 @@ def send_message(chat_id):
         # Send completion event with routing info
         # КРИТ-2 FIX: отдельное событие 'cost' для frontend
         yield f"data: {json.dumps({'type': 'cost', 'cost': total_cost, 'tokens_in': tokens_in, 'tokens_out': tokens_out})}\n\n"
-        yield f"data: {json.dumps({'type': 'done', 'tokens_in': tokens_in, 'tokens_out': tokens_out, 'cost': total_cost, 'model': routed_model_name, 'tier': routed_tier, 'complexity': routed_complexity})}\n\n"
+        yield f"data: {json.dumps({'type': 'done', 'tokens_in': tokens_in, 'tokens_out': tokens_out, 'cost': total_cost, 'model': agent_model_name, 'tier': routed_tier, 'complexity': routed_complexity})}\n\n"
 
         # ══ TASK PERSISTENCE: mark task as done ══
         with _tasks_lock:
@@ -2159,8 +2180,10 @@ def direct_chat():
                         _pm = _orch_plan.get("primary_model", "")
                         _pa = _orch_plan.get("primary_agent", "")
                         
-                        if _pm and _pm in MODEL_MAP:
-                            _orch_model_override = MODEL_MAP[_pm]
+                        # PATCHED: Do NOT override model from orchestrator primary_model
+                        if _pm:
+                            logging.info(f"[ORCH] primary_model={_pm} (ignored, using mode-based model)")
+                            _orch_model_override = None
                         
                         if _pa and _pa in AGENT_PROMPTS:
                             _orch_prompt_extra = AGENT_PROMPTS[_pa]

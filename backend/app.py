@@ -37,6 +37,29 @@ from crash_recovery import get_crash_recovery
 _crash_recovery = get_crash_recovery()
 _crash_recovery.start_watchdog()
 
+
+# ═══ SECURITY: CSP + CSRF ═══
+@app.after_request
+def security_headers(response):
+    response.headers['Content-Security-Policy'] = (
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; "
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdnjs.cloudflare.com; "
+        "font-src 'self' https://fonts.gstatic.com; "
+        "img-src 'self' data: https:; "
+        "connect-src 'self' https://openrouter.ai"
+    )
+    return response
+
+@app.before_request
+def csrf_check():
+    from flask import request as _req
+    if _req.method in ('POST', 'PUT', 'DELETE'):
+        origin = _req.headers.get('Origin', '')
+        if origin and 'orion.mksitdev.ru' not in origin and 'localhost' not in origin and '127.0.0.1' not in origin:
+            from flask import jsonify as _j
+            return _j({"error": "CSRF check failed"}), 403
+
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 3510))
     app.run(host="0.0.0.0", port=port, debug=False)

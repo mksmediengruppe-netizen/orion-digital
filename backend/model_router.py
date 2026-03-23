@@ -85,15 +85,8 @@ MODELS = {
         "description": "Emergency: только при 2+ rejected от FinalJudge",
         "max_tokens": 32000
     },
-    "mimo": {
-        "id": "openai/gpt-5.4-nano",
-        "name": "MiMo V2 Flash",
-        "input_price": 0.09,
-        "output_price": 0.29,
-        "role": "hands",
-        "description": "Руки: SSH, FTP, деплой, серверные команды",
-        "max_tokens": 32768
-    }
+    # "mimo" removed — use gpt54_nano with runtime_role instead
+    # runtime_role "hands" is tracked in metrics, not in model definition
 }
 
 # ══════════════════════════════════════════════════════════════
@@ -111,9 +104,9 @@ MODES = {
             "intent_clarifier": "gpt54_nano",
             "designer":         "gemini_flash",
             "developer":        "gpt54_mini",
-            "devops":           "mimo",
-            "integrator":       "mimo",
-            "tester":           "mimo",
+            "devops":           "gpt54_nano",
+            "integrator":       "gpt54_nano",
+            "tester":           "gpt54_nano",
             "analyst":          "gpt54_mini",
             "copywriter":       "gpt54_mini",
             "code_reviewer":    None,
@@ -130,9 +123,9 @@ MODES = {
             "intent_clarifier": "gpt54_nano",
             "designer":         "gemini_flash",
             "developer":        "gpt54_mini",
-            "devops":           "mimo",
-            "integrator":       "mimo",
-            "tester":           "mimo",
+            "devops":           "gpt54_nano",
+            "integrator":       "gpt54_nano",
+            "tester":           "gpt54_nano",
             "analyst":          "gpt54_mini",
             "copywriter":       "gpt54_mini",
             "code_reviewer":    None,
@@ -149,9 +142,9 @@ MODES = {
             "intent_clarifier": "gpt54_nano",
             "designer":         "gemini_pro",
             "developer":        "gpt54_mini",
-            "devops":           "mimo",
-            "integrator":       "mimo",
-            "tester":           "mimo",
+            "devops":           "gpt54_nano",
+            "integrator":       "gpt54_nano",
+            "tester":           "gpt54_nano",
             "analyst":          "gpt54",
             "copywriter":       "sonnet",
             "code_reviewer":    "sonnet",
@@ -174,7 +167,7 @@ FALLBACK_CHAINS = {
     "gemini_pro":  ["google/gemini-2.5-pro", "anthropic/claude-sonnet-4.6"],
     "sonnet":      ["anthropic/claude-sonnet-4.6", "openai/gpt-5.4"],
     "opus":        ["anthropic/claude-opus-4", "openai/gpt-5.4", "anthropic/claude-sonnet-4.6"],
-    "mimo":        ["openai/gpt-5.4-nano", "openai/gpt-5.4-nano"],
+    # mimo removed — use gpt54_nano chain
 }
 
 # ══════════════════════════════════════════════════════════════
@@ -189,7 +182,7 @@ PRICING = {
     "google/gemini-2.5-pro":       (1.25, 10.00),
     "anthropic/claude-sonnet-4.6": (3.00, 15.00),
     "anthropic/claude-opus-4":     (15.00, 75.00),
-    "openai/gpt-5.4-nano":        (0.09, 0.29),
+    # duplicate nano entry removed
 }
 
 # ══════════════════════════════════════════════════════════════
@@ -326,6 +319,8 @@ def select_model(query: str, variant: str = "standard",
 
 _data_dir = os.environ.get("DATA_DIR", "/var/www/orion/backend/data")
 _cost_log_path = os.path.join(_data_dir, "cost_log.json")
+import threading as _threading_cost
+_cost_lock = _threading_cost.Lock()
 _cost_log: List[Dict] = []
 _session_costs: Dict[str, float] = {}
 
@@ -344,7 +339,8 @@ def check_cost_limit(session_id: str, mode: str = DEFAULT_MODE) -> Dict[str, Any
 
 
 def add_session_cost(session_id: str, cost_usd: float):
-    _session_costs[session_id] = _session_costs.get(session_id, 0.0) + cost_usd
+    with _cost_lock:
+        _session_costs[session_id] = _session_costs.get(session_id, 0.0) + cost_usd
 
 
 def reset_session_cost(session_id: str):
@@ -366,7 +362,10 @@ def log_cost(user_id: str, model_id: str, tokens_in: int, tokens_out: int,
         "mode": mode, "agent_role": agent_role,
         "timestamp": datetime.now(timezone.utc).isoformat()
     }
-    _cost_log.append(entry)
+    with _cost_lock:
+        _cost_log.append(entry)
+        if len(_cost_log) > 15000:
+            _cost_log[:] = _cost_log[-10000:]
     if session_id:
         add_session_cost(session_id, cost_usd)
     if len(_cost_log) % 10 == 0:

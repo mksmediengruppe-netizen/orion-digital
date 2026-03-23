@@ -503,3 +503,36 @@ def validate_arguments(tool_name: str, args: dict) -> dict:
                     }
     
     return {"allowed": True}
+
+# ═══ SECURITY: SSRF Protection ═══
+import ipaddress as _ipaddress
+from urllib.parse import urlparse as _urlparse
+import socket as _socket
+
+BLOCKED_NETWORKS = [
+    _ipaddress.ip_network("127.0.0.0/8"),
+    _ipaddress.ip_network("10.0.0.0/8"),
+    _ipaddress.ip_network("172.16.0.0/12"),
+    _ipaddress.ip_network("192.168.0.0/16"),
+    _ipaddress.ip_network("169.254.0.0/16"),
+    _ipaddress.ip_network("::1/128"),
+]
+BLOCKED_HOSTS = {"localhost", "metadata.google.internal"}
+
+def is_url_safe(url):
+    """Check if URL is safe (not internal/private)."""
+    try:
+        parsed = _urlparse(url)
+        hostname = parsed.hostname
+        if not hostname:
+            return False
+        if hostname.lower() in BLOCKED_HOSTS:
+            return False
+        ip = _ipaddress.ip_address(_socket.gethostbyname(hostname))
+        for network in BLOCKED_NETWORKS:
+            if ip in network:
+                return False
+    except (_socket.gaierror, ValueError):
+        pass
+    return True
+

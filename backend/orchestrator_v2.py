@@ -214,7 +214,7 @@ MODEL_MAP = {
     "mimo":      "xiaomi/mimo-v2-flash",       # hands: SSH, деплой, интеграции
     "sonnet":    "anthropic/claude-sonnet-4.6",
     "opus":      "anthropic/claude-opus-4",
-    "deepseek":  "deepseek/deepseek-v3.2",    # fallback 3-й уровень только
+    "deepseek":  "openai/gpt-5.4-mini",       # PATCHED: was deepseek, now gpt54_mini
     "gpt54":     "openai/gpt-5.4",             # Standard mode main model
     "gpt54_mini":"openai/gpt-5.4-mini",        # Fast mode main model
 }
@@ -318,7 +318,7 @@ class Orchestrator:
     def _chat_model_for_mode(self):
         """Return the correct primary_model key based on orion_mode."""
         if self.orion_mode == "premium":
-            return "opus"
+            return "gpt54"  # PATCHED: was opus, now gpt54 (opus only as emergency fallback)
         elif self.orion_mode == "standard":
             return "gpt54"
         else:
@@ -358,7 +358,7 @@ class Orchestrator:
                     "primary_model":"mimo","primary_agent":"developer","understanding":"Написание кода","ask_user":None}
 
         # Opus для сверхсложных задач
-        if self._needs_opus(msg):
+        if False and self._needs_opus(msg):  # PATCHED: opus disabled, only emergency fallback
             return {
                 "mode": "single",
                 "phases": [{"name": "Архитектура", "agents": ["analyst"], "model": "opus",

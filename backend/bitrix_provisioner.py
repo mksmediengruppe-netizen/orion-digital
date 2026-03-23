@@ -1,3 +1,21 @@
+
+# ═══ SECURITY: SQL injection prevention ═══
+import re as _re_sql
+import secrets as _secrets_sql
+import string as _string_sql
+
+def validate_identifier(name, label="identifier"):
+    """Validate DB names and usernames."""
+    if not _re_sql.fullmatch(r"[A-Za-z0-9_]+", name):
+        raise ValueError(f"Invalid {label}: {name}. Only [A-Za-z0-9_] allowed.")
+    return name
+
+def generate_safe_password(length=20):
+    """Generate password from safe characters."""
+    chars = _string_sql.ascii_letters + _string_sql.digits + "!@#$%^"
+    return ''.join(_secrets_sql.choice(chars) for _ in range(length))
+
+
 """
 Bitrix Provisioner — Подготовка сервера для установки 1С-Битрикс.
 Устанавливает Apache/Nginx, PHP, MySQL, создаёт БД, скачивает bitrixsetup.php.
@@ -374,7 +392,7 @@ def install_bitrix_cli(config: dict, ssh_fn) -> dict:
     db_pass = db.get("password", "")
     db_name = db.get("name", "bitrix_db")
     admin_login = config.get("admin_login", "admin")
-    admin_password = config.get("admin_password", "Admin123!")
+    admin_password = config.get("admin_password") or generate_safe_password()
     admin_email = config.get("admin_email", "admin@example.com")
     site_name = config.get("site_name", "My Bitrix Site")
     php_bin = config.get("php_bin", "php8.1")  # php8.1 совместим с Битрикс
