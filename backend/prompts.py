@@ -616,6 +616,25 @@ def classify_task_type(user_message: str) -> str:
     return PIPELINE_GENERAL
 
 
+def classify_task_mode(user_message: str) -> str:
+    """
+    Классифицирует режим задачи: full_build или patch.
+    patch — задача на исправление/обновление существующего.
+    full_build — создание с нуля.
+    Returns: "patch" | "full_build"
+    """
+    patch_words = [
+        "исправь", "замени", "почини", "поменяй", "обнови", "измени",
+        "добавь", "удали", "поправь", "переделай", "fix", "change",
+        "update", "replace", "remove", "delete", "edit", "modify",
+    ]
+    msg_lower = user_message.lower()
+    for w in patch_words:
+        if w in msg_lower:
+            return "patch"
+    return "full_build"
+
+
 def get_pipeline_prompt(task_type: str) -> str:
     """Возвращает промпт pipeline для типа задачи."""
     if task_type == PIPELINE_BITRIX:

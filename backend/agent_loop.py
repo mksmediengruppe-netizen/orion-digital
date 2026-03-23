@@ -85,7 +85,7 @@ except ImportError as _gp_err:
 # ═══ TASK 7: Extracted modules ═══
 from tools_schema import TOOLS_SCHEMA
 from prompts import AgentState, AGENT_SYSTEM_PROMPT, AGENT_SYSTEM_PROMPT_PRO, get_system_prompt, PRO_MODES
-from prompts import WEBSITE_PIPELINE_RULE, BITRIX_PIPELINE_RULE, classify_task_type, WEBSITE_SUCCESS_CRITERIA, BITRIX_SUCCESS_CRITERIA
+from prompts import WEBSITE_PIPELINE_RULE, BITRIX_PIPELINE_RULE, classify_task_type, classify_task_mode, WEBSITE_SUCCESS_CRITERIA, BITRIX_SUCCESS_CRITERIA
 try:
     from project_brain import get_project_brain
     _HAS_PROJECT_BRAIN = True
@@ -381,6 +381,7 @@ class AgentLoop:
         self.total_tokens_in = 0
         self.total_tokens_out = 0
         self.actions_log = []
+        self._current_phase = "start"  # [PIPELINE] phase state tracker
         self._extra_credentials = {}  # ПАТЧ 1: FTP, админка и др.
         self._solution_cache = None  # ПАТЧ 9: Solution Cache
         self._stop_requested = False
@@ -1670,6 +1671,11 @@ class AgentLoop:
                         json.dump(self.task_charter, _chf, ensure_ascii=False, indent=2)
                 except Exception as _ch_persist_err:
                     logger.debug(f"[Charter] Persist error: {_ch_persist_err}")
+                # [PIPELINE] phase logging: start → brief
+                if getattr(self, "_current_phase", "start") == "start":
+                    _prev_phase = self._current_phase
+                    self._current_phase = "brief"
+                    logger.info(f"[PIPELINE] phase: {_prev_phase} → brief")
                 return {"success": True, "field": field, "updated": True,
                         "charter_summary": {"goal": self.task_charter.get("goal", "")[:80],
                                             "steps": len(self.task_charter.get("steps", [])),
@@ -3686,12 +3692,19 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);
         # ═══ PIPELINE INJECTION: classify task and inject pipeline rules ═══
         try:
             _task_type = classify_task_type(user_message if isinstance(user_message, str) else str(user_message))
-            if _task_type == "website":
-                _effective_system_prompt += "\n\n" + WEBSITE_PIPELINE_RULE
-                logger.info(f"[PIPELINE] Injected WEBSITE pipeline rule")
-            elif _task_type == "bitrix":
-                _effective_system_prompt += "\n\n" + BITRIX_PIPELINE_RULE
-                logger.info(f"[PIPELINE] Injected BITRIX pipeline rule")
+            _task_mode = classify_task_mode(user_message if isinstance(user_message, str) else str(user_message))
+            self._task_mode = _task_mode  # Store for SOFT BLUEPRINT GUARD
+            logger.info(f"[PIPELINE] task_type={_task_type} task_mode={_task_mode}")
+            # Inject pipeline rule ONLY for full_build tasks
+            if _task_mode == "full_build":
+                if _task_type == "website":
+                    _effective_system_prompt += "\n\n" + WEBSITE_PIPELINE_RULE
+                    logger.info(f"[PIPELINE] Injected WEBSITE pipeline rule (full_build)")
+                elif _task_type == "bitrix":
+                    _effective_system_prompt += "\n\n" + BITRIX_PIPELINE_RULE
+                    logger.info(f"[PIPELINE] Injected BITRIX pipeline rule (full_build)")
+            else:
+                logger.info(f"[PIPELINE] Skipped pipeline injection (task_mode=patch)")
         except Exception as _pipeline_err:
             logger.warning(f"[PIPELINE] classify_task_type failed: {_pipeline_err}")
 
@@ -4683,23 +4696,20 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);
                             logger.info(f"[BLOCK3-GK] Warnings for {tool_name}: {_b3_gk_warnings[:100]}")
                     except Exception as _b3_gk_err:
                         logger.debug(f'[BLOCK3-GK] Error: {_b3_gk_err}')
-                # ═══ SOFT BLUEPRINT GUARD (Variant C) ═══
-                # Мягкое напоминание создать план перед первым HTML/PHP файлом
+                # ═══ SOFT BLUEPRINT GUARD (Variant C, v2) ═══
+                # Мягкое напоминание — только для full_build без плана
                 if (tool_name == "file_write"
                         and isinstance(tool_args, dict)
                         and any(tool_args.get("path", "").endswith(ext) for ext in (".html", ".php"))
-                        and not any(
-                            a.get("tool") in ("update_task_charter", "update_scratchpad")
-                            for a in self.actions_log
-                        )
-                        and len(self.actions_log) < 3):
+                        and getattr(self, "_current_phase", "start") == "start"
+                        and getattr(self, "_task_mode", "full_build") == "full_build"):
                     _blueprint_hint = (
-                        "Ты начинаешь писать код, но ещё не создал план. "
-                        "Рекомендуется сначала вызвать update_task_charter с blueprint "
-                        "(секции, стиль, контент). Это сэкономит время и деньги."
+                        "Ты начинаешь build без blueprint. "
+                        "Рекомендуется update_task_charter с планом секций. "
+                        "Это сэкономит итерации."
                     )
                     messages.append({"role": "system", "content": _blueprint_hint})
-                    logger.info("[BLUEPRINT-GUARD] Soft hint injected before first HTML/PHP write")
+                    logger.info("[BLUEPRINT-GUARD] Soft hint injected (phase=start, mode=full_build)")
                 # Execute the tool
                 start_time = time.time()
                 result = self._execute_tool(tool_name, tool_args_str)
@@ -4713,6 +4723,37 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);
                     "elapsed": elapsed,
                     "timestamp": datetime.now(timezone.utc).isoformat()
                 })
+                # ═══ PIPELINE PHASE TRANSITIONS (logging only, no blocking) ═══
+                try:
+                    _ph_now = getattr(self, "_current_phase", "start")
+                    _ph_path = getattr(tool_args, "get", lambda k, d=None: d)("path", "") if isinstance(tool_args, dict) else ""
+                    # brief → blueprint: second update_task_charter or update_scratchpad
+                    if (tool_name in ("update_task_charter", "update_scratchpad")
+                            and _ph_now == "brief"):
+                        self._current_phase = "blueprint"
+                        logger.info("[PIPELINE] phase: brief → blueprint")
+                    # blueprint/brief/start → build: first .html/.php file_write
+                    elif (tool_name == "file_write"
+                            and isinstance(tool_args, dict)
+                            and any(_ph_path.endswith(ext) for ext in (".html", ".php", ".css", ".js"))
+                            and _ph_now in ("start", "brief", "blueprint")):
+                        self._current_phase = "build"
+                        logger.info(f"[PIPELINE] phase: {_ph_now} → build")
+                    # build → publish: ssh_execute with deploy/upload keywords
+                    elif (tool_name == "ssh_execute"
+                            and _ph_now == "build"
+                            and isinstance(tool_args, dict)):
+                        _ssh_cmd = str(tool_args.get("command", "") or tool_args.get("cmd", "")).lower()
+                        if any(kw in _ssh_cmd for kw in ("scp", "rsync", "cp ", "mv ", "deploy", "nginx", "systemctl", "service")):
+                            self._current_phase = "publish"
+                            logger.info("[PIPELINE] phase: build → publish")
+                    # publish → verify: browser_navigate or browser_check_site after publish
+                    elif (tool_name in ("browser_navigate", "browser_check_site")
+                            and _ph_now == "publish"):
+                        self._current_phase = "verify"
+                        logger.info("[PIPELINE] phase: publish → verify")
+                except Exception as _ph_err:
+                    logger.debug(f"[PIPELINE] phase transition error: {_ph_err}")
                 # ═══ BLOCK 3: Create Snapshot after tool execution ═══
                 if hasattr(self, '_current_task_id') and self._current_task_id:
                     try:
