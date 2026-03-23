@@ -257,7 +257,10 @@ class TaskScorecard:
         verdict: str = "",
         quality_score: float = 0.0,
         final_answer_len: int = 0,
-        status: str = "done"
+        status: str = "done",
+        search_fallback_used: int = 0,
+        approaches_tried: int = 0,
+        repeated_failures: int = 0,
     ) -> Optional[Dict]:
         """Завершить отслеживание задачи."""
         now = time.time()
@@ -277,10 +280,13 @@ class TaskScorecard:
                 quality_score = ?,
                 final_answer_len = ?,
                 status = ?,
-                updated_at = ?
+                updated_at = ?,
+                search_fallback_used = ?,
+                approaches_tried = ?,
+                repeated_failures = ?
             WHERE task_id = ?
         """, (now, duration, verdict, quality_score, final_answer_len,
-              status, now, task_id))
+              status, now, search_fallback_used, approaches_tried, repeated_failures, task_id))
         conn.commit()
         if not _USE_UNIFIED_DB:
             conn.close()

@@ -5158,6 +5158,46 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);
                         break
             except Exception as e:
                 yield self._sse({"type": "content", "text": f"\n\n⚠️ Агент достиг лимита итераций ({self.MAX_ITERATIONS}). Пожалуйста, уточните задачу или повторите запрос."})
+        # ── SCORECARD: finish if not already done (max_iterations path) ──
+        try:
+            if hasattr(self, '_scorecard_store') and self._scorecard_store:
+                _sc_task_id = getattr(self, '_current_task_id', None)
+                if _sc_task_id:
+                    _already_finished = False
+                    try:
+                        import sqlite3 as _sq3
+                        _sc_db = getattr(self._scorecard_store, '_db_path', None)
+                        if _sc_db:
+                            _sc_conn = _sq3.connect(_sc_db)
+                            _sc_row = _sc_conn.execute(
+                                'SELECT status FROM task_scorecards WHERE task_id=?', (_sc_task_id,)
+                            ).fetchone()
+                            _sc_conn.close()
+                            if _sc_row and _sc_row[0] == 'done':
+                                _already_finished = True
+                    except Exception:
+                        pass
+                    if not _already_finished:
+                        _web_search_count = getattr(self, '_web_search_count', 0)
+                        _approach_count = max(getattr(self, '_approach_count', 1), 1)
+                        _repeated_fails = getattr(self, '_repeated_fail_count', 0)
+                        self._scorecard_store.finish(
+                            task_id=_sc_task_id,
+                            verdict='PARTIAL',
+                            quality_score=0.3,
+                            final_answer_len=len(getattr(self, 'full_response_text', '') or ''),
+                            status='done',
+                            search_fallback_used=1 if _web_search_count > 0 else 0,
+                            approaches_tried=_approach_count,
+                            repeated_failures=_repeated_fails,
+                        )
+                        import logging as _log_sc
+                        _log_sc.getLogger('task_scorecard').info(
+                            f'[scorecard] MaxIter finish: {_sc_task_id} | verdict=PARTIAL iter={getattr(self, "_iteration_count", 0)}'
+                        )
+        except Exception as _sc_maxiter_err:
+            import logging as _log_sc2
+            _log_sc2.getLogger('task_scorecard').debug(f'[scorecard] MaxIter finish error: {_sc_maxiter_err}')
         # ── USAGE: отправляем токены обратно в app.py ──
         yield self._sse({"type": "usage", "prompt_tokens": self.total_tokens_in, "completion_tokens": self.total_tokens_out})
 
