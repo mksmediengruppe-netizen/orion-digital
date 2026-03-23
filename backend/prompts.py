@@ -484,36 +484,93 @@ WEBSITE_PIPELINE_RULE = """
 """
 
 BITRIX_PIPELINE_RULE = """
-═══ BITRIX CREATION PIPELINE (обязательный порядок) ═══
-
-При создании Битрикс-сайта Рекомендуемый порядок:
-
-1. BRIEF → parse_site_brief: Разбери ТЗ
-2. BLUEPRINT → build_site_blueprint: Структура сайта
-3. PROVISION → provision_bitrix_server: Подготовь сервер (PHP, MySQL, Apache)
-4. WIZARD → run_bitrix_wizard: Пройди установщик Битрикс
-5. VERIFY_INSTALL → verify_bitrix: Проверь установку
-6. DESIGN → plan_site_design: Визуальный стиль
-7. CONTENT → generate_site_content: Тексты
-8. BUILD → build_landing: Собери HTML
-9. TEMPLATE → build_bitrix_template: Создай шаблон Битрикс из HTML
-10. COMPONENTS → map_bitrix_components: Маппинг секций → компоненты
-11. PUBLISH → publish_bitrix: Деплой (домен, SSL, кеш)
-12. JUDGE → judge_bitrix_release: Финальная оценка
+BITRIX CREATION PIPELINE (обязательный порядок)
+При создании Битрикс-сайта рекомендуемый порядок:
+1. BRIEF - parse_site_brief: Разбери ТЗ
+2. BLUEPRINT - build_site_blueprint: Структура сайта
+3. PROVISION - provision_bitrix_server: Подготовь сервер (PHP 8.1+, MySQL, Nginx)
+4. WIZARD - run_bitrix_wizard: Пройди установщик Битрикс через HTTP
+5. VERIFY_INSTALL - verify_bitrix: Проверь установку (320+ таблиц, /bitrix/admin/ = 200)
+6. DESIGN - plan_site_design: Визуальный стиль
+7. CONTENT - generate_site_content: Тексты
+8. BUILD - build_landing: Собери HTML
+9. TEMPLATE - build_bitrix_template: Создай шаблон Битрикс из HTML
+10. COMPONENTS - map_bitrix_components: Маппинг секций в компоненты
+11. PUBLISH - publish_bitrix: Деплой (домен, SSL, кеш)
+12. JUDGE - judge_bitrix_release: Финальная оценка
 
 ПРАВИЛА:
 - НЕ начинай без provision. Сервер должен быть готов.
 - НЕ создавай шаблон без HTML. Сначала build_landing, потом template.
 - Перед деплоем ВСЕГДА делай backup_bitrix.
-- Если judge вернул FAIL — исправь и повтори.
+- Если judge вернул FAIL - исправь и повтори.
 
-ВАЖНО — УСТАНОВКА БИТРИКС:
-  bitrixsetup.php устанавливает BITRIX24 (корпоративный портал), НЕ 1С-Битрикс CMS!
-  Для 1С-Битрикс CMS нужен архив tar.gz (требует авторизации на 1c-bitrix.ru).
-  Редакции CMS: start_encode.tar.gz, standard_encode.tar.gz, business_encode.tar.gz
-  Если архив недоступен — использовать bitrixsetup.php (установит Bitrix24).
-  NGINX должен выполнять PHP: location ~ \.php$ { fastcgi_pass unix:/run/php/... }
-  bitrixsetup.php должен быть в КОРНЕ сайта (не в /subdir/).
+УСТАНОВКА БИТРИКС - ПРОВЕРЕННЫЙ МЕТОД (wizard через HTTP):
+
+1. Скачать архив:
+   wget https://www.1c-bitrix.ru/download/start_encode.tar.gz
+   tar -xzf start_encode.tar.gz -C /var/www/html/SITE/
+   chown -R www-data:www-data /var/www/html/SITE/
+
+2. Wizard работает через iframe-форму (НЕ XMLHttpRequest).
+   Ответы приходят в формате: [response]window.ajaxForm.Post(step,stage,desc);[/response]
+
+3. Шаги wizard по порядку:
+   welcome -> agreement (POST __wiz_agree_license=Y)
+   agreement -> select_database
+   select_database -> requirements
+   requirements -> create_database
+   create_database -> create_modules (POST DB: __wiz_db_host, __wiz_db_name, __wiz_db_user, __wiz_db_pass)
+   create_modules: AJAX-цикл 39 итераций (0-100%)
+     - POST: CurrentStepID=create_modules, __wiz_nextStep=STEP, __wiz_nextStepStage=STAGE
+     - Парсить ответ: window.ajaxForm.Post(NEXT_STEP, NEXT_STAGE, ...)
+     - При 100%: window.ajaxForm.Post(__finish, , Установка завершена)
+   __finish -> create_admin (POST CurrentStepID=__finish, NextStepID=create_admin)
+   create_admin: поля __wiz_login, __wiz_admin_password, __wiz_admin_password_confirm,
+                      __wiz_email, __wiz_user_name, __wiz_user_surname
+                 ВАЖНО: NextStepID = select_wizard (НЕ finish!)
+   select_wizard -> finish
+
+4. Создание admin (Метод 2 - надёжнее, работает после установки):
+   Запустить PHP скрипт с CUser->Add() напрямую.
+   GROUP_ID = [1] (группа Администраторы).
+   Подробнее: /var/www/orion/backend/docs/bitrix_install_guide.md
+
+5. Проверка успешной установки:
+   - Таблиц в БД: 320+ (SELECT COUNT(*) FROM information_schema.tables WHERE table_name LIKE 'b_%')
+   - HTTP: curl http://SERVER/bitrix/admin/ -> 200
+   - Admin: SELECT LOGIN, ACTIVE FROM b_user WHERE GROUP_ID=1
+
+ШАБЛОН БИТРИКС из HTML-лендинга:
+  Структура: /bitrix/templates/TPLNAME/
+    header.php - шапка (CSS, JS, навигация)
+    footer.php - подвал
+    template_styles.css
+    components/ - переопределения компонентов
+    description.php
+
+  Для редактируемости через админку использовать:
+    bitrix:main.include - редактируемые текстовые блоки (IntelliPHPad)
+    bitrix:news.list - инфоблоки (услуги, кейсы, отзывы)
+    bitrix:form.result.new - формы обратной связи
+
+  Активация шаблона: UPDATE b_site SET TEMPLATE_ID='dimydiv' WHERE LID='s1';
+
+ВАЖНО:
+  - bitrixsetup.php устанавливает BITRIX24 (портал), НЕ 1С-Битрикс CMS!
+  - Для 1С-Битрикс CMS нужен архив *_encode.tar.gz
+  - Nginx: location ~ \.php$ { fastcgi_pass unix:/run/php/php8.1-fpm.sock; }
+  - Полная документация: /var/www/orion/backend/docs/bitrix_install_guide.md
+
+ВАЖНО: Encoded Битрикс НЕ работает через PHP CLI.
+  Class CMain not found через командную строку.
+  PHP скрипты для Битрикс запускай ТОЛЬКО через HTTP:
+    curl http://САЙТ/script.php
+  НЕ через: php /path/script.php
+  Алгоритм:
+    1. Загрузи PHP-скрипт в webroot: scp script.php root@SERVER:/var/www/html/SITE/
+    2. Запусти через HTTP: curl -s http://SERVER/script.php
+    3. Удали скрипт после выполнения: ssh root@SERVER rm /var/www/html/SITE/script.php
 """
 
 # ══════════════════════════════════════════════════════════════════
