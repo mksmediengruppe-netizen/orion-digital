@@ -70,6 +70,15 @@ _handoff_store = get_handoff_store()
 _scorecard_store = get_scorecard_store()
 _autonomy_manager = get_autonomy_manager()
 _tool_sandbox = get_tool_sandbox()
+# ═══ BLOCK 5: Golden Paths — проверенные решения ═══
+try:
+    from golden_paths import GoldenPathStore
+    _golden_paths_store = GoldenPathStore()
+    _HAS_GOLDEN_PATHS = True
+except ImportError as _gp_err:
+    _golden_paths_store = None
+    _HAS_GOLDEN_PATHS = False
+    __import__("logging").getLogger("agent_loop").warning(f"golden_paths not available: {_gp_err}")
 
 # ── ORION Sprint 5 imports ──────────────────────────────────
 
@@ -87,7 +96,7 @@ try:
     from intent_clarifier import clarify as clarify_intent, format_clarification_for_user
     from model_router import (
         get_model_for_agent, get_max_cost, check_cost_limit,
-        add_session_cost, log_cost, DEFAULT_MODE, MODES
+        add_session_cost, log_cost, DEFAULT_MODE, MODES, PRICING
     )
 except ImportError:
     pass
@@ -408,6 +417,9 @@ class AgentLoop:
         self._scorecard_store = _scorecard_store
         self._autonomy_manager = get_autonomy_manager()
         self._tool_sandbox = get_tool_sandbox()
+        # ═══ BLOCK 5: Golden Paths store ═══
+        self._golden_paths = _golden_paths_store if _HAS_GOLDEN_PATHS else None
+        self._golden_path_used_id = None  # Track which GP was used
         self._final_judge = get_final_judge()
         # Configure sandbox for this session
         self._tool_sandbox.configure(
@@ -596,6 +608,35 @@ class AgentLoop:
 
 
 
+
+    # ═══ BUDGET GUARD: downgrade expensive models when budget is low ═══
+    def _budget_guard(self, model_id: str) -> str:
+        """Check if model is expensive (>=$5/M input) and downgrade if budget low."""
+        try:
+            in_price, _ = PRICING.get(model_id, (0, 0))
+            if in_price < 5.0:
+                return model_id  # Not expensive, pass through
+            _mode = getattr(self, 'orion_mode', 'standard')
+            _max = get_max_cost(_mode)
+            _remaining = max(0.0, _max - self._session_cost)
+            if _remaining < 2.0:
+                _fallback = "anthropic/claude-sonnet-4.6"
+                logger.warning(
+                    f"[BUDGET_GUARD] Model {model_id} (${in_price}/M) too expensive. "
+                    f"Remaining=${_remaining:.2f}, max=${_max:.2f}. "
+                    f"Downgrading to {_fallback}"
+                )
+                return _fallback
+            else:
+                logger.info(
+                    f"[BUDGET_GUARD] Model {model_id} (${in_price}/M) allowed. "
+                    f"Remaining=${_remaining:.2f}"
+                )
+                return model_id
+        except Exception as e:
+            logger.warning(f"[BUDGET_GUARD] Error: {e}, passing through {model_id}")
+            return model_id
+
     # ── LLM Call with Retry ──────────────────────────────────────
 
     @retry(max_attempts=3, base_delay=2.0, max_delay=30.0, jitter=1.0,
@@ -611,7 +652,7 @@ class AgentLoop:
         }
 
         payload = {
-            "model": self.model,
+            "model": self._budget_guard(self.model),
             "messages": messages,
             "temperature": 0.2,
             "max_tokens": 16000,
@@ -720,6 +761,9 @@ class AgentLoop:
                 if _orion_mode in ("fast", "fast"):
                     _model = TURBO_BRAIN_MODEL
 
+        # ═══ BUDGET GUARD ═══
+        _model = self._budget_guard(_model)
+        logger.info(f"[DEBUG_MODEL] orion_mode={_orion_mode} self.model={self.model} _model={_model} model_override={self.model_override}")
         payload = {
             "model": _model,
             "messages": messages,
@@ -859,7 +903,7 @@ class AgentLoop:
             if _cleaned_messages != messages:
                 _log.info(f"[agent_loop] Retrying with cleaned messages (stripped base64/large content)")
                 try:
-                    _cl_payload = {"model": self.model, "messages": _cleaned_messages,
+                    _cl_payload = {"model": self._budget_guard(self.model), "messages": _cleaned_messages,
                                    "temperature": 0.2, "max_tokens": 16000, "stream": True}
                     if tools:
                         _cl_payload["tools"] = tools
@@ -3797,6 +3841,37 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);
         except Exception as _plan_err:
             logger.debug(f"[PATCH-W1-2] Plan generation failed: {_plan_err}")
 
+        # ═══ BLOCK 5: Golden Paths — lookup + inject runbook ═══
+        try:
+            if self._golden_paths:
+                _gp_task_type = classify_task_type(user_message if isinstance(user_message, str) else str(user_message))
+                _gp_env = {}
+                if self.ssh_credentials:
+                    def _gp_ssh(cmd):
+                        try:
+                            _ssh = SSHExecutor(self.ssh_credentials)
+                            return _ssh.execute(cmd).get("output", "")
+                        except Exception:
+                            return ""
+                    _gp_env = self._golden_paths.collect_environment_fingerprint(ssh_exec=_gp_ssh)
+                _gp_match = self._golden_paths.find_golden_path(
+                    _gp_task_type, user_message, _gp_env, min_match_score=2
+                )
+                if _gp_match:
+                    _gp_runbook = self._golden_paths.format_runbook_prompt(_gp_match)
+                    if messages and messages[0].get("role") == "system":
+                        messages[0]["content"] += "\n\n" + _gp_runbook
+                    self._golden_path_used_id = _gp_match.path.get("id")
+                    logger.info(f"[GOLDEN_PATHS] Injected runbook id={self._golden_path_used_id} score={_gp_match.match_score}")
+                    yield self._sse({"type": "info", "message": f"Найден проверенный путь решения (score={_gp_match.match_score}/6)"})
+                # Anti-patterns
+                _gp_anti = self._golden_paths.format_anti_patterns_prompt(_gp_task_type)
+                if _gp_anti:
+                    if messages and messages[0].get("role") == "system":
+                        messages[0]["content"] += "\n\n" + _gp_anti
+                    logger.info(f"[GOLDEN_PATHS] Injected anti-patterns for {_gp_task_type}")
+        except Exception as _gp_err:
+            logger.warning(f"[GOLDEN_PATHS] Lookup error: {_gp_err}")
         # Agent loop with LangGraph state tracking
         logger.info("[DEBUG] Starting iteration loop"); iteration = 0
         full_response_text = ""
@@ -4259,7 +4334,20 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);
 
                     # ═══ BLOCK 4: FinalJudge — MANDATORY GATE before task_complete ═══
                     _fj_gate_passed = True  # default: allow if no judge
-                    if hasattr(self, '_final_judge') and self._final_judge:
+                    # SSH EARLY-EXIT FIX: Skip FinalJudge for simple SSH tasks
+                    # Simple = only ssh_execute used, <= 8 iterations, no browser/file_write
+                    _tools_used_fj = [a.get('tool', '') for a in self.actions_log]
+                    _has_complex_tools_fj = any(t in _tools_used_fj for t in ('browser_navigate', 'browser_screenshot', 'file_write', 'generate_file', 'create_artifact'))
+                    _non_ssh_tools = [t for t in _tools_used_fj if t not in ('ssh_execute', 'update_scratchpad', 'store_memory', 'recall_memory')]
+                    _is_simple_ssh = (
+                        not _has_complex_tools_fj and
+                        iteration <= 8 and
+                        any(t == 'ssh_execute' for t in _tools_used_fj) and
+                        len(_non_ssh_tools) == 0
+                    )
+                    if _is_simple_ssh:
+                        logger.info(f'[BLOCK4] SSH EARLY-EXIT: simple task ({iteration} iters, tools={set(_tools_used_fj)}) → skip FinalJudge')
+                    if hasattr(self, '_final_judge') and self._final_judge and not _is_simple_ssh:
                         try:
                             _fj_charter = None
                             if hasattr(self, '_charter_store') and self._current_task_id:
@@ -4409,6 +4497,45 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);
                         self._runtime_state.complete_task(str(getattr(self, '_chat_id', '')))
                     except Exception:
                         pass
+                    # ═══ BLOCK 5: Golden Paths — save on success ═══
+                    try:
+                        if self._golden_paths:
+                            import time as _gp_time
+                            _gp_task_type = classify_task_type(user_message if isinstance(user_message, str) else str(user_message))
+                            _gp_fj_verdict = getattr(self, '_last_fj_verdict', '')
+                            _gp_task_status = "SUCCESS" if _gp_fj_verdict in ("PASS", "APPROVED", "SUCCESS") else "FAIL"
+                            _gp_all_criteria = _gp_fj_verdict in ("PASS", "APPROVED", "SUCCESS")
+                            _gp_env = {}
+                            if self.ssh_credentials:
+                                try:
+                                    def _gp_ssh2(cmd):
+                                        _ssh2 = SSHExecutor(self.ssh_credentials)
+                                        return _ssh2.execute(cmd).get("output", "")
+                                    _gp_env = self._golden_paths.collect_environment_fingerprint(ssh_exec=_gp_ssh2)
+                                except Exception:
+                                    pass
+                            _gp_elapsed = _gp_time.time() - _task_start_time if '_task_start_time' in dir() else 0
+                            _gp_path_id = self._golden_paths.save_golden_path(
+                                task_type=_gp_task_type,
+                                task_description=user_message[:500],
+                                actions_log=self.actions_log,
+                                environment_fingerprint=_gp_env,
+                                total_cost=_task_cost if '_task_cost' in dir() else 0,
+                                total_time=_gp_elapsed,
+                                final_judge_verdict=_gp_fj_verdict,
+                                task_status=_gp_task_status,
+                                all_success_criteria_passed=_gp_all_criteria,
+                            )
+                            # Record outcome for used golden path
+                            if self._golden_path_used_id:
+                                self._golden_paths.record_path_outcome(
+                                    self._golden_path_used_id,
+                                    success=(_gp_task_status == "SUCCESS")
+                                )
+                            if _gp_path_id:
+                                logger.info(f"[GOLDEN_PATHS] Saved path id={_gp_path_id}")
+                    except Exception as _gp_save_err:
+                        logger.warning(f"[GOLDEN_PATHS] Save error: {_gp_save_err}")
                     # ── TASK 10: Complete checkpoint on success ──
                     try:
                         self._crash_recovery.complete_checkpoint(str(getattr(self, '_chat_id', '')))
@@ -4793,6 +4920,28 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);
                         "tool_call_id": tool_id,
                         "content": result_str
                     })
+
+                # ═══ SSH_EARLY_EXIT_V2: Force completion for simple SSH tasks ═══
+                if tool_name == "ssh_execute" and result.get("success", False) and iteration >= 2:
+                    _orig_msg = (user_message or "").lower()
+                    _simple_kw = ["создай файл", "create file", "mkdir", "touch", "echo ",
+                                  "cat ", "ls ", "uname", "whoami", "hostname", "df ",
+                                  "free ", "uptime", "date", "pwd", "id ", "head ",
+                                  "tail ", "wc ", "du ", "ps ", "выполни команду",
+                                  "покажи", "проверь версию", "version", "info"]
+                    if any(kw in _orig_msg for kw in _simple_kw) or iteration >= 5:
+                        logger.info(f"[SSH_EARLY_EXIT_V2] iter={iteration}, forcing task_complete")
+                        messages.append({
+                            "role": "system",
+                            "content": "ЗАДАЧА ВЫПОЛНЕНА. SSH команда выполнена успешно. "
+                                       "Вызови task_complete НЕМЕДЛЕННО с результатом. "
+                                       "НЕ выполняй дополнительных проверок."
+                        })
+                        self._ssh_force_complete_iter = iteration + 2
+                # ═══ SSH_EARLY_EXIT_V2: Break if exceeded force-complete iteration ═══
+                if hasattr(self, "_ssh_force_complete_iter") and iteration >= self._ssh_force_complete_iter:
+                    logger.info(f"[SSH_EARLY_EXIT_V2] Force break at iter={iteration}")
+                    break
 
         if self._stop_requested:
             # BUG-1 FIX: on_stop — сохранить прерванную задачу
