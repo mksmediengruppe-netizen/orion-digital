@@ -178,9 +178,36 @@ def _get_nav_timeout(url: str) -> int:
     return 90000
 
 PLAYWRIGHT_MAX_WORKERS = int(os.environ.get("PLAYWRIGHT_MAX_WORKERS", "1"))
-# FIX: Use single dedicated thread for Playwright to prevent greenlet.error
-# Playwright's sync API uses greenlets which cannot switch between threads
-_pw_thread_pool = concurrent.futures.ThreadPoolExecutor(max_workers=1, thread_name_prefix="pw")
+# FIX: Use a PERMANENT single daemon thread with queue instead of ThreadPoolExecutor
+# ThreadPoolExecutor recreates threads after idle timeout, causing greenlet cross-thread errors
+# A permanent daemon thread guarantees all Playwright calls run in the SAME thread always
+import queue as _pw_queue
+
+_pw_task_queue = _pw_queue.Queue()
+_pw_result_store = {}
+_pw_result_lock = _pw_threading.Lock()
+
+def _pw_worker_loop():
+    """Permanent worker thread that processes all Playwright tasks sequentially."""
+    while True:
+        try:
+            task_id, fn, args, kwargs = _pw_task_queue.get(timeout=3600)
+            try:
+                result = fn(*args, **kwargs)
+                with _pw_result_lock:
+                    _pw_result_store[task_id] = ("ok", result)
+            except Exception as e:
+                with _pw_result_lock:
+                    _pw_result_store[task_id] = ("err", e)
+            finally:
+                _pw_task_queue.task_done()
+        except _pw_queue.Empty:
+            continue  # Keep thread alive
+        except Exception:
+            continue
+
+_pw_worker_thread = _pw_threading.Thread(target=_pw_worker_loop, name="pw-worker", daemon=True)
+_pw_worker_thread.start()
 
 
 # ══ SECURITY FIX 4: SSL verification with exceptions ══
@@ -197,16 +224,28 @@ def _ssl_verify(url: str) -> bool:
 
 
 def _run_in_pw_thread(fn, *args, **kwargs):
-    """Run a function in the dedicated Playwright thread (no asyncio loop)."""
-    try:
-        future = _pw_thread_pool.submit(fn, *args, **kwargs)
-        return future.result(timeout=180)
-    except concurrent.futures.TimeoutError:
-        logger.error("[PW] Playwright operation timed out (180s)")
-        return None
-    except Exception as e:
-        logger.error(f"[PW] Thread pool error: {e}")
-        raise
+    """Run a function in the permanent Playwright daemon thread via queue."""
+    import uuid as _uuid
+    task_id = _uuid.uuid4().hex
+    _pw_task_queue.put((task_id, fn, args, kwargs))
+    # Wait for result
+    deadline = _pw_threading.Event()
+    start = _pw_threading.current_thread()
+    timeout = 180
+    import time as _time
+    t0 = _time.time()
+    while True:
+        with _pw_result_lock:
+            if task_id in _pw_result_store:
+                status, result = _pw_result_store.pop(task_id)
+                if status == "ok":
+                    return result
+                else:
+                    raise result
+        if _time.time() - t0 > timeout:
+            logger.error("[PW] Playwright operation timed out (180s)")
+            return None
+        _time.sleep(0.05)
 
 
 def _get_pw_page_impl(url: str = None, width: int = 1280, height: int = 800):
