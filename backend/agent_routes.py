@@ -111,28 +111,43 @@ def _parse_ssh_from_message(message):
     if ip_match:
         host = ip_match.group(1)
         rest = message[ip_match.end():].strip()
-        # Try: IP username password
+        # Remove path-like tokens: "путь: /var/www/...", "/path/to/dir", URLs
+        rest = re.sub(r'(путь|path|dir|директория|folder)[:\s]+\S+', '', rest, flags=re.IGNORECASE)
+        rest = re.sub(r'/\S+', '', rest)  # Remove /path/like/tokens
+        rest = rest.strip()
+        # Skip short Russian prepositions and common non-password words
+        SKIP_WORDS = {'в', 'на', 'по', 'к', 'из', 'от', 'до', 'за', 'под', 'над',
+                      'путь', 'path', 'dir', 'сервер', 'server', 'хост', 'host',
+                      'логин', 'login', 'пользователь', 'user', 'порт', 'port',
+                      'минимум', 'быстро', 'дёшево', 'создай', 'деплой'}
+        # Try: word1 word2 → username password
         m2 = re.match(r'^\s*(\S+)\s+(\S+)', rest)
         if m2:
-            word1 = m2.group(1)
-            word2 = m2.group(2)
-            # If word1 looks like a username (root, admin, user, etc.)
-            if re.match(r'^[a-zA-Z][a-zA-Z0-9_.-]*$', word1) and len(word1) < 32:
+            word1 = m2.group(1).rstrip(':,.')
+            word2 = m2.group(2).rstrip(':,.')
+            # Skip if word1 is a preposition/keyword or starts with /
+            if (word1.lower() not in SKIP_WORDS and
+                    not word1.startswith('/') and
+                    re.match(r'^[a-zA-Z][a-zA-Z0-9_.-]*$', word1) and
+                    len(word1) < 32 and
+                    word2.lower() not in SKIP_WORDS and
+                    not word2.startswith('/')):
                 return {"host": host, "username": word1, "password": word2}
-            else:
-                # word1 is password, assume root
-                return {"host": host, "username": "root", "password": word1}
+            elif (word1.lower() not in SKIP_WORDS and
+                  not word1.startswith('/') and
+                  word1.lower() not in SKIP_WORDS):
+                # word1 might be password, assume root
+                if len(word1) >= 4 and not word1.endswith(':'):
+                    return {"host": host, "username": "root", "password": word1}
         elif rest:
-            # Just one word after IP — treat as password
-            word = rest.split()[0]
-            # Skip path-like tokens (путь, /, etc.)
-            if not word.startswith('/') and word.lower() not in ('путь', 'path', 'в', 'на', 'по', 'dir'):
+            word = rest.split()[0].rstrip(':,.')
+            if (word.lower() not in SKIP_WORDS and
+                    not word.startswith('/') and
+                    len(word) >= 4 and
+                    not word.endswith(':')):
                 return {"host": host, "username": "root", "password": word}
-
-    # SSH_HOST_ONLY: if IP found anywhere in message but no password, return host for memory fallback
-    _ip_anywhere = re.search(r'(\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3})', message)
-    if _ip_anywhere:
-        return {"host": _ip_anywhere.group(1), "username": "root", "password": None}
+        # IP found but no valid password — return host only for SSH_MEMORY_FALLBACK
+        return {"host": host, "username": "root", "password": None}
     return None
 
 
