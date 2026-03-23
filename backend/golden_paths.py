@@ -266,7 +266,7 @@ class GoldenPathStore:
         if task_status != "SUCCESS":
             logger.info(f"[GOLDEN_PATHS] Skip save: task_status={task_status} (need SUCCESS)")
             return None
-        if final_judge_verdict.upper() not in ("APPROVED", "PASSED", "SUCCESS"):
+        if final_judge_verdict.upper() not in ("APPROVED", "PASSED", "SUCCESS", "PASS"):
             logger.info(f"[GOLDEN_PATHS] Skip save: judge={final_judge_verdict} (need APPROVED)")
             return None
         if not all_success_criteria_passed:
