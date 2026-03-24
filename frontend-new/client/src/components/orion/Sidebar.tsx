@@ -702,6 +702,7 @@ function UserAvatarRow({
   onClearAllNotifs?: () => void;
 }) {
   const { currentUser } = useCurrentUser();
+  if (!currentUser) return null;
   const roleColors = ROLE_COLORS[currentUser.role];
   const initials = currentUser.name.split(" ").map(w => w[0]).slice(0, 2).join("");
 

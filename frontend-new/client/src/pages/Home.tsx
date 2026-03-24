@@ -3,6 +3,8 @@
 // NEW: CommandPalette (Cmd+K), TakeoverMode, AgentInterrupt, SkeletonChat, keyboard shortcuts, pinned chats, inline edit
 
 import { useState, useRef, useEffect, useMemo, useCallback } from "react";
+import { useCurrentUser } from "@/contexts/CurrentUserContext";
+import { useChatsAPI } from "@/hooks/useChatsAPI";
 import { cn } from "@/lib/utils";
 import { CHATS, PROJECTS, type Step, type Message, type AgentStatus, type Chat, type Project, type ViewerArtifact } from "@/lib/mockData";
 import { Sidebar } from "@/components/orion/Sidebar";
@@ -153,18 +155,26 @@ Could not connect to Redis at 127.0.0.1:6379: Connection refused
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function Home() {
-  const [activeChat, setActiveChat] = useState("c1");
+  // ─── Real API ─────────────────────────────────────────────────────────────
+  const { currentUser: user, logout, budgetExhausted: apiBudgetExhausted } = useCurrentUser();
+  const chatsAPI = useChatsAPI();
+
+  // Derived from chatsAPI — must be declared early to avoid TDZ errors
+  const activeChat = chatsAPI.activeChat ?? (chatsAPI.chats[0]?.id ?? "c1");
+  const setActiveChat = chatsAPI.setActiveChat;
+  const chatMessages = chatsAPI.messages;
+  const setChatMessages = (_fn: unknown) => {}; // no-op: managed by chatsAPI
+
   const [rightPanelOpen, setRightPanelOpen] = useState(true);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [activeStep, setActiveStep] = useState<string | undefined>(undefined);
   const [showAdmin, setShowAdmin] = useState(false);
   const [rightPanelTab, setRightPanelTab] = useState("live");
-  const [chatMessages, setChatMessages] = useState<Record<string, Message[]>>(INITIAL_MESSAGES);
   const [simStatusOverride, setSimStatusOverride] = useState<AgentStatus | undefined>(undefined);
   const [selectedModel, setSelectedModel] = useState<ModelKey>("standard");
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [isTakeover, setIsTakeover] = useState(false);
-  const [pinnedChats, setPinnedChats] = useState<Set<string>>(new Set(["c2"]));
+  const [pinnedChats, setPinnedChats] = useState<Set<string>>(new Set());
   const [isLoadingChat, setIsLoadingChat] = useState(false);
   const [showPlaybooks, setShowPlaybooks] = useState(false);
   const [showScheduled, setShowScheduled] = useState(false);
@@ -177,12 +187,13 @@ export default function Home() {
   // ─── SSE connection state (demo) ─────────────────────────────────────────
   const { sseState, showBanner: sseBannerVisible, simulateDisconnect, simulateFailed, simulateOffline, retry: retrySSE, setShowBanner: setSSEBannerVisible } = useSSEConnectionDemo();
 
-  // ─── Budget enforcement ───────────────────────────────────────────────────
-  // Simulates current user's budget: $5.00 limit, $4.80 already spent
-  const [userBudgetLimit] = useState(5.00);
-  const [userBudgetSpent, setUserBudgetSpent] = useState(4.80);
-  const budgetExhausted = userBudgetSpent >= userBudgetLimit;
-  const budgetWarning = !budgetExhausted && userBudgetSpent / userBudgetLimit >= 0.8;
+  // ─── Budget enforcement (from real API) ─────────────────────────────────────────────────────────
+  const userBudgetLimit = user?.budgetLimit ?? 999999;
+  const [userBudgetSpent, setUserBudgetSpent] = useState(user?.budgetSpent ?? 0);
+  // Sync budgetSpent when user data loads
+  useEffect(() => { if (user?.budgetSpent !== undefined) setUserBudgetSpent(user.budgetSpent); }, [user?.budgetSpent]);
+  const budgetExhausted = apiBudgetExhausted || (userBudgetLimit < 999999 && userBudgetSpent >= userBudgetLimit);
+  const budgetWarning = !budgetExhausted && userBudgetLimit < 999999 && userBudgetSpent / userBudgetLimit >= 0.8;
   const budgetExhaustedNotifSent = useRef(false);
   const budgetWarningNotifSent = useRef(false);
 
@@ -267,8 +278,13 @@ export default function Home() {
   }, []);
 
   // Projects & chats state (lifted up for sidebar)
-  const [projects, setProjects] = useState<Project[]>(PROJECTS);
-  const [allChats, setAllChats] = useState<Chat[]>(CHATS);
+  // Use a single default project for real API chats
+  const [projects, setProjects] = useState<Project[]>([
+    { id: "default", name: "Мои задачи", type: "custom", chatCount: 0, lastActivity: "", color: "#6366f1" },
+  ]);
+  // Real chats from API; fall back to empty array while loading
+  const allChats = chatsAPI.chats.length > 0 ? chatsAPI.chats : (chatsAPI.isLoading ? [] : CHATS);
+  const setAllChats = (_fn: ((prev: Chat[]) => Chat[]) | Chat[]) => {}; // no-op: managed by chatsAPI
 
   const { theme, toggleTheme } = useTheme();
 
@@ -288,38 +304,22 @@ export default function Home() {
     toast.success(`Проект «${name}» создан`);
   }, []);
 
-  const handleCreateChat = useCallback((projectId: string, title: string) => {
-    const newChat: Chat = {
-      id: `c${Date.now()}`,
-      projectId,
-      title,
-      mode: "premium",
-      status: "idle",
-      cost: 0,
-      duration: "0s",
-      lastMessage: "",
-      timestamp: "только что",
-      model: "GPT-5.4",
-    };
-    setAllChats(prev => [...prev, newChat]);
-    setActiveChat(newChat.id);
-    setChatMessages(prev => ({ ...prev, [newChat.id]: [] }));
-    toast.success(`Задача «${title}» создана`);
-  }, []);
-
-  const handleRenameChat = useCallback((chatId: string, title: string) => {
-    setAllChats(prev => prev.map(c => c.id === chatId ? { ...c, title } : c));
-    toast.success("Переименовано");
-  }, []);
-
-  const handleDeleteChat = useCallback((chatId: string) => {
-    setAllChats(prev => prev.filter(c => c.id !== chatId));
-    if (activeChat === chatId) {
-      const remaining = allChats.filter(c => c.id !== chatId);
-      setActiveChat(remaining[0]?.id ?? "c1");
+  const handleCreateChat = useCallback(async (_projectId: string, title: string) => {
+    const newChat = await chatsAPI.createChat(title);
+    if (newChat) {
+      toast.success(`Чат «${title}» создан`);
     }
-    toast.success("Задача удалена");
-  }, [activeChat, allChats]);
+  }, [chatsAPI]);
+
+  const handleRenameChat = useCallback(async (chatId: string, title: string) => {
+    await chatsAPI.renameChat(chatId, title);
+    toast.success("Переименовано");
+  }, [chatsAPI]);
+
+  const handleDeleteChat = useCallback(async (chatId: string) => {
+    await chatsAPI.deleteChat(chatId);
+    toast.success("Чат удалён");
+  }, [chatsAPI]);
 
   const handleMoveChat = useCallback((chatId: string, projectId: string) => {
     setAllChats(prev => prev.map(c => c.id === chatId ? { ...c, projectId } : c));
@@ -354,7 +354,7 @@ export default function Home() {
 
   // Simulation callbacks
   const handleSimMessages = useCallback((msgs: Message[]) => {
-    setChatMessages(prev => ({ ...prev, c1: msgs }));
+    setChatMessages((_prev: Record<string, Message[]>) => ({ ..._prev, c1: msgs }));
   }, []);
   const handleSimStatus = useCallback((status: AgentStatus) => {
     setSimStatusOverride(status);
@@ -433,7 +433,7 @@ export default function Home() {
       toast.error("Бюджет исчерпан. Пополните бюджет у администратора.", { action: { label: "Админка", onClick: () => setShowAdmin(true) } });
       return;
     }
-    setChatMessages(prev => ({ ...prev, c1: [] }));
+    setChatMessages((_prev: Record<string, Message[]>) => ({ ..._prev, c1: [] }));
     setSimStatusOverride(undefined);
     setActiveStep(undefined);
     setRightPanelTab("live");
@@ -444,7 +444,7 @@ export default function Home() {
 
   const handleResetSimulation = useCallback(() => {
     resetSim();
-    setChatMessages(prev => ({ ...prev, c1: [] }));
+    setChatMessages((_prev: Record<string, Message[]>) => ({ ..._prev, c1: [] }));
     setSimStatusOverride(undefined);
     setActiveStep(undefined);
     setRightPanelTab("live");
@@ -525,18 +525,18 @@ export default function Home() {
   const handleChatSelect = useCallback((id: string) => {
     if (id === activeChat) return;
     setIsLoadingChat(true);
-    setActiveChat(id);
+    chatsAPI.selectChat(id);
     setActiveStep(undefined);
     setRightPanelTab("live");
     setTimeout(() => setIsLoadingChat(false), 400);
-  }, [activeChat]);
+  }, [activeChat, chatsAPI]);
 
   // ─── Message edit ─────────────────────────────────────────────────────────
 
   const handleMessageEdit = useCallback((messageId: string, newContent: string) => {
-    setChatMessages(prev => ({
+    setChatMessages((prev: Record<string, Message[]>) => ({
       ...prev,
-      [activeChat]: (prev[activeChat] ?? []).map(m =>
+      [activeChat]: (prev[activeChat] ?? []).map((m: Message) =>
         m.id === messageId ? { ...m, content: newContent } : m
       ),
     }));
@@ -558,7 +558,7 @@ export default function Home() {
     });
   }, []);
 
-  // ─── Derived state ────────────────────────────────────────────────────────
+  // ─── Derived state ─────────────────────────────────────────────────────────────
 
   const chat = allChats.find(c => c.id === activeChat) ?? allChats[0] ?? CHATS[0];
   const messages = chatMessages[activeChat] ?? [];
@@ -577,31 +577,33 @@ export default function Home() {
     setRightPanelTab("steps");
   };
 
-  const handleSend = (text: string) => {
+  const handleSend = useCallback((text: string) => {
     if (budgetExhausted) {
       toast.error("Бюджет исчерпан. Задачи заблокированы.", { action: { label: "Админка", onClick: () => setShowAdmin(true) } });
       return;
     }
-    const newMsg: Message = {
-      id: `m${Date.now()}`,
-      role: "user",
-      content: text,
-      timestamp: new Date().toLocaleTimeString("ru", { hour: "2-digit", minute: "2-digit" }),
-    };
-    setChatMessages(prev => ({
-      ...prev,
-      [activeChat]: [...(prev[activeChat] ?? []), newMsg],
-    }));
-    toast.success("Задача отправлена агенту");
-  };
+    const currentChatId = chatsAPI.activeChat;
+    if (!currentChatId) {
+      // Create a new chat first, then send
+      chatsAPI.createChat("Новая задача").then((newChat) => {
+        if (newChat) {
+          chatsAPI.sendMessage(newChat.id, text);
+        }
+      });
+      return;
+    }
+    chatsAPI.sendMessage(currentChatId, text);
+  }, [budgetExhausted, chatsAPI]);
 
-  const headerStatus = activeChat === "c1" && simStatusOverride ? simStatusOverride : chat.status;
-  const isRunning = activeChat === "c1" && simState === "running";
+  // Real agent status from API
+  const realAgentStatus = chatsAPI.agentStatus[activeChat];
+  const headerStatus = realAgentStatus
+    ? (realAgentStatus as AgentStatus)
+    : (activeChat === "c1" && simStatusOverride ? simStatusOverride : chat.status);
+  const isRunning = chatsAPI.isSending || (activeChat === "c1" && simState === "running");
   const showTypingIndicator =
-    activeChat === "c1" &&
-    simState === "running" &&
-    messages.length > 0 &&
-    messages[messages.length - 1]?.role === "user";
+    (chatsAPI.isSending && messages.length > 0 && messages[messages.length - 1]?.role === "user") ||
+    (activeChat === "c1" && simState === "running" && messages.length > 0 && messages[messages.length - 1]?.role === "user");
 
   if (showAdmin) {
     return (
