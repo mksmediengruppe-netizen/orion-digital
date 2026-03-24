@@ -3735,6 +3735,18 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);
                 elif _task_type == "bitrix":
                     _effective_system_prompt += "\n\n" + BITRIX_PIPELINE_RULE
                     logger.info(f"[PIPELINE] Injected BITRIX pipeline rule (full_build)")
+                    # AUTO-KB-INJECT: Automatically read and inject bitrix KB content
+                    try:
+                        _kb_path = "/var/www/orion/backend/docs/bitrix_knowledge_base.md"
+                        if os.path.exists(_kb_path):
+                            with open(_kb_path, "r", encoding="utf-8") as _kb_f:
+                                _kb_content = _kb_f.read()
+                            _effective_system_prompt += "\n\n=== БАЗА ЗНАНИЙ БИТРИКС (автозагрузка) ===\n" + _kb_content
+                            logger.info(f"[AUTO-KB] Injected bitrix_knowledge_base.md ({len(_kb_content)} chars)")
+                        else:
+                            logger.warning("[AUTO-KB] bitrix_knowledge_base.md not found")
+                    except Exception as _kb_err:
+                        logger.warning(f"[AUTO-KB] Failed to load KB: {_kb_err}")
             else:
                 logger.info(f"[PIPELINE] Skipped pipeline injection (task_mode=patch)")
         except Exception as _pipeline_err:

@@ -483,3 +483,123 @@ ls /var/www/html/bitrix/cache/ 2>/dev/null | wc -l
 11. Дубликаты при повторном запуске → проверять существование перед созданием
 12. Нет description.php → шаблон не виден в админке
 13. Нет проверки "изменил в админке → видно на сайте" → интеграция не завершена
+---
+
+## 10. Шаблоны компонентов — обязательные файлы
+
+### A. description.php обязателен
+
+Каждый кастомный шаблон компонента ДОЛЖЕН содержать `description.php`, иначе шаблон не будет виден в визуальном редакторе Bitrix.
+
+```php
+<?php if(!defined("B_PROLOG_INCLUDED")||B_PROLOG_INCLUDED!==true)die();
+$arTemplateDescription = [
+    'NAME'        => 'Название шаблона',
+    'DESCRIPTION' => 'Описание шаблона',
+    'PREVIEW'     => '',
+];
+```
+
+### B. Назначение шаблона сайту
+
+После создания папки шаблона необходимо убедиться что он назначен:
+
+```sql
+SELECT TEMPLATE FROM b_lang;
+-- Должно быть имя папки шаблона, например: dentapro
+```
+
+Назначить через API:
+```php
+CSite::Update('s1', ['TEMPLATE' => [['TEMPLATE' => 'dentapro', 'CONDITION' => '', 'SORT' => 100]]]);
+```
+
+### C. Готовые template.php для services/reviews/doctors/portfolio
+
+**services_cards** (`bitrix/templates/{TEMPLATE}/components/bitrix/news.list/services_cards/template.php`):
+```php
+<?php if(!defined("B_PROLOG_INCLUDED")||B_PROLOG_INCLUDED!==true)die(); ?>
+<?php foreach($arResult["ITEMS"] as $arItem): ?>
+<article class="rounded-[28px] border border-slate-100 bg-white p-6 shadow-xl">
+    <h3 class="text-lg font-extrabold text-slate-900"><?= htmlspecialchars($arItem["NAME"]) ?></h3>
+    <?php if($arItem["PREVIEW_TEXT"]): ?>
+    <p class="mt-2 text-sm text-slate-600"><?= $arItem["PREVIEW_TEXT"] ?></p>
+    <?php endif; ?>
+    <?php if($arItem["PROPERTIES"]["PRICE"]["VALUE"]): ?>
+    <p class="mt-3 font-bold text-sky-700">от <?= $arItem["PROPERTIES"]["PRICE"]["VALUE"] ?> ₽</p>
+    <?php endif; ?>
+</article>
+<?php endforeach; ?>
+```
+
+**reviews_cards** (`bitrix/templates/{TEMPLATE}/components/bitrix/news.list/reviews_cards/template.php`):
+```php
+<?php if(!defined("B_PROLOG_INCLUDED")||B_PROLOG_INCLUDED!==true)die(); ?>
+<?php foreach($arResult["ITEMS"] as $arItem): ?>
+<article class="rounded-[28px] border border-slate-100 bg-white p-6 shadow-xl">
+    <p class="text-sm text-slate-600"><?= $arItem["PREVIEW_TEXT"] ?></p>
+    <div class="mt-4 font-bold text-slate-900"><?= htmlspecialchars($arItem["NAME"]) ?></div>
+    <?php if($arItem["PROPERTIES"]["CITY"]["VALUE"]): ?>
+    <div class="text-xs text-slate-400"><?= htmlspecialchars($arItem["PROPERTIES"]["CITY"]["VALUE"]) ?></div>
+    <?php endif; ?>
+</article>
+<?php endforeach; ?>
+```
+
+### D. Обязательная проверка: admin → frontend cycle
+
+После создания шаблонов и заполнения инфоблоков ВСЕГДА выполнять:
+
+1. Зайти в Bitrix Admin → Контент → нужный инфоблок
+2. Изменить название элемента (добавить тестовую метку, например "ТЕСТ17")
+3. Сохранить
+4. Очистить кэш: `rm -rf bitrix/cache/* bitrix/managed_cache/*`
+5. Открыть сайт и проверить: `curl -s http://SITE/ | grep -c "ТЕСТ17"` — должно быть >= 1
+6. Если 0 — интеграция НЕ завершена
+
+---
+
+## 11. SQL — только как аварийный repair
+
+Основной путь работы с Битрикс — через API:
+- `CSite::Update()` для назначения шаблона
+- `CIBlock::GetList()` для поиска инфоблоков по CODE
+- `CIBlockElement::Update()` для обновления данных элементов
+- `BXClearCache(true)` для очистки кэша
+
+Прямой SQL (`UPDATE b_lang`, `UPDATE b_iblock_element`) использовать ТОЛЬКО как аварийный repair если API недоступен.
+
+---
+
+## 12. Настройка PHP для Битрикс (idempotent override)
+
+НЕ делать `echo >> php.ini`. Создавать override-файл:
+
+```bash
+PHP_VER=$(php -v | head -1 | grep -oP '\d+\.\d+')
+cat > /etc/php/${PHP_VER}/fpm/conf.d/99-orion-bitrix.ini << 'INI'
+max_input_vars = 10000
+mbstring.func_overload = 0
+opcache.revalidate_freq = 0
+INI
+systemctl restart php${PHP_VER}-fpm
+```
+
+Проверять через web (не CLI):
+```bash
+echo '<?php echo ini_get("max_input_vars");' > ${BITRIX_ROOT}/check_ini.php
+curl -s http://SITE/check_ini.php   # должно быть 10000
+rm ${BITRIX_ROOT}/check_ini.php
+```
+
+---
+
+## 13. Архитектурное правило: инфоблоки vs include
+
+| Тип контента | Правильный подход |
+|---|---|
+| Услуги, врачи, отзывы, тарифы, портфолио | `bitrix:news.list` с инфоблоком |
+| Hero-секция, контакты, форма (уникальные) | `bitrix:main.include` |
+| Навигация, футер | Шаблон сайта (header.php / footer.php) |
+
+**Нельзя**: хардкодить списки в PHP include-файлах — тогда редактирование через админку не работает.
