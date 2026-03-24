@@ -421,6 +421,7 @@ class AgentLoop:
         self._tool_sandbox = get_tool_sandbox()
         # ═══ BLOCK 5: Golden Paths store ═══
         self._golden_paths = _golden_paths_store if _HAS_GOLDEN_PATHS else None
+        self._bitrix_core_ready = False  # v5 FIX 1.4: HARD GATE
         self._golden_path_used_id = None  # Track which GP was used
         self._final_judge = get_final_judge()
         # Configure sandbox for this session
@@ -1163,6 +1164,15 @@ class AgentLoop:
 
                 # Execute with retry
                 result = self._ssh_execute_with_retry(host, username, password, command)
+                # ═══ v5 FIX 1.4b: Detect Bitrix core readiness ═══
+                _ssh_out_str = str(result.get("output", "") if isinstance(result, dict) else result)
+                if "bitrix/admin" in command:
+                    if any(_m in _ssh_out_str for _m in ["authorize", "bx-admin", "bitrix_sessid", "AUTH_FORM", "CAuthProvider"]):
+                        self._bitrix_core_ready = True
+                        logger.info("[BITRIX GATE] Core ready — admin markers found")
+                if any(_tbl in _ssh_out_str for _tbl in ["b_option", "b_user", "b_module"]):
+                    self._bitrix_core_ready = True
+                    logger.info("[BITRIX GATE] Core ready — DB tables found")
 
                 # Store result for idempotency
                 if is_mutating_command(command) and result.get("success"):
@@ -1170,6 +1180,16 @@ class AgentLoop:
                     tool_store.store(idem_key, result, ttl=300)
 
                 return result
+
+            # ═══ v5 FIX 1.4c: HARD GATE — no core = no template ═══
+            if (tool_name == "file_write" and
+                hasattr(self, 'task_charter') and
+                "bitrix" in str(self.task_charter.get("task_type", "")).lower() and
+                not self._bitrix_core_ready):
+                _gate_path = str(args.get("path", ""))
+                if "/templates/" in _gate_path or "/local/templates/" in _gate_path:
+                    logger.warning(f"[BITRIX GATE] BLOCKED template write: {_gate_path}")
+                    return {"success": False, "error": "Битрикс ядро не установлено. Сначала установи Битрикс и добейся рабочей /bitrix/admin/. Потом создавай шаблон."}
 
             elif tool_name == "file_write":
                 path = args.get("path", "")
@@ -3727,28 +3747,97 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);
                 self.MAX_ITERATIONS = min(self.MAX_ITERATIONS, 10)
                 logger.info(f"[PIPELINE] patch mode: MAX_ITERATIONS capped to {self.MAX_ITERATIONS}")
             logger.info(f"[PIPELINE] task_type={_task_type} task_mode={_task_mode}")
-            # Inject pipeline rule ONLY for full_build tasks
-            if _task_mode == "full_build":
-                if _task_type == "website":
-                    _effective_system_prompt += "\n\n" + WEBSITE_PIPELINE_RULE
-                    logger.info(f"[PIPELINE] Injected WEBSITE pipeline rule (full_build)")
-                elif _task_type == "bitrix":
-                    _effective_system_prompt += "\n\n" + BITRIX_PIPELINE_RULE
-                    logger.info(f"[PIPELINE] Injected BITRIX pipeline rule (full_build)")
-                    # AUTO-KB-INJECT: Automatically read and inject bitrix KB content
-                    try:
-                        _kb_path = "/var/www/orion/backend/docs/bitrix_knowledge_base.md"
-                        if os.path.exists(_kb_path):
-                            with open(_kb_path, "r", encoding="utf-8") as _kb_f:
-                                _kb_content = _kb_f.read()
-                            _effective_system_prompt += "\n\n=== БАЗА ЗНАНИЙ БИТРИКС (автозагрузка) ===\n" + _kb_content
-                            logger.info(f"[AUTO-KB] Injected bitrix_knowledge_base.md ({len(_kb_content)} chars)")
-                        else:
-                            logger.warning("[AUTO-KB] bitrix_knowledge_base.md not found")
-                    except Exception as _kb_err:
-                        logger.warning(f"[AUTO-KB] Failed to load KB: {_kb_err}")
+            # ═══ v5: Pipeline injection (always for bitrix, not just full_build) ═══
+            if _task_type.startswith("bitrix"):
+                _effective_system_prompt += "\n\n" + BITRIX_PIPELINE_RULE
+                logger.info(f"[PIPELINE] Injected BITRIX pipeline rule (type={_task_type}, mode={_task_mode})")
+            elif _task_type == "website" and _task_mode == "full_build":
+                _effective_system_prompt += "\n\n" + WEBSITE_PIPELINE_RULE
+                logger.info(f"[PIPELINE] Injected WEBSITE pipeline rule (full_build)")
             else:
-                logger.info(f"[PIPELINE] Skipped pipeline injection (task_mode=patch)")
+                logger.info(f"[PIPELINE] No pipeline injection (type={_task_type}, mode={_task_mode})")
+
+            # ═══ v5 FIX 1.1: Universal platform KB injection into system prompt ═══
+            _msg_lower = (user_message if isinstance(user_message, str) else str(user_message)).lower()
+            _PLATFORM_KEYWORDS = {
+                "bitrix": ["битрикс", "bitrix", "1с-битрикс", "1c-bitrix"],
+                "wordpress": ["wordpress", "вордпресс"],
+            }
+            for _platform, _keywords in _PLATFORM_KEYWORDS.items():
+                if any(_kw in _msg_lower for _kw in _keywords):
+                    _kb_path = f"/var/www/orion/backend/docs/{_platform}_knowledge_base.md"
+                    if os.path.exists(_kb_path):
+                        try:
+                            with open(_kb_path, "r", encoding="utf-8") as _kb_f:
+                                _kb_full = _kb_f.read()
+                            _kb_summary = _kb_full[:2000]
+                            _effective_system_prompt += f"\n\nБАЗА ЗНАНИЙ {_platform.upper()}:\n{_kb_summary}"
+                            _effective_system_prompt += f"\nПолная KB: {_kb_path}"
+                            logger.info(f"[KB] Injected {_platform} KB ({len(_kb_summary)} chars)")
+                        except Exception as _kb_err:
+                            logger.warning(f"[KB] Failed: {_kb_err}")
+                    if self._golden_paths:
+                        for _suffix in ["_site", "_install", "_integration"]:
+                            _anti = self._golden_paths.format_anti_patterns_prompt(f"{_platform}{_suffix}")
+                            if _anti:
+                                _effective_system_prompt += f"\n\n{_anti}"
+                                logger.info(f"[KB] Anti-patterns: {_platform}{_suffix}")
+                    break
+
+            # ═══ v5 FIX 1.3: Preflight — real SSH commands ═══
+            if _task_type.startswith("bitrix") or "wordpress" in _task_type:
+                if self.ssh_credentials and self.ssh_credentials.get("host"):
+                    _pf_h = self.ssh_credentials["host"]
+                    _pf_u = self.ssh_credentials.get("username", "root")
+                    _pf_p = self.ssh_credentials.get("password", "")
+                    _pf = {}
+                    try:
+                        _r = self._ssh_execute_with_retry(_pf_h, _pf_u, _pf_p, "ss -tlnp | grep :80 | head -3")
+                        _o = str(_r.get("output","") if isinstance(_r,dict) else _r)
+                        _pf["port_80"] = "nginx" if "nginx" in _o else ("apache" if "apache" in _o else "free")
+                    except: _pf["port_80"] = "unknown"
+                    try:
+                        _r = self._ssh_execute_with_retry(_pf_h, _pf_u, _pf_p, "php -v 2>/dev/null | head -1")
+                        _o = str(_r.get("output","") if isinstance(_r,dict) else _r)
+                        _pf["php"] = _o.strip()[:50] if _o.strip() else "not installed"
+                    except: _pf["php"] = "unknown"
+                    try:
+                        _r = self._ssh_execute_with_retry(_pf_h, _pf_u, _pf_p, "mysql --version 2>/dev/null | head -1")
+                        _o = str(_r.get("output","") if isinstance(_r,dict) else _r)
+                        _pf["mysql"] = "yes" if _o.strip() else "no"
+                    except: _pf["mysql"] = "unknown"
+                    try:
+                        _r = self._ssh_execute_with_retry(_pf_h, _pf_u, _pf_p, "grep -r 'root' /etc/nginx/sites-enabled/ 2>/dev/null | head -3")
+                        _o = str(_r.get("output","") if isinstance(_r,dict) else _r)
+                        _pf["web_root"] = _o.strip()[:200]
+                    except: _pf["web_root"] = "unknown"
+                    if hasattr(self, 'task_charter'):
+                        self.task_charter["server_preflight"] = _pf
+                    _effective_system_prompt += f"""\n\nФАКТЫ О СЕРВЕРЕ (определены автоматически):
+- Порт 80: {_pf['port_80']}
+- PHP: {_pf['php']}
+- MySQL: {_pf['mysql']}
+- Web root: {_pf['web_root']}
+Работай с тем что есть. Не ставь Apache если Nginx на 80."""
+                    logger.info(f"[PREFLIGHT] Server: {_pf}")
+
+            # ═══ v5 FIX 1.5: Project isolation ═══
+            _msg_text = user_message if isinstance(user_message, str) else str(user_message)
+            _project_name = None
+            import re as _re_proj
+            _proj_match = _re_proj.search(r'(?:путь|path)[:\s]*/var/www/(?:html/)?([a-zA-Z0-9_-]+)', _msg_text, _re_proj.IGNORECASE)
+            if _proj_match:
+                _project_name = _proj_match.group(1)
+            if _project_name:
+                if hasattr(self, 'task_charter'):
+                    self.task_charter["project_name"] = _project_name
+                    self.task_charter["db_name"] = f"{_project_name}_db"
+                _effective_system_prompt += f"""\n\nИЗОЛЯЦИЯ ПРОЕКТА:
+- Директория: /var/www/html/{_project_name}/
+- Шаблон: {_project_name}
+- БД: {_project_name}_db
+- НЕ трогать файлы/БД других проектов."""
+                logger.info(f"[ISOLATION] Project: {_project_name}")
         except Exception as _pipeline_err:
             logger.warning(f"[PIPELINE] classify_task_type failed: {_pipeline_err}")
 

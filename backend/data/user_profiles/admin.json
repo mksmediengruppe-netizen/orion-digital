@@ -1,6 +1,6 @@
 {
   "user_id": "admin",
-  "chat_count": 1213,
+  "chat_count": 1244,
   "facts": [
     "Пользователя зовут Тестер5",
     "Работает с Elixir и Phoenix",
@@ -165,7 +165,7 @@
     "телефон": "не вносить",
     "columns_desktop": 3,
     "columns_mobile": 1,
-    "technology": "HTML/CSS Grid",
+    "technology": "Битрикс",
     "инструменты": "BeautifulSoup, requests",
     "задача": "шифрование файлов",
     "создание favicon.ico": "предпочитает использовать Python Pillow",
@@ -179,7 +179,7 @@
     "API": "GitHub",
     "окружение": "Linux/Unix",
     "база_данных": "SQLite",
-    "language": "ru",
+    "language": "Русский",
     "task_type": "system_monitoring",
     "format": "User prefers answers as a single number for simple arithmetic questions.",
     "stack": "HTML/CSS/JS (одностраничный лендинг)",
@@ -202,7 +202,7 @@
       "report creation",
       "tables"
     ],
-    "focus": "чтение и запись данных",
+    "focus": "Извлечение фактов о пользователе",
     "domain": "email automation",
     "protocol": "SMTP",
     "библиотека": "Pillow",
@@ -265,7 +265,16 @@
     "photos": "минимум фото",
     "speed": "быстро",
     "budget": "дёшево",
-    "sections": "hero, меню, контакты"
+    "sections": "hero, меню, контакты",
+    "response_style": "JSON без markdown",
+    "task": "Назначить шаблон сайту",
+    "platform": "Битрикс",
+    "project": "сайт для стоматологии DentaPro",
+    "content_management": "все данные через инфоблоки",
+    "admin_panel": "админка должна работать и синхронизироваться с сайтом",
+    "media": "AI фото для каждой секции",
+    "responsive_design": "мобильная версия",
+    "forms": "рабочая форма записи"
   },
   "expertise_level": "unknown"
 }

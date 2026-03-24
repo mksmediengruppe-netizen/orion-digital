@@ -621,24 +621,25 @@ WEBSITE_KEYWORDS = [
 
 def classify_task_type(user_message: str) -> str:
     """
-    Классифицирует задачу по типу pipeline.
-    Вызывается Nano-классификатором при получении задачи.
-
+    Классифицирует задачу по типу pipeline с подтипами для Битрикс.
     Returns:
-        "bitrix" | "website" | "general"
+        "bitrix_install" | "bitrix_integration" | "bitrix_site" | "website" | "general"
     """
     msg_lower = user_message.lower()
-
-    # Bitrix has priority (more specific)
-    for kw in BITRIX_KEYWORDS:
-        if kw in msg_lower:
-            return PIPELINE_BITRIX
-
+    # ВЫСШИЙ ПРИОРИТЕТ — CMS платформы
+    bitrix_kw = ["битрикс", "bitrix", "1с-битрикс", "1c-bitrix", "bitrixsetup", "инфоблок", "iblock"]
+    if any(kw in msg_lower for kw in bitrix_kw):
+        install_kw = ["установ", "install", "поставь", "разверн", "с нуля", "from scratch", "настрой сервер"]
+        if any(w in msg_lower for w in install_kw):
+            return "bitrix_install"
+        integrate_kw = ["интегрир", "перенес", "натян", "шаблон", "подключ"]
+        if any(w in msg_lower for w in integrate_kw):
+            return "bitrix_integration"
+        return "bitrix_site"
     # Website pipeline
     for kw in WEBSITE_KEYWORDS:
         if kw in msg_lower:
             return PIPELINE_WEBSITE
-
     return PIPELINE_GENERAL
 
 
