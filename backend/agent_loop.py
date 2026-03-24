@@ -5106,7 +5106,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);
                                   "free ", "uptime", "date", "pwd", "id ", "head ",
                                   "tail ", "wc ", "du ", "ps ", "выполни команду",
                                   "покажи", "проверь версию", "version", "info"]
-                    if any(kw in _orig_msg for kw in _simple_kw) or iteration >= 10:
+                    if any(kw in _orig_msg for kw in _simple_kw):
                         logger.info(f"[SSH_EARLY_EXIT_V2] iter={iteration}, forcing task_complete")
                         messages.append({
                             "role": "system",
