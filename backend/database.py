@@ -490,7 +490,7 @@ def save_db(db):
                     )
 
             # KV store for remaining data
-            for key in ["analytics", "memory", "ssh_servers", "connections"]:
+            for key in ["analytics", "memory", "ssh_servers", "connections", "scheduled_tasks"]:
                 if key in db:
                     conn.execute(
                         "INSERT OR REPLACE INTO kv_store (key, value, updated_at) VALUES (?, ?, ?)",
