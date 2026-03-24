@@ -727,3 +727,138 @@ require_once $_SERVER["DOCUMENT_ROOT"]."/bitrix/modules/main/include/prolog_befo
 CSite::Update("s1", ["TEMPLATE" => [["TEMPLATE" => "TEMPLATE_NAME", "CONDITION" => ""]]]);
 BXClearCache(true);
 ```
+
+
+## Раздел 18: Установка Битрикс — wizard через HTTP, НЕ через браузер
+
+**КРИТИЧНО:** НИКОГДА не использовать `browser_click` / `browser_navigate` для установщика Битрикс.
+Wizard работает через iframe + POST-запросы. Playwright зависает на кнопках wizard (особенно `#agree_license_id`).
+
+### СПОСОБ 1 — HTTP POST wizard (предпочтительный)
+
+Шаги wizard через curl/requests:
+
+```
+1. GET /bitrixsetup.php          → скачивание архива Битрикс
+2. POST CurrentStepID=welcome    → agreement (принятие лицензии)
+3. POST CurrentStepID=agreement  → select_database
+4. POST CurrentStepID=select_database → requirements
+5. POST CurrentStepID=requirements    → create_database (с данными БД)
+6. POST CurrentStepID=create_database → create_modules (AJAX цикл, ~39 итераций)
+7. При 100%: POST CurrentStepID=__finish → create_admin
+8. POST CurrentStepID=create_admin (с логином/паролем)
+9. POST CurrentStepID=select_wizard → finish
+```
+
+Ответы в формате: `[response]window.ajaxForm.Post(...)...[/response]`
+
+Пример curl-запроса для шага agreement:
+```bash
+curl -s -X POST "http://HOST/bitrix/wizard/index.php" \
+  -d "CurrentStepID=agreement&NEXT_STEP=select_database&agree_license=Y" \
+  -H "Content-Type: application/x-www-form-urlencoded"
+```
+
+Пример curl для create_database:
+```bash
+curl -s -X POST "http://HOST/bitrix/wizard/index.php" \
+  -d "CurrentStepID=create_database&NEXT_STEP=create_modules&DB_HOST=localhost&DB_NAME=bitrix_db&DB_LOGIN=bitrix&DB_PASSWORD=bitrix123&DB_ROOT_LOGIN=root&DB_ROOT_PASSWORD=&INSTALL_DB=Y" \
+  -H "Content-Type: application/x-www-form-urlencoded"
+```
+
+### СПОСОБ 2 — скачать архив напрямую + CLI (быстрее)
+
+```bash
+# Скачать архив
+wget https://www.1c-bitrix.ru/download/start_encode.tar.gz -O /tmp/bitrix.tar.gz
+# Распаковать в web root
+tar -xzf /tmp/bitrix.tar.gz -C /var/www/html/
+
+# Создать dbconn.php
+cat > /var/www/html/bitrix/php_interface/dbconn.php << 'EOF'
+<?php
+define("DBHost", "localhost");
+define("DBLogin", "bitrix");
+define("DBPassword", "bitrix123");
+define("DBName", "bitrix_db");
+define("DBPersistent", false);
+define("DBDebug", false);
+define("DBDebugToFile", false);
+define("DELAY_DB_CONNECT", true);
+define("CHARSET", "UTF-8");
+EOF
+
+# Создать .settings.php
+cat > /var/www/html/bitrix/.settings.php << 'EOF'
+<?php
+return array(
+  'connections' => array(
+    'value' => array(
+      'default' => array(
+        'className' => '\\Bitrix\\Main\\DB\\MysqliConnection',
+        'host' => 'localhost',
+        'database' => 'bitrix_db',
+        'login' => 'bitrix',
+        'password' => 'bitrix123',
+        'options' => 2,
+      ),
+    ),
+    'readonly' => false,
+  ),
+  'utf_mode' => array('value' => true, 'readonly' => true),
+  'cache_flags' => array('value' => array('config_options' => 3600, 'site_template' => 3600)),
+  'cookies' => array('value' => array('secure' => false, 'httpOnly' => true)),
+  'exception_handling' => array('value' => array('debug' => false, 'handled_errors_types' => E_ALL & ~E_NOTICE & ~E_STRICT & ~E_DEPRECATED, 'exception_errors_types' => E_ERROR | E_PARSE | E_COMPILE_ERROR | E_COMPILE_WARNING, 'ignore_silence' => false, 'assertion_throws_exception' => true, 'assertion_error_type' => 256, 'log' => null)),
+);
+EOF
+
+# Создать admin через PHP API
+php -r "
+define('STOP_STATISTICS', true);
+define('NO_AGENT_STATISTIC', 'Y');
+define('NO_AGENT_CHECK', true);
+define('DisableEventsCheck', true);
+\$_SERVER['DOCUMENT_ROOT'] = '/var/www/html';
+require('/var/www/html/bitrix/modules/main/include/prolog_before.php');
+\$user = new CUser;
+\$arFields = array(
+    'NAME' => 'Admin',
+    'EMAIL' => 'admin@dentapro.ru',
+    'LOGIN' => 'admin',
+    'PASSWORD' => 'Admin123!',
+    'CONFIRM_PASSWORD' => 'Admin123!',
+    'GROUP_ID' => array(1),
+    'ACTIVE' => 'Y',
+);
+\$id = \$user->Add(\$arFields);
+echo \$id ? 'Admin created: '.\$id : 'Error: '.\$user->LAST_ERROR;
+"
+```
+
+### Проверка успешной установки
+
+```bash
+# Проверить что .settings.php создан
+test -f /var/www/html/bitrix/.settings.php && echo "OK" || echo "FAIL"
+
+# Проверить что admin панель доступна
+curl -sI http://HOST/bitrix/admin/ | grep "HTTP/1.1 200\|HTTP/1.1 302"
+
+# Проверить max_input_vars
+php -r "echo ini_get('max_input_vars');" # должно быть >= 10000
+```
+
+### ПРАВИЛО: Порядок действий при установке Битрикс
+
+1. Скачать архив через `wget` (НЕ через browser)
+2. Распаковать `tar -xzf`
+3. Создать БД через `mysql -e "CREATE DATABASE..."`
+4. Создать `dbconn.php` и `.settings.php` вручную
+5. Настроить права: `chown -R www-data:www-data /var/www/html/`
+6. Настроить nginx/apache VirtualHost
+7. Создать admin через PHP CLI (НЕ через browser wizard)
+8. Настроить `max_input_vars = 10000` в php.ini
+9. Очистить кэш: `rm -rf /var/www/html/bitrix/cache/*`
+10. Проверить: `curl -sI http://HOST/bitrix/admin/` → 200 или 302
+
+**ЗАПРЕЩЕНО:** browser_click, browser_navigate, browser_fill_form для любых шагов установки Битрикс.
