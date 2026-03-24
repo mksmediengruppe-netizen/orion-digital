@@ -3722,6 +3722,10 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);
             _task_type = classify_task_type(user_message if isinstance(user_message, str) else str(user_message))
             _task_mode = classify_task_mode(user_message if isinstance(user_message, str) else str(user_message))
             self._task_mode = _task_mode  # Store for SOFT BLUEPRINT GUARD
+            # BUG-PATCH-LOOP FIX: cap iterations for patch tasks (price change, text edit etc.)
+            if _task_mode == "patch":
+                self.MAX_ITERATIONS = min(self.MAX_ITERATIONS, 10)
+                logger.info(f"[PIPELINE] patch mode: MAX_ITERATIONS capped to {self.MAX_ITERATIONS}")
             logger.info(f"[PIPELINE] task_type={_task_type} task_mode={_task_mode}")
             # Inject pipeline rule ONLY for full_build tasks
             if _task_mode == "full_build":

@@ -71,6 +71,17 @@ def _parse_ssh_from_message(message):
     if not message:
         return None
 
+    # BUG-SSH-PARSE FIX: Blacklist of shell commands/flags that cannot be SSH credentials
+    SSH_PARSE_BLACKLIST = {
+        "rm", "ls", "cat", "grep", "find", "mkdir", "chmod",
+        "chown", "wget", "curl", "apt", "yum", "pip", "pip3",
+        "python", "python3", "bash", "sh", "sudo", "su",
+        "echo", "cp", "mv", "tar", "zip", "unzip", "kill",
+        "ps", "top", "df", "du", "free", "uname", "whoami",
+        "-rf", "-la", "-r", "--force", "--recursive", "-f",
+        "-v", "-h", "--help", "--version",
+    }
+
     # Pattern: user@host password
     # IP: digits and dots, or hostname
     # Password: non-space string (can contain special chars)
@@ -82,6 +93,9 @@ def _parse_ssh_from_message(message):
         username = m.group(1)
         host = m.group(2)
         password = m.group(3)
+        # BUG-SSH-PARSE FIX: reject if username or password is a shell command/flag
+        if username.lower() in SSH_PARSE_BLACKLIST or password.lower() in SSH_PARSE_BLACKLIST:
+            return None
         # Validate host looks like IP or hostname
         if re.match(r'^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$', host) or '.' in host:
             return {
