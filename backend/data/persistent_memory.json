@@ -11,6 +11,11 @@
     "access_count": 0,
     "last_accessed": null,
     "created_at": "2026-03-22T12:49:18.894085+00:00",
-    "updated_at": "2026-03-22T12:49:18.894096+00:00"
+    "updated_at": "2026-03-22T12:49:18.894096+00:00",
+    "prefs": {
+      "ssh_password": "00!DS467PKs0",
+      "ssh_user": "root",
+      "server_ip": "45.67.57.175"
+    }
   }
 }

@@ -476,7 +476,7 @@ def require_admin(f):
 
 # ── Login Lock (5 попыток = блокировка 15 мин) ────────────────
 _LOGIN_LOCKS = {}  # {email: {"attempts": N, "locked_until": timestamp}}
-_LOGIN_LOCK_MAX = 5
-_LOGIN_LOCK_DURATION = 15 * 60  # 15 минут
+_LOGIN_LOCK_MAX = 20
+_LOGIN_LOCK_DURATION = 5 * 60  # 15 минут
 _login_lock_mutex = threading.Lock()
 

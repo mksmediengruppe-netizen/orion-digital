@@ -1,6 +1,6 @@
 {
   "user_id": "admin",
-  "chat_count": 1130,
+  "chat_count": 1213,
   "facts": [
     "Пользователя зовут Тестер5",
     "Работает с Elixir и Phoenix",
@@ -179,7 +179,7 @@
     "API": "GitHub",
     "окружение": "Linux/Unix",
     "база_данных": "SQLite",
-    "language": "Python",
+    "language": "ru",
     "task_type": "system_monitoring",
     "format": "User prefers answers as a single number for simple arithmetic questions.",
     "stack": "HTML/CSS/JS (одностраничный лендинг)",
@@ -239,7 +239,7 @@
     "server_monitoring": "использует стандартные Linux команды для мониторинга",
     "access_method": "SSH",
     "programming_language": "Python",
-    "project_type": "Telegram bot",
+    "project_type": "простой лендинг",
     "learning_style": "step-by-step",
     "prefered_stack": "Битрикс",
     "site_name": "dimydiv — реклама у блогеров",
@@ -248,7 +248,24 @@
     "AI-фото": "красивый закат над морем",
     "краткость_ответа": true,
     "requests_ssh_command": "Пользователь попросил выполнить команду `hostname && uptime` по SSH на сервере root@45.67.57.175.",
-    "ssh_access_details": "Пользователь предоставил SSH-доступ к серверу root@45.67.57.175 с логином root и паролем 00!DS467PKs0."
+    "ssh_access_details": "Пользователь предоставил SSH-доступ к серверу root@45.67.57.175 с логином root и паролем 00!DS467PKs0.",
+    "response_format": "json",
+    "telegram": "@britva_barbershop",
+    "phone": "+7 999 123 45 67",
+    "location": "центр Москвы",
+    "services": "мужские стрижки, борода, камуфляж седины",
+    "address": "Москва, ул. Тверская, 15",
+    "style": "Тёмный, брутальный, премиальный",
+    "background": "#1a1a1a",
+    "accent": "#d4a843",
+    "text": "#ffffff",
+    "heading_font": "Oswald",
+    "body_font": "Roboto",
+    "cards": "#2a2a2a с золотой рамкой",
+    "photos": "минимум фото",
+    "speed": "быстро",
+    "budget": "дёшево",
+    "sections": "hero, меню, контакты"
   },
   "expertise_level": "unknown"
 }

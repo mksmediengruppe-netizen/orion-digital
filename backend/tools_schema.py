@@ -207,17 +207,22 @@ TOOLS_SCHEMA = [
         "type": "function",
         "function": {
             "name": "install_bitrix",
-            "description": "Install 1C-Bitrix CMS on a server. Prepares the server, runs the installation wizard, and verifies the result.",
+            "description": "Install 1C-Bitrix CMS on a server via SSH/CLI pipeline. Downloads official Bitrix archive, creates DB, generates config files, initializes Bitrix core, creates admin user, configures nginx. No browser wizard needed. Returns verdict: SUCCESS/PARTIAL_SUCCESS/FAILED.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "server_host": {
                         "type": "string",
-                        "description": "Server IP or domain"
+                        "description": "Server IP or domain for SSH connection"
                     },
                     "install_path": {
                         "type": "string",
-                        "description": "Installation path, e.g. /var/www/html/site"
+                        "description": "Installation path on server, e.g. /var/www/html or /var/www/html/bitrix-test"
+                    },
+                    "db_host": {
+                        "type": "string",
+                        "description": "MySQL host (default: localhost)",
+                        "default": "localhost"
                     },
                     "db_name": {
                         "type": "string",
@@ -233,19 +238,36 @@ TOOLS_SCHEMA = [
                     },
                     "admin_login": {
                         "type": "string",
-                        "description": "Bitrix admin login"
+                        "description": "Bitrix admin login",
+                        "default": "admin"
                     },
                     "admin_email": {
                         "type": "string",
-                        "description": "Admin email"
+                        "description": "Admin email address"
                     },
                     "admin_password": {
                         "type": "string",
                         "description": "Admin password"
                     },
+                    "site_name": {
+                        "type": "string",
+                        "description": "Site name",
+                        "default": "My Bitrix Site"
+                    },
+                    "site_url": {
+                        "type": "string",
+                        "description": "Full site URL, e.g. http://45.67.57.175/bitrix-test/"
+                    },
+                    "edition": {
+                        "type": "string",
+                        "description": "Bitrix edition: start, standard, small_business, business",
+                        "default": "start",
+                        "enum": ["start", "standard", "small_business", "business"]
+                    },
                     "use_demo": {
                         "type": "boolean",
-                        "description": "Install demo data"
+                        "description": "Install in demo mode",
+                        "default": True
                     }
                 },
                 "required": [

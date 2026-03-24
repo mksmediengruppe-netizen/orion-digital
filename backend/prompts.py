@@ -577,6 +577,23 @@ BITRIX CREATION PIPELINE (обязательный порядок)
     1. Загрузи PHP-скрипт в webroot: scp script.php root@SERVER:/var/www/html/SITE/
     2. Запусти через HTTP: curl -s http://SERVER/script.php
     3. Удали скрипт после выполнения: ssh root@SERVER rm /var/www/html/SITE/script.php
+
+БАЗА ЗНАНИЙ БИТРИКС:
+Перед работой с Битрикс прочитай /var/www/orion/backend/docs/bitrix_knowledge_base.md
+
+КЛЮЧЕВЫЕ ПРАВИЛА (anti-patterns):
+- Пути к картинкам в PHP файлах: <?=SITE_TEMPLATE_PATH?>/images/
+  (в CSS/JS — обычные относительные пути, SITE_TEMPLATE_PATH там не работает)
+- Определить реальный SITE_ID через SELECT LID FROM b_lang, НЕ хардкодить s1
+- Тип инфоблока: ОБЯЗАТЕЛЬНО указывать LANG при создании CIBlockType->Add()
+- Инфоблок: ОБЯЗАТЕЛЬНО указывать SITE_ID при создании CIBlock->Add()
+- Перед созданием: проверить существует ли (idempotent — не создавать дубликаты)
+- Списки (услуги, тарифы, отзывы, портфолио) → bitrix:news.list с шаблоном компонента
+- Уникальные блоки (hero, контакты) → bitrix:main.include
+- Шаблон: ОБЯЗАТЕЛЬНО description.php + назначить сайту через UPDATE b_lang
+- PHP скрипты: через HTTP (curl), НЕ через CLI (Class CMain not found)
+- После изменений: очистить кэш rm -rf bitrix/cache/* bitrix/managed_cache/*
+- Финальная проверка: изменить данные в инфоблоке через админку → увидеть изменение на сайте
 """
 
 # ══════════════════════════════════════════════════════════════════
