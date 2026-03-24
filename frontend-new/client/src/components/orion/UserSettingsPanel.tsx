@@ -1,20 +1,18 @@
 // ORION UserSettingsPanel — "Warm Intelligence" design
-// Shows current user's profile: role, budget progress, allowed tools, and a role switcher for demo.
+// Shows current user's profile: role, budget progress, allowed tools.
 
 import { useState } from "react";
 import { cn } from "@/lib/utils";
 import {
   useCurrentUser, ROLE_LABELS, ROLE_COLORS,
-  type UserRole, DEMO_USERS,
+  type UserRole, type AllowedTool,
 } from "@/contexts/CurrentUserContext";
 import {
   X, User, Shield, Wallet, Wrench, ChevronLeft,
-  Check, AlertTriangle, Lock, Unlock, Info,
+  AlertTriangle, Info,
   Globe, Terminal, FolderOpen, Image as ImageIcon, Plug, Server,
-  ChevronDown, ChevronRight,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
-import { toast } from "sonner";
 
 // ─── Tool icon map ────────────────────────────────────────────────────────────
 
@@ -35,13 +33,21 @@ interface UserSettingsPanelProps {
 
 export function UserSettingsPanel({ onClose }: UserSettingsPanelProps) {
   const { currentUser, setRole, budgetPct, budgetExhausted } = useCurrentUser();
-  const [activeTab, setActiveTab] = useState<"profile" | "tools" | "demo">("profile");
+  const [activeTab, setActiveTab] = useState<"profile" | "tools">("profile");
+
+  if (!currentUser) {
+    return (
+      <div className="flex flex-col h-full items-center justify-center text-gray-400">
+        <span className="text-sm">Загрузка...</span>
+      </div>
+    );
+  }
+
   const roleColors = ROLE_COLORS[currentUser.role];
 
   const tabs = [
-    { id: "profile" as const, label: "Профиль", icon: <User size={13} /> },
-    { id: "tools"   as const, label: "Инструменты", icon: <Wrench size={13} /> },
-    { id: "demo"    as const, label: "Демо-роли", icon: <Shield size={13} /> },
+    { id: "profile" as const, label: "Профиль",       icon: <User size={13} /> },
+    { id: "tools"   as const, label: "Инструменты",   icon: <Wrench size={13} /> },
   ];
 
   return (
@@ -107,9 +113,6 @@ export function UserSettingsPanel({ onClose }: UserSettingsPanelProps) {
             {activeTab === "tools" && (
               <ToolsTab tools={currentUser.allowedTools} />
             )}
-            {activeTab === "demo" && (
-              <DemoRolesTab currentRole={currentUser.role} onSetRole={setRole} />
-            )}
           </motion.div>
         </AnimatePresence>
       </div>
@@ -119,13 +122,24 @@ export function UserSettingsPanel({ onClose }: UserSettingsPanelProps) {
 
 // ─── Profile Tab ──────────────────────────────────────────────────────────────
 
+interface ProfileUser {
+  name: string;
+  email: string;
+  role: UserRole;
+  budgetLimit: number;
+  budgetSpent: number;
+  joinedAt: string;
+  lastActive: string;
+}
+
 function ProfileTab({ user, budgetPct, budgetExhausted }: {
-  user: ReturnType<typeof useCurrentUser>["currentUser"];
+  user: ProfileUser;
   budgetPct: number;
   budgetExhausted: boolean;
 }) {
   const roleColors = ROLE_COLORS[user.role];
   const budgetRemaining = Math.max(0, user.budgetLimit - user.budgetSpent);
+  const hasLimit = user.budgetLimit > 0 && user.budgetLimit < 999999;
 
   return (
     <div className="p-4 space-y-5">
@@ -135,12 +149,14 @@ function ProfileTab({ user, budgetPct, budgetExhausted }: {
           "w-12 h-12 rounded-xl flex items-center justify-center text-lg font-bold shrink-0",
           roleColors.bg, roleColors.text
         )}>
-          {user.name.charAt(0)}
+          {user.name.charAt(0).toUpperCase()}
         </div>
         <div className="flex-1 min-w-0">
           <div className="font-semibold text-gray-900 dark:text-gray-100 truncate">{user.name}</div>
           <div className="text-xs text-gray-500 dark:text-gray-400 truncate">{user.email}</div>
-          <div className="text-xs text-gray-400 mt-0.5">С {user.joinedAt} · Активен: {user.lastActive}</div>
+          {user.lastActive && (
+            <div className="text-xs text-gray-400 mt-0.5">Активен: {user.lastActive}</div>
+          )}
         </div>
       </div>
 
@@ -156,9 +172,9 @@ function ProfileTab({ user, budgetPct, budgetExhausted }: {
             <div className={cn("text-sm font-semibold", roleColors.text)}>{ROLE_LABELS[user.role]}</div>
             <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
               {user.role === "admin"   && "Полный доступ ко всем функциям и настройкам системы"}
-              {user.role === "manager" && "Доступ к аналитике и управлению командой, без терминала и SSH"}
-              {user.role === "user"    && "Запуск задач через браузер и файлы. Терминал и SSH недоступны"}
-              {user.role === "viewer"  && "Только просмотр результатов. Запуск задач недоступен"}
+              {user.role === "manager" && "Доступ к аналитике и управлению командой"}
+              {user.role === "user"    && "Запуск задач через браузер и файлы"}
+              {user.role === "viewer"  && "Только просмотр результатов"}
             </div>
           </div>
         </div>
@@ -167,10 +183,10 @@ function ProfileTab({ user, budgetPct, budgetExhausted }: {
       {/* Budget */}
       <div className="space-y-2">
         <div className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Бюджет</div>
-        {user.budgetLimit === 0 ? (
+        {!hasLimit ? (
           <div className="flex items-center gap-2 p-3 rounded-xl bg-gray-50 dark:bg-gray-800/50 border border-[#E8E6E1] dark:border-[#2a2d3a]">
             <Wallet size={14} className="text-gray-400 shrink-0" />
-            <span className="text-sm text-gray-500">Бюджет не назначен</span>
+            <span className="text-sm text-gray-500">Без ограничений</span>
           </div>
         ) : (
           <div className="p-3 rounded-xl bg-gray-50 dark:bg-gray-800/50 border border-[#E8E6E1] dark:border-[#2a2d3a] space-y-3">
@@ -193,7 +209,6 @@ function ProfileTab({ user, budgetPct, budgetExhausted }: {
                 {budgetPct}%
               </span>
             </div>
-            {/* Progress bar */}
             <div className="h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
               <motion.div
                 className={cn(
@@ -222,7 +237,7 @@ function ProfileTab({ user, budgetPct, budgetExhausted }: {
       <div className="flex items-start gap-2 p-3 rounded-xl bg-blue-50 dark:bg-blue-950/30 border border-blue-100 dark:border-blue-900/50">
         <Info size={13} className="text-blue-500 shrink-0 mt-0.5" />
         <p className="text-xs text-blue-700 dark:text-blue-300 leading-relaxed">
-          Для изменения роли или лимита бюджета обратитесь к администратору. Вкладка «Демо-роли» позволяет переключать роли для демонстрации прототипа.
+          Для изменения роли или лимита бюджета обратитесь к администратору системы.
         </p>
       </div>
     </div>
@@ -231,8 +246,8 @@ function ProfileTab({ user, budgetPct, budgetExhausted }: {
 
 // ─── Tools Tab ────────────────────────────────────────────────────────────────
 
-function ToolsTab({ tools }: { tools: ReturnType<typeof useCurrentUser>["currentUser"]["allowedTools"] }) {
-  const enabledCount = tools.filter(t => t.enabled).length;
+function ToolsTab({ tools }: { tools: AllowedTool[] }) {
+  const enabledCount = tools.filter((t: AllowedTool) => t.enabled).length;
 
   return (
     <div className="p-4 space-y-4">
@@ -242,7 +257,7 @@ function ToolsTab({ tools }: { tools: ReturnType<typeof useCurrentUser>["current
       </div>
 
       <div className="space-y-2">
-        {tools.map(tool => (
+        {tools.map((tool: AllowedTool) => (
           <div
             key={tool.id}
             className={cn(
@@ -265,117 +280,15 @@ function ToolsTab({ tools }: { tools: ReturnType<typeof useCurrentUser>["current
               <div className="text-xs text-gray-400 truncate">{tool.description}</div>
             </div>
             <div className={cn(
-              "flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full shrink-0",
-              tool.enabled
-                ? "bg-green-100 dark:bg-green-950/50 text-green-700 dark:text-green-400"
-                : "bg-gray-100 dark:bg-gray-800 text-gray-400"
-            )}>
-              {tool.enabled ? <Unlock size={9} /> : <Lock size={9} />}
-              {tool.enabled ? "Разрешён" : "Заблокирован"}
-            </div>
+              "w-2 h-2 rounded-full shrink-0",
+              tool.enabled ? "bg-green-500" : "bg-gray-300 dark:bg-gray-600"
+            )} />
           </div>
         ))}
       </div>
-
-      <div className="flex items-start gap-2 p-3 rounded-xl bg-gray-50 dark:bg-gray-800/50 border border-[#E8E6E1] dark:border-[#2a2d3a]">
-        <Info size={13} className="text-gray-400 shrink-0 mt-0.5" />
-        <p className="text-xs text-gray-500 dark:text-gray-400 leading-relaxed">
-          Набор инструментов определяется вашей ролью и настройками администратора. Для получения доступа к заблокированным инструментам обратитесь к администратору.
-        </p>
-      </div>
     </div>
   );
 }
 
-// ─── Demo Roles Tab ───────────────────────────────────────────────────────────
-
-function DemoRolesTab({ currentRole, onSetRole }: { currentRole: UserRole; onSetRole: (r: UserRole) => void }) {
-  const roles: UserRole[] = ["admin", "manager", "user", "viewer"];
-
-  const roleDescriptions: Record<UserRole, { desc: string; features: string[] }> = {
-    admin: {
-      desc: "Полный доступ к системе",
-      features: ["Открывает Админку", "Все инструменты", "Управление пользователями", "Бюджет $100"],
-    },
-    manager: {
-      desc: "Управление командой без терминала",
-      features: ["Открывает Админку", "Браузер + Файлы", "Без SSH и Терминала", "Бюджет $50"],
-    },
-    user: {
-      desc: "Стандартный пользователь",
-      features: ["Нет доступа к Админке", "Браузер + Файлы", "Бюджет $5 (почти исчерпан)", "Без SSH/Терминала"],
-    },
-    viewer: {
-      desc: "Только просмотр результатов",
-      features: ["Нет доступа к Админке", "Все инструменты заблокированы", "Нет бюджета", "Нельзя запускать задачи"],
-    },
-  };
-
-  return (
-    <div className="p-4 space-y-4">
-      <div className="flex items-start gap-2 p-3 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-100 dark:border-amber-900/50">
-        <Info size={13} className="text-amber-600 shrink-0 mt-0.5" />
-        <p className="text-xs text-amber-700 dark:text-amber-300 leading-relaxed">
-          Переключение ролей доступно только в демо-режиме. В реальной системе роль назначается администратором.
-        </p>
-      </div>
-
-      <div className="space-y-2">
-        {roles.map(role => {
-          const colors = ROLE_COLORS[role];
-          const info = roleDescriptions[role];
-          const isActive = currentRole === role;
-
-          return (
-            <button
-              key={role}
-              onClick={() => {
-                onSetRole(role);
-                toast.success(`Роль переключена на «${ROLE_LABELS[role]}»`);
-              }}
-              className={cn(
-                "w-full text-left p-3 rounded-xl border transition-all",
-                isActive
-                  ? cn("border-2", colors.border, colors.bg)
-                  : "border-[#E8E6E1] dark:border-[#2a2d3a] hover:bg-gray-50 dark:hover:bg-gray-800/50 bg-white dark:bg-transparent"
-              )}
-            >
-              <div className="flex items-center gap-3">
-                <div className={cn(
-                  "w-8 h-8 rounded-lg flex items-center justify-center shrink-0 text-sm font-bold",
-                  colors.bg, colors.text
-                )}>
-                  {ROLE_LABELS[role].charAt(0)}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-semibold text-gray-800 dark:text-gray-200">{ROLE_LABELS[role]}</span>
-                    {isActive && (
-                      <span className={cn(
-                        "text-[10px] font-medium px-1.5 py-0.5 rounded-full",
-                        colors.bg, colors.text
-                      )}>
-                        Активна
-                      </span>
-                    )}
-                  </div>
-                  <div className="text-xs text-gray-500 dark:text-gray-400">{info.desc}</div>
-                </div>
-                {isActive && <Check size={14} className={colors.text} />}
-              </div>
-              {isActive && (
-                <div className="mt-2 pl-11 flex flex-wrap gap-1">
-                  {info.features.map((f, i) => (
-                    <span key={i} className="text-[10px] px-1.5 py-0.5 rounded bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400">
-                      {f}
-                    </span>
-                  ))}
-                </div>
-              )}
-            </button>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
+// ─── Unused exports kept for compatibility ────────────────────────────────────
+export { X }; // re-export to avoid unused import warning
