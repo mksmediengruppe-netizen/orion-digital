@@ -603,3 +603,127 @@ rm ${BITRIX_ROOT}/check_ini.php
 | Навигация, футер | Шаблон сайта (header.php / footer.php) |
 
 **Нельзя**: хардкодить списки в PHP include-файлах — тогда редактирование через админку не работает.
+
+---
+## 14. КРИТИЧНО: Установка Битрикс — НЕ использовать browser_click
+
+**ЗАПРЕЩЕНО** использовать `browser_click` для прохождения веб-установщика Битрикс (`bitrixsetup.php`).
+Playwright зависает на элементах `#agree_license_id` и других кнопках установщика.
+
+**ПРАВИЛЬНЫЙ ПУТЬ** — использовать `bitrix_installer.py` или `bitrix_wizard_operator.py`:
+```python
+from bitrix_installer import BitrixInstaller
+installer = BitrixInstaller(ssh_executor=ssh_fn)
+result = installer.install(
+    server={"host": "45.67.57.175", "username": "root", "password": "..."},
+    install_path="/var/www/html",
+    db_config={"db_name": "bitrix_db", "db_user": "bitrix_user", "db_password": "..."}
+)
+```
+
+Или через SSH + curl (если Python модуль недоступен):
+```bash
+# Шаг 1: Скачать установщик
+cd /var/www/html && wget -q https://www.1c-bitrix.ru/download/scripts/bitrixsetup.php
+
+# Шаг 2: Пройти установщик через curl (НЕ через браузер)
+# Установщик Битрикс поддерживает POST-запросы для каждого шага
+curl -s -X POST http://45.67.57.175/bitrixsetup.php \
+  -d "step=1&agree_license=Y&edition=start" > /tmp/step1.html
+
+# Шаг 3: Проверить что ядро установлено
+ls /var/www/html/bitrix/modules/ | wc -l  # должно быть > 10
+curl -sI http://45.67.57.175/bitrix/admin/ | head -1  # должно быть HTTP 200 или 302
+```
+
+**ПРИЗНАК УСПЕШНОЙ УСТАНОВКИ:**
+- `curl -sI http://SITE/bitrix/admin/` → HTTP 302 (редирект на /bitrix/admin/index.php)
+- `ls /var/www/html/bitrix/admin/` → содержит `index.php`
+- `cat /var/www/html/bitrix/.settings.php` → содержит `connections`
+
+---
+## 15. КРИТИЧНО: Стандартный режим — защита от потери SSE
+
+В режиме **Стандарт** (не PRO/Turbo) агент НЕ имеет background thread.
+При потере SSE-соединения задача **умирает**.
+
+**Правила для длинных операций:**
+1. Разбивать установку на короткие SSH-команды (не более 30 секунд каждая)
+2. НЕ использовать `cp -a` для больших директорий — использовать `rsync` с прогрессом
+3. Скачивание архивов через `wget -q --show-progress` с таймаутом
+4. После каждой операции делать `curl -sI http://SITE/` для проверки
+
+**Пример правильной установки через SSH (без browser):**
+```bash
+# Быстрая установка Битрикс через готовый архив
+cd /var/www/html
+wget -q -O bitrix.tar.gz "https://www.1c-bitrix.ru/download/start_encode.tar.gz" --timeout=120
+tar -xzf bitrix.tar.gz --strip-components=1
+chown -R www-data:www-data /var/www/html
+chmod -R 755 /var/www/html
+```
+
+---
+## 16. КРИТИЧНО: Проверка готовности Битрикс к работе
+
+После установки ВСЕГДА проверять:
+```bash
+# 1. Ядро установлено
+[ -f /var/www/html/bitrix/admin/index.php ] && echo "OK" || echo "FAIL: no admin"
+
+# 2. Настройки БД
+[ -f /var/www/html/bitrix/.settings.php ] && echo "OK" || echo "FAIL: no settings"
+
+# 3. HTTP ответ
+curl -sI http://45.67.57.175/ | head -1  # HTTP 200 или 302
+
+# 4. Админка доступна
+curl -sI http://45.67.57.175/bitrix/admin/ | head -1  # HTTP 302 (редирект на login)
+
+# 5. PHP работает
+curl -s http://45.67.57.175/ | grep -c "bitrix" || echo "WARN: no bitrix in HTML"
+```
+
+Если любая проверка FAIL — останавливаться и исправлять ПЕРЕД созданием шаблона.
+
+---
+## 17. Правильная структура файлов Битрикс-шаблона
+
+Шаблон ДОЛЖЕН находиться в:
+```
+/var/www/html/local/templates/TEMPLATE_NAME/
+├── .description.php          # ОБЯЗАТЕЛЬНО: описание шаблона
+├── header.php                # Шапка сайта
+├── footer.php                # Подвал сайта
+├── template_styles.css       # CSS стили
+├── script.js                 # JavaScript
+└── components/               # Шаблоны компонентов
+    └── bitrix/
+        └── news.list/
+            ├── services_cards/
+            │   ├── template.php      # ОБЯЗАТЕЛЬНО
+            │   └── .description.php  # ОБЯЗАТЕЛЬНО
+            ├── reviews_cards/
+            │   ├── template.php
+            │   └── .description.php
+            └── doctors_cards/
+                ├── template.php
+                └── .description.php
+```
+
+**ОБЯЗАТЕЛЬНЫЕ поля в .description.php:**
+```php
+<?php
+$TEMPLATE_NAME = "Название шаблона";
+$TEMPLATE_DESCRIPTION = "Описание";
+$TEMPLATE_SUPPORT_MULTI_SITE = "Y";
+$TEMPLATE_SUPPORT_MULTI_LANG = "Y";
+```
+
+**Назначение шаблона сайту через API (НЕ через SQL):**
+```php
+// В PHP-скрипте через Bitrix API:
+require_once $_SERVER["DOCUMENT_ROOT"]."/bitrix/modules/main/include/prolog_before.php";
+CSite::Update("s1", ["TEMPLATE" => [["TEMPLATE" => "TEMPLATE_NAME", "CONDITION" => ""]]]);
+BXClearCache(true);
+```
