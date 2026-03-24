@@ -1682,7 +1682,7 @@ class AgentLoop:
                                             "steps": len(self.task_charter.get("steps", [])),
                                             "completed": len(self.task_charter.get("completed", [])),
                                             "failed": len(self.task_charter.get("failed", []))}}
-            elif tool_name == "task_complete":  # FIX-VERIFIER  # PATCH 12 bug13: removed duplicate update_scratchpad handler
+            elif tool_name == "task_complete":  # PATCH 12 bug13: removed duplicate update_scratchpad handler
                 summary = args.get("summary", "Task completed")
                 return {"success": True, "completed": True, "summary": summary}
 
@@ -3523,32 +3523,6 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);
             logger.debug(f"[COST-OPT] _trim_context error: {_trim_err}")
         return messages
 
-
-def extract_project_name(message):
-    """Извлечь имя проекта из сообщения пользователя. FIX-PROJECT-NAME"""
-    import re as _re
-    import time as _time
-    msg = str(message).lower()
-    
-    patterns = [
-        r'(?:для|for)\s+(?:компании|клиента|бренда|студии|клиники|салона|бар[а-я]*|ресторан[а-я]*|стоматолог[а-я]*)?\s*["\'\']?([A-Za-zА-Яа-яёЁ0-9_-]+)',
-        r'(?:лендинг|сайт|landing|site)\s+(?:для\s+)?["\'\']?([A-Za-zА-Яа-яёЁ0-9_-]+)',
-        r'(?:стоматологи[а-я]*|барбершоп|кофейн[а-я]*|салон[а-я]*|клиник[а-я]*)\s+["\'\']?([A-Za-zА-Яа-яёЁ0-9_-]+)',
-    ]
-    stop_words = {'на', 'в', 'для', 'и', 'с', 'the', 'a', 'an', 'битриксе', 'bitrix', 'wordpress', 'сервере'}
-    for p in patterns:
-        m = _re.search(p, msg, _re.IGNORECASE)
-        if m:
-            name = m.group(1).strip().lower()
-            if name not in stop_words and len(name) >= 3:
-                # Transliterate common Russian chars
-                trans = {'а':'a','е':'e','о':'o','и':'i','у':'u','р':'r','с':'s','т':'t','н':'n','п':'p'}
-                name = ''.join(trans.get(c, c) for c in name)
-                clean = _re.sub(r'[^a-z0-9_-]', '', name)
-                if clean and len(clean) >= 3:
-                    return clean
-    return "site_" + str(int(_time.time()))[-6:]
-
     def run_stream(self, user_message, chat_history=None, file_content=None, ssh_credentials=None):
         """
         Run the agent loop with streaming.
@@ -3765,26 +3739,6 @@ def extract_project_name(message):
                 logger.info(f"[PIPELINE] Skipped pipeline injection (task_mode=patch)")
         except Exception as _pipeline_err:
             logger.warning(f"[PIPELINE] classify_task_type failed: {_pipeline_err}")
-        # FIX-PROJECT-NAME: extract project name and inject into agent context
-        try:
-            _project_name = extract_project_name(user_message if isinstance(user_message, str) else str(user_message))
-            _project_dir = f"/var/www/html/{_project_name}/"
-            if hasattr(self, 'task_charter'):
-                self.task_charter["project_name"] = _project_name
-                self.task_charter["project_dir"] = _project_dir
-                self.task_charter["template_name"] = _project_name
-            _project_ctx = (
-                f"Проект: {_project_name}. "
-                f"Директория: {_project_dir}. "
-                f"Шаблон Битрикс: {_project_name}. "
-                f"Работай ТОЛЬКО в этой директории. "
-                f"НЕ трогай файлы других проектов (dimydiv, britva и т.д.)."
-            )
-            _effective_system_prompt += f"\n\n[PROJECT SCOPE]\n{_project_ctx}"
-            logger.info(f"[PROJECT-NAME] Extracted: {_project_name} -> {_project_dir}")
-        except Exception as _pn_err:
-            logger.warning(f"[PROJECT-NAME] Failed: {_pn_err}")
-
 
         # ── AutoSummary: загрузить ВСЕ резюме прошлых чатов (без фильтра по query) ───
         _project_summaries = ""
@@ -4442,20 +4396,6 @@ def extract_project_name(message):
                 if tool_name == "task_complete":
                     result = self._execute_tool(tool_name, tool_args_str)
                     summary = result.get("summary", "")
-                    # FIX-VERIFIER-INJECTED: check project name on site
-                    try:
-                        _tc_project = (self.task_charter or {}).get("project_name", "") if hasattr(self, 'task_charter') else ""
-                        _tc_type = getattr(self, '_task_type', '') if hasattr(self, '_task_type') else ''
-                        if _tc_project and _tc_type in ('website', 'bitrix'):
-                            import subprocess as _sp
-                            _v = _sp.run(['curl', '-s', '-o', '/dev/null', '-w', '%{http_code}', f'http://localhost/{_tc_project}/'], capture_output=True, text=True, timeout=5)
-                            _code = _v.stdout.strip()
-                            if _code not in ('200', '301', '302'):
-                                logger.warning(f"[VERIFIER] Project '{_tc_project}' not accessible (HTTP {_code}) — may be wrong directory")
-                            else:
-                                logger.info(f"[VERIFIER] OK: '{_tc_project}' accessible at http://localhost/{_tc_project}/ (HTTP {_code})")
-                    except Exception as _ver_err:
-                        logger.warning(f"[VERIFIER] check failed: {_ver_err}")
                     yield self._sse({
                         "type": "tool_result",
                         "tool": tool_name,
@@ -5448,32 +5388,6 @@ class MultiAgentLoop(AgentLoop):
 Если есть проблемы — исправь их."""
         }
     }
-
-
-def extract_project_name(message):
-    """Извлечь имя проекта из сообщения пользователя. FIX-PROJECT-NAME"""
-    import re as _re
-    import time as _time
-    msg = str(message).lower()
-    
-    patterns = [
-        r'(?:для|for)\s+(?:компании|клиента|бренда|студии|клиники|салона|бар[а-я]*|ресторан[а-я]*|стоматолог[а-я]*)?\s*["\'\']?([A-Za-zА-Яа-яёЁ0-9_-]+)',
-        r'(?:лендинг|сайт|landing|site)\s+(?:для\s+)?["\'\']?([A-Za-zА-Яа-яёЁ0-9_-]+)',
-        r'(?:стоматологи[а-я]*|барбершоп|кофейн[а-я]*|салон[а-я]*|клиник[а-я]*)\s+["\'\']?([A-Za-zА-Яа-яёЁ0-9_-]+)',
-    ]
-    stop_words = {'на', 'в', 'для', 'и', 'с', 'the', 'a', 'an', 'битриксе', 'bitrix', 'wordpress', 'сервере'}
-    for p in patterns:
-        m = _re.search(p, msg, _re.IGNORECASE)
-        if m:
-            name = m.group(1).strip().lower()
-            if name not in stop_words and len(name) >= 3:
-                # Transliterate common Russian chars
-                trans = {'а':'a','е':'e','о':'o','и':'i','у':'u','р':'r','с':'s','т':'t','н':'n','п':'p'}
-                name = ''.join(trans.get(c, c) for c in name)
-                clean = _re.sub(r'[^a-z0-9_-]', '', name)
-                if clean and len(clean) >= 3:
-                    return clean
-    return "site_" + str(int(_time.time()))[-6:]
 
     def run_stream(self, user_message, chat_history=None, file_content=None, ssh_credentials=None):
         """Override run_stream to handle orchestrator sequential pipeline."""
@@ -6468,6 +6382,27 @@ PIPELINE_BITRIX = [
     {"step": "judge", "agent": "sonnet", "action": "final_site_judge"}
 ]
 
+
+
+
+
+def extract_project_name(message):
+    import re as _re, time as _time
+    msg = str(message).lower()
+    for p in [
+        r'stomatologi[a-z]*\s+([A-Za-z0-9_-]{3,})',
+        r'dentapro|britva|coffeetime|dimydiv',
+        r'(?:landing|site|lend)\s+(?:dlya\s+)?([A-Za-z0-9_-]{3,})',
+    ]:
+        m = _re.search(p, msg, _re.IGNORECASE)
+        if m:
+            return m.group(0 if not m.lastindex else 1).lower()[:20]
+    # Simple keyword extraction
+    for word in msg.split():
+        w = _re.sub(r"[^a-z0-9]", "", word.lower())
+        if len(w) >= 4 and w not in {"server", "bitrix", "wordpress", "landing", "sajt", "sayt"}:
+            return w[:20]
+    return "site_" + str(int(_time.time()))[-6:]
 
 def select_pipeline(brief_text: str) -> list:
     """Select pipeline based on brief content.
