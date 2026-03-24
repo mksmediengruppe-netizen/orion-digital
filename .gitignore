@@ -21,3 +21,9 @@ __pycache__/
 *.sqlite
 uploads/
 venv/
+
+# Frontend new — exclude build artifacts and dependencies
+frontend-new/node_modules/
+frontend-new/dist/
+frontend-new/.pnpm-store/
+frontend-new/client/node_modules/

@@ -19,6 +19,7 @@ from task_routes import task_bp
 from canvas_routes import canvas_bp
 from misc_routes import misc_bp
 from dashboard_routes import dashboard_bp
+from schedule_routes import schedule_bp
 
 # Register blueprints
 app.register_blueprint(auth_bp)
@@ -30,6 +31,7 @@ app.register_blueprint(task_bp)
 app.register_blueprint(canvas_bp)
 app.register_blueprint(misc_bp)
 app.register_blueprint(dashboard_bp)
+app.register_blueprint(schedule_bp)
 
 
 # ── TASK 10: Start crash recovery watchdog ──
