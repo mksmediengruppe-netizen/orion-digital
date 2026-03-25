@@ -135,6 +135,13 @@ class ContextCompactor:
         self._call_llm = call_llm
 
     def should_compact(self, messages: List[Dict], iteration: int) -> bool:
+        # Token-based check: estimate total chars as proxy for tokens
+        total_chars = sum(len(str(m.get('content', ''))) for m in messages)
+        estimated_tokens = total_chars // 3  # rough estimate: 1 token ~ 3 chars
+        # Compact if token budget exceeded OR message count threshold hit
+        if estimated_tokens > MemoryConfig.MAX_CONTEXT_TOKENS:
+            logger.info(f"[COMPACT] Token budget exceeded: ~{estimated_tokens} > {MemoryConfig.MAX_CONTEXT_TOKENS}")
+            return True
         if len(messages) < MemoryConfig.COMPACT_MSG_THRESHOLD:
             return False
         if iteration % MemoryConfig.COMPACT_EVERY_N != 0:

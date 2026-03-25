@@ -6,7 +6,8 @@ import { type Chat, type Project } from "@/lib/mockData";
 import { Bot, Plus, Search, MessageSquare, LayoutDashboard,
   ChevronRight, ChevronDown, FolderOpen, MoreHorizontal,
   Pencil, Trash2, FolderInput, PanelLeftClose, PanelLeftOpen,
-  BookOpen, Sun, Moon, Settings, AlertTriangle, Pin, PinOff, Calendar
+  BookOpen, Sun, Moon, Settings, AlertTriangle, Pin, PinOff, Calendar,
+  Brain, Cpu, Layers, FileText, Plug
 } from "lucide-react";
 import { useState, useRef, useEffect } from "react";
 import { useTheme } from "@/contexts/ThemeContext";
@@ -39,6 +40,11 @@ interface SidebarProps {
   onCommandPalette?: () => void;
   onPlaybooks?: () => void;
   onScheduled?: () => void;
+  onMemory?: () => void;
+  onCustomAgents?: () => void;
+  onModels?: () => void;
+  onTemplates?: () => void;
+  onConnectors?: () => void;
   onSettingsClick?: () => void;
   budgetExhausted?: boolean;
   notifications?: AppNotification[];
@@ -55,9 +61,10 @@ export function Sidebar({
   onCreateProject, onCreateChat, onRenameChat, onDeleteChat, onMoveChat,
   onRenameProject, onDeleteProject,
   pinnedChats, onPinChat, onCommandPalette, onPlaybooks, onScheduled, onSettingsClick,
+  onMemory, onCustomAgents, onModels, onTemplates, onConnectors,
   budgetExhausted, notifications = [], onMarkRead, onMarkAllRead, onDismissNotif, onClearAllNotifs,
 }: SidebarProps) {
-  const [expandedProjects, setExpandedProjects] = useState<Set<string>>(new Set(["p1"]));
+  const [expandedProjects, setExpandedProjects] = useState<Set<string>>(new Set(["default"]));
   const [searchQuery, setSearchQuery] = useState("");
   const [showCreateProject, setShowCreateProject] = useState(false);
   const [newProjectName, setNewProjectName] = useState("");
@@ -360,7 +367,7 @@ export function Sidebar({
           </div>
 
           {/* Bottom */}
-          <div className="border-t border-[#E8E6E1] dark:border-[#2a2d3a] px-2 py-2 shrink-0 space-y-0.5">
+          <div className="border-t border-[#E8E6E1] dark:border-[#2a2d3a] px-2 py-2 shrink-0 space-y-0.5 overflow-y-auto max-h-64">
             {onPlaybooks && (
               <button
                 className="w-full flex items-center gap-2.5 px-2 py-1.5 rounded-md text-xs text-gray-500 dark:text-gray-400 hover:bg-white dark:hover:bg-[#1e2130] hover:text-gray-700 dark:hover:text-gray-200 transition-colors"
@@ -377,6 +384,51 @@ export function Sidebar({
               >
                 <Calendar size={13} />
                 Расписание
+              </button>
+            )}
+            {onMemory && (
+              <button
+                className="w-full flex items-center gap-2.5 px-2 py-1.5 rounded-md text-xs text-gray-500 dark:text-gray-400 hover:bg-white dark:hover:bg-[#1e2130] hover:text-gray-700 dark:hover:text-gray-200 transition-colors"
+                onClick={onMemory}
+              >
+                <Brain size={13} />
+                Память
+              </button>
+            )}
+            {onCustomAgents && (
+              <button
+                className="w-full flex items-center gap-2.5 px-2 py-1.5 rounded-md text-xs text-gray-500 dark:text-gray-400 hover:bg-white dark:hover:bg-[#1e2130] hover:text-gray-700 dark:hover:text-gray-200 transition-colors"
+                onClick={onCustomAgents}
+              >
+                <Cpu size={13} />
+                Агенты
+              </button>
+            )}
+            {onModels && (
+              <button
+                className="w-full flex items-center gap-2.5 px-2 py-1.5 rounded-md text-xs text-gray-500 dark:text-gray-400 hover:bg-white dark:hover:bg-[#1e2130] hover:text-gray-700 dark:hover:text-gray-200 transition-colors"
+                onClick={onModels}
+              >
+                <Layers size={13} />
+                Модели
+              </button>
+            )}
+            {onTemplates && (
+              <button
+                className="w-full flex items-center gap-2.5 px-2 py-1.5 rounded-md text-xs text-gray-500 dark:text-gray-400 hover:bg-white dark:hover:bg-[#1e2130] hover:text-gray-700 dark:hover:text-gray-200 transition-colors"
+                onClick={onTemplates}
+              >
+                <FileText size={13} />
+                Шаблоны
+              </button>
+            )}
+            {onConnectors && (
+              <button
+                className="w-full flex items-center gap-2.5 px-2 py-1.5 rounded-md text-xs text-gray-500 dark:text-gray-400 hover:bg-white dark:hover:bg-[#1e2130] hover:text-gray-700 dark:hover:text-gray-200 transition-colors"
+                onClick={onConnectors}
+              >
+                <Plug size={13} />
+                Коннекторы
               </button>
             )}
             <button
@@ -704,7 +756,7 @@ function UserAvatarRow({
   const { currentUser } = useCurrentUser();
   if (!currentUser) return null;
   const roleColors = ROLE_COLORS[currentUser.role];
-  const initials = currentUser.name.split(" ").map(w => w[0]).slice(0, 2).join("");
+  const initials = (currentUser.name || currentUser.email || "U").split(" ").map(w => (w && w[0]) || "").slice(0, 2).join("").toUpperCase();
 
   return (
     <div
@@ -719,7 +771,7 @@ function UserAvatarRow({
         <span className={cn("text-[9px] font-semibold", roleColors.text)}>{initials}</span>
       </div>
       <div className="min-w-0 flex-1">
-        <div className="text-xs font-medium text-gray-700 dark:text-gray-200 truncate">{currentUser.name}</div>
+        <div className="text-xs font-medium text-gray-700 dark:text-gray-200 truncate">{currentUser.name || currentUser.email || "Пользователь"}</div>
       </div>
       {/* Bell notification center */}
       <div onClick={e => e.stopPropagation()}>

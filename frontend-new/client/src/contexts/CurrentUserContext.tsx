@@ -10,6 +10,7 @@ import {
   type ReactNode,
 } from "react";
 import api from "@/lib/api";
+import { clearStoredToken } from "@/lib/api";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -97,7 +98,9 @@ export function CurrentUserProvider({ children }: { children: ReactNode }) {
   const refresh = useCallback(async () => {
     try {
       const data = await api.auth.me();
-      setCurrentUser(mapApiUser(data));
+      // api.auth.me() returns { user: {...} }, extract the user object
+      const userObj = (data as any).user || data;
+      setCurrentUser(mapApiUser(userObj));
     } catch {
       setCurrentUser(null);
     }
@@ -125,6 +128,7 @@ export function CurrentUserProvider({ children }: { children: ReactNode }) {
     } catch {
       // ignore
     }
+    clearStoredToken();
     setCurrentUser(null);
   }, []);
 

@@ -1,9 +1,9 @@
 // ORION ChatHeader — model selector + status + timer + controls
-// Layout: [breadcrumb] ... [$cost] [timer] [model▾] [status] [simulate] [panel] [⋯]
+// Layout: [breadcrumb] ... [$cost] [timer] [model▾] [status] [panel] [⋯]
 
 import { cn } from "@/lib/utils";
 import { type AgentStatus } from "@/lib/mockData";
-import { PanelRight, Play, RotateCcw, MoreHorizontal, DollarSign, Clock, Square, Zap, Gauge, Sparkles, Crown, ChevronDown, Check, AlertTriangle, Terminal, Keyboard } from "lucide-react";
+import { PanelRight, MoreHorizontal, DollarSign, Clock, Square, Zap, Gauge, Sparkles, Crown, ChevronDown, Check, AlertTriangle, Terminal, Keyboard } from "lucide-react";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem,
   DropdownMenuTrigger, DropdownMenuSeparator,
@@ -120,11 +120,7 @@ interface ChatHeaderProps {
   status: AgentStatus;
   rightPanelOpen: boolean;
   onToggleRightPanel: () => void;
-  onSimulate?: () => void;
-  onReset?: () => void;
   onStop?: () => void;
-  simState?: "idle" | "running" | "done";
-  showSimButton?: boolean;
   cost?: number;
   duration?: string;
   isTimerLive?: boolean;
@@ -135,10 +131,7 @@ interface ChatHeaderProps {
   onTakeoverActivate?: () => void;
   onTakeoverDeactivate?: () => void;
   isRunning?: boolean;
-  // SSE demo triggers
-  onSimulateSSEDisconnect?: () => void;
-  onSimulateSSEFailed?: () => void;
-  onSimulateSSEOffline?: () => void;
+
 }
 
 export function ChatHeader({
@@ -147,10 +140,6 @@ export function ChatHeader({
   status,
   rightPanelOpen,
   onToggleRightPanel,
-  onSimulate,
-  onReset,
-  simState = "idle",
-  showSimButton = false,
   onStop,
   cost,
   duration,
@@ -162,9 +151,7 @@ export function ChatHeader({
   onTakeoverActivate,
   onTakeoverDeactivate,
   isRunning = false,
-  onSimulateSSEDisconnect,
-  onSimulateSSEFailed,
-  onSimulateSSEOffline,
+
 }: ChatHeaderProps) {
   const [modelOpen, setModelOpen] = useState(false);
   const current = MODELS[model];
@@ -283,40 +270,17 @@ export function ChatHeader({
           )}>{STATUS_LABELS[status]}</span>
         </div>
 
-        {/* Simulate button */}
-        {showSimButton && (
-          simState === "idle" ? (
-            <button
-              onClick={onSimulate}
-              className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-indigo-600 text-white text-xs font-medium hover:bg-indigo-700 transition-colors"
-            >
-              <Play size={10} />
-              Симуляция
-            </button>
-          ) : simState === "running" ? (
-            <div className="flex items-center gap-2">
-              <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-indigo-50 border border-indigo-200 text-indigo-700 text-xs font-medium">
-                <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse" />
-                Выполняется...
-              </div>
-              <button
-                onClick={onStop ?? onReset}
-                className="flex items-center gap-1 px-2 py-1 rounded-md bg-red-50 border border-red-200 text-red-600 text-xs font-medium hover:bg-red-100 transition-colors"
-                title="Остановить задачу"
-              >
-                <Square size={9} fill="currentColor" />
-                Стоп
-              </button>
-            </div>
-          ) : (
-            <button
-              onClick={onReset}
-              className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-gray-100 text-gray-600 text-xs font-medium hover:bg-gray-200 transition-colors"
-            >
-              <RotateCcw size={10} />
-              Сбросить
-            </button>
-          )
+
+        {/* Real agent stop button — shown when real API agent is running */}
+        {isRunning && onStop && (
+          <button
+            onClick={onStop}
+            className="flex items-center gap-1 px-2.5 py-1 rounded-md bg-red-500 text-white text-xs font-semibold hover:bg-red-600 transition-colors shadow-sm"
+            title="Остановить задачу"
+          >
+            <Square size={9} fill="currentColor" />
+            Стоп
+          </button>
         )}
 
         {/* Takeover button — shown when running */}
@@ -377,27 +341,7 @@ export function ChatHeader({
             <DropdownMenuItem className="text-xs" onClick={() => toast.info("Скоро")}>Переименовать</DropdownMenuItem>
             <DropdownMenuItem className="text-xs" onClick={() => toast.info("Скоро")}>Поделиться</DropdownMenuItem>
             <DropdownMenuItem className="text-xs" onClick={() => { exportChatMarkdown(chatTitle, projectName); toast.success("Чат экспортирован в Markdown"); }}>Экспорт в Markdown</DropdownMenuItem>
-            {(onSimulateSSEDisconnect || onSimulateSSEFailed || onSimulateSSEOffline) && (
-              <>
-                <DropdownMenuSeparator />
-                <div className="px-2 py-1 text-[10px] font-semibold text-gray-400 uppercase tracking-wider">Demo: SSE States</div>
-                {onSimulateSSEDisconnect && (
-                  <DropdownMenuItem className="text-xs text-amber-600" onClick={onSimulateSSEDisconnect}>
-                    ⚡ Симул. переподключение
-                  </DropdownMenuItem>
-                )}
-                {onSimulateSSEFailed && (
-                  <DropdownMenuItem className="text-xs text-red-600" onClick={onSimulateSSEFailed}>
-                    ✕ Симул. потерю соединения
-                  </DropdownMenuItem>
-                )}
-                {onSimulateSSEOffline && (
-                  <DropdownMenuItem className="text-xs text-gray-500" onClick={onSimulateSSEOffline}>
-                    ○ Симул. offline
-                  </DropdownMenuItem>
-                )}
-              </>
-            )}
+
           </DropdownMenuContent>
         </DropdownMenu>
       </div>

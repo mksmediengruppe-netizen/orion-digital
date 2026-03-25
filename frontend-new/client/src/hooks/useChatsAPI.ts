@@ -174,8 +174,10 @@ export function useChatsAPI() {
 
   // ─── Send message with SSE streaming ─────────────────────────────────────
   const sendMessage = useCallback(
-    async (chatId: string, text: string) => {
-      if (isSending) return;
+    async (chatId: string, text: string, variant?: string) => {
+      // Allow sending messages during task execution (mid-task messaging like Manus)
+      // Only block if already processing an SSE stream for THIS chat
+      // if (isSending) return; // REMOVED: Allow mid-task messages
 
       // Optimistically add user message
       const userMsg: Message = {
@@ -216,7 +218,7 @@ export function useChatsAPI() {
       }));
 
       try {
-        const response = await api.agent.send({ chatId, message: text });
+        const response = await api.agent.send({ chatId, message: text, variant });
 
         if (!response.body) {
           throw new Error("No response body");
@@ -366,6 +368,41 @@ export function useChatsAPI() {
                 setChats((prev) =>
                   prev.map((c) => (c.id === chatId ? { ...c, status: "failed" } : c))
                 );
+              } else if (type === "queued") {
+                // Message queued for after current task
+                const queuedText = event.text || "В очереди — возьму после текущей задачи";
+                setMessages((prev) => ({
+                  ...prev,
+                  [chatId]: (prev[chatId] || []).map((m) =>
+                    m.id === agentMsgId
+                      ? { ...m, content: `🕐 ${queuedText}` }
+                      : m
+                  ),
+                }));
+                setAgentStatus((prev) => ({ ...prev, [chatId]: "executing" }));
+              } else if (type === "appended") {
+                // Message appended to current task
+                const appendedText = event.text || "Добавлено к текущей задаче";
+                setMessages((prev) => ({
+                  ...prev,
+                  [chatId]: (prev[chatId] || []).map((m) =>
+                    m.id === agentMsgId
+                      ? { ...m, content: `📩 ${appendedText}` }
+                      : m
+                  ),
+                }));
+                setAgentStatus((prev) => ({ ...prev, [chatId]: "executing" }));
+              } else if (type === "model_change") {
+                // Model changed notification
+                const modelMsg = event.message || "Модель изменена";
+                setMessages((prev) => ({
+                  ...prev,
+                  [chatId]: (prev[chatId] || []).map((m) =>
+                    m.id === agentMsgId
+                      ? { ...m, content: `🔄 ${modelMsg}` }
+                      : m
+                  ),
+                }));
               }
               // Ignore: heartbeat, keepalive, usage, verification, memory_context, intent, resume
             } catch {

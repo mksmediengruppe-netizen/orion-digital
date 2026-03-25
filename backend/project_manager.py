@@ -319,8 +319,9 @@ Assistant: {assistant_msg}"""
                 items = json.loads(json_match.group(0))
             except (json.JSONDecodeError, ValueError):
                 # Fallback: try to extract JSON array from LLM response
+                # FIX: use content_clean (raw_text was undefined)
                 import re as _re
-                _json_match = _re.search(r'\[\s*\{.*?\}\s*\]', raw_text, _re.DOTALL)
+                _json_match = _re.search(r'\[\s*\{.*?\}\s*\]', content_clean, _re.DOTALL)
                 if _json_match:
                     try:
                         items = json.loads(_json_match.group())

@@ -9,6 +9,22 @@
  *   const chats = await api.chats.list();
  */
 
+// ─── Token persistence ───────────────────────────────────────────────────────
+
+const TOKEN_KEY = "orion_session_token";
+
+export function getStoredToken(): string | null {
+  try { return localStorage.getItem(TOKEN_KEY); } catch { return null; }
+}
+
+export function setStoredToken(token: string) {
+  try { localStorage.setItem(TOKEN_KEY, token); } catch { /* ignore */ }
+}
+
+export function clearStoredToken() {
+  try { localStorage.removeItem(TOKEN_KEY); } catch { /* ignore */ }
+}
+
 // ─── Base fetch ───────────────────────────────────────────────────────────────
 
 export class ApiError extends Error {
@@ -25,10 +41,15 @@ async function request<T>(
   path: string,
   options: RequestInit = {}
 ): Promise<T> {
+  const token = getStoredToken();
+  const authHeaders: Record<string, string> = {};
+  if (token) authHeaders["Authorization"] = `Bearer ${token}`;
+
   const res = await fetch(path, {
     credentials: "include",
     headers: {
       "Content-Type": "application/json",
+      ...authHeaders,
       ...(options.headers || {}),
     },
     ...options,
@@ -95,9 +116,16 @@ export interface LoginResponse {
 
 const auth = {
   me: () => get<{ user: User }>("/api/auth/me"),
-  login: (email: string, password: string) =>
-    post<LoginResponse>("/api/auth/login", { email, password }),
-  logout: () => post<{ ok: boolean }>("/api/auth/logout"),
+  login: async (email: string, password: string) => {
+    const resp = await post<LoginResponse>("/api/auth/login", { email, password });
+    if (resp.token) setStoredToken(resp.token);
+    return resp;
+  },
+  logout: async () => {
+    const resp = await post<{ ok: boolean }>("/api/auth/logout");
+    clearStoredToken();
+    return resp;
+  },
 };
 
 // ─── Chats ────────────────────────────────────────────────────────────────────
@@ -132,8 +160,8 @@ export interface ChatDetail extends ChatSummary {
 const chats = {
   list: () => get<{ chats: ChatSummary[] }>("/api/chats"),
   get: (chatId: string) => get<{ chat: ChatDetail }>(`/api/chats/${chatId}`),
-  create: (title?: string, model?: string) =>
-    post<{ chat: ChatSummary }>("/api/chats", { title, model }),
+  create: (title?: string, model?: string, mode?: string) =>
+    post<{ chat: ChatSummary }>("/api/chats", { title, model, mode }),
   delete: (chatId: string) => del<{ ok: boolean }>(`/api/chats/${chatId}`),
   rename: (chatId: string, title: string) =>
     put<{ ok: boolean }>(`/api/chats/${chatId}/rename`, { title }),
@@ -150,6 +178,7 @@ export interface SendMessageOptions {
   message: string;
   model?: string;
   variant?: string;
+  mode?: string;
   fileContent?: string;
 }
 
@@ -158,14 +187,18 @@ export interface SendMessageOptions {
  * The caller is responsible for reading the stream.
  */
 function sendMessage(opts: SendMessageOptions): Promise<Response> {
+  const token = getStoredToken();
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (token) headers["Authorization"] = `Bearer ${token}`;
   return fetch(`/api/chats/${opts.chatId}/send`, {
     method: "POST",
     credentials: "include",
-    headers: { "Content-Type": "application/json" },
+    headers,
     body: JSON.stringify({
       message: opts.message,
       model: opts.model,
       variant: opts.variant,
+      mode: opts.mode,
       file_content: opts.fileContent,
     }),
   });
@@ -264,7 +297,10 @@ const admin = {
     email: string;
     password: string;
     name?: string;
+    username?: string;
     role?: string;
+    budget_limit?: number;
+    permissions?: Record<string, boolean>;
   }) => post<{ ok: boolean; user: AdminUser }>("/api/admin/users", data),
   updateUser: (id: string, data: Partial<AdminUser>) =>
     put<{ ok: boolean }>(`/api/admin/users/${id}`, data),
@@ -297,6 +333,173 @@ const analytics = {
     get<Record<string, unknown>>("/api/analytics", period ? { period } : undefined),
 };
 
+// ─── Memory ──────────────────────────────────────────────────────────────────
+
+export interface MemoryEntry {
+  id: string;
+  content: string;
+  source?: string;
+  tags?: string[];
+  created_at: string;
+  relevance?: number;
+}
+
+const memory = {
+  list: (chatId?: string) =>
+    get<{ memories: MemoryEntry[] }>("/api/memory", chatId ? { chat_id: chatId } : undefined),
+  search: (query: string, chatId?: string) =>
+    post<{ memories: MemoryEntry[] }>("/api/memory/search", { query, chat_id: chatId }),
+  store: (content: string, source?: string, tags?: string[]) =>
+    post<{ ok: boolean; memory: MemoryEntry }>("/api/memory", { content, source, tags }),
+  delete: (id: string) => del<{ ok: boolean }>(`/api/memory/${id}`),
+  stats: () => get<{ total: number; sessions?: number; size_kb?: number; initialized?: boolean; vector_dim?: number; collection?: string }>("/api/memory/stats"),
+  adminList: (userId?: string) =>
+    get<{ memories: MemoryEntry[] }>("/api/admin/memory", userId ? { user_id: userId } : undefined),
+  adminDelete: (id: string) => del<{ ok: boolean }>(`/api/admin/memory/${id}`),
+  adminClearSessions: () => post<{ ok: boolean; cleared: number }>("/api/admin/memory/clear-sessions"),
+};
+
+// ─── Custom Agents ────────────────────────────────────────────────────────────
+
+export interface CustomAgent {
+  id: string;
+  name: string;
+  description?: string;
+  system_prompt: string;
+  model?: string;
+  tools?: string[];
+  created_at: string;
+}
+
+const agents = {
+  list: () => get<{ agents: CustomAgent[] }>("/api/agents/custom"),
+  create: (data: Omit<CustomAgent, "id" | "created_at">) =>
+    post<{ ok: boolean; agent: CustomAgent }>("/api/agents/custom", data),
+  delete: (id: string) => del<{ ok: boolean }>(`/api/agents/custom/${id}`),
+};
+
+// ─── Models ───────────────────────────────────────────────────────────────────
+
+export interface ModelInfo {
+  id: string;
+  name: string;
+  provider?: string;
+  context_length?: number;
+  cost_per_1k_input?: number;
+  cost_per_1k_output?: number;
+  available?: boolean;
+}
+
+const models = {
+  list: async (): Promise<{ models: ModelInfo[] }> => {
+    const raw = await get<{
+      chat_models?: Record<string, { name: string; lang?: string }>;
+      configs?: Record<string, { name: string; emoji?: string; quality?: number; monthly_cost?: string; coding_model?: string }>;
+      models?: ModelInfo[];
+    }>("/api/models");
+    // If already in expected format
+    if (raw.models) return { models: raw.models };
+    // Transform from backend format
+    const result: ModelInfo[] = [];
+    if (raw.configs) {
+      Object.entries(raw.configs).forEach(([id, cfg]) => {
+        result.push({
+          id,
+          name: cfg.name,
+          provider: "orion",
+          available: true,
+        });
+      });
+    }
+    if (raw.chat_models) {
+      Object.entries(raw.chat_models).forEach(([id, m]) => {
+        if (!result.find(r => r.id === id)) {
+          result.push({ id, name: m.name, provider: "orion", available: true });
+        }
+      });
+    }
+    return { models: result };
+  },
+};
+
+// ─── Templates ────────────────────────────────────────────────────────────────
+
+export interface TaskTemplate {
+  id: string;
+  title?: string;
+  name?: string;
+  description?: string;
+  prompt: string;
+  category?: string;
+  tags?: string[];
+}
+
+const templates = {
+  list: () => get<{ templates: TaskTemplate[] }>("/api/templates"),
+};
+
+// ─── Connectors ───────────────────────────────────────────────────────────────
+
+export interface Connector {
+  id: string;
+  name: string;
+  type?: string;
+  description?: string;
+  connected?: boolean;
+  status?: string;
+  auth_type?: string;
+  scopes?: string[];
+  icon?: string;
+  config?: Record<string, unknown>;
+}
+
+const connectors = {
+  list: () => get<{ connectors: Connector[] }>("/api/connectors"),
+  connect: (id: string, config?: Record<string, unknown>) =>
+    post<{ ok: boolean }>(`/api/connectors/${id}/connect`, config || {}),
+  disconnect: (id: string) => post<{ ok: boolean }>(`/api/connectors/${id}/disconnect`),
+};
+
+// ─── Rate Limit ───────────────────────────────────────────────────────────────
+
+export interface RateLimitStatus {
+  requests_per_minute: number;
+  requests_used: number;
+  tokens_per_minute: number;
+  tokens_used: number;
+  reset_at: string;
+}
+
+const rateLimit = {
+  status: () => get<RateLimitStatus>("/api/rate-limit/status"),
+};
+
+// ─── Files ────────────────────────────────────────────────────────────────────
+
+export interface FileEntry {
+  id: string;
+  name: string;
+  size: number;
+  mime_type?: string;
+  created_at: string;
+  url?: string;
+}
+
+const files = {
+  list: (chatId?: string) =>
+    get<{ files: FileEntry[] }>("/api/files", chatId ? { chat_id: chatId } : undefined),
+  upload: (formData: FormData) =>
+    fetch("/api/upload", { method: "POST", credentials: "include", body: formData }).then(r => r.json()),
+  downloadUrl: (id: string) => `/api/files/${id}/download`,
+  preview: (id: string) => get<{ content: string; mime_type: string }>(`/api/files/${id}/preview`),
+};
+
+// ─── Health ───────────────────────────────────────────────────────────────────
+
+const health = {
+  check: () => get<{ status: string; version?: string; uptime?: number }>("/api/health"),
+};
+
 // ─── Export ───────────────────────────────────────────────────────────────────
 
 export const api = {
@@ -307,6 +510,14 @@ export const api = {
   admin,
   settings,
   analytics,
+  memory,
+  agents,
+  models,
+  templates,
+  connectors,
+  rateLimit,
+  files,
+  health,
 };
 
 export default api;

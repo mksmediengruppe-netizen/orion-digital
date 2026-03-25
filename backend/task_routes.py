@@ -145,4 +145,17 @@ def rename_chat(chat_id):
     return jsonify({"ok": True})
 
 
+@task_bp.route("/api/chats/<chat_id>/messages", methods=["GET"])
+@require_auth
+def get_chat_messages(chat_id):
+    """Get messages for a specific chat."""
+    db = db_read()
+    chat = db["chats"].get(chat_id)
+    if not chat:
+        return jsonify({"error": "Chat not found"}), 404
+    if chat.get("user_id") != request.user_id and request.user.get("role") != "admin":
+        return jsonify({"error": "Access denied"}), 403
+    return jsonify({"messages": chat.get("messages", []), "chat_id": chat_id})
+
+
 # ── File Upload ────────────────────────────────────────────────

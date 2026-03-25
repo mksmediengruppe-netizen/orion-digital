@@ -1,0 +1,8 @@
+{
+  "name": "code-review",
+  "description": "Automated code review skill",
+  "version": "1.0.0",
+  "author": "ORION",
+  "active": true,
+  "created_at": "2026-03-25T17:39:34.723049+00:00"
+}

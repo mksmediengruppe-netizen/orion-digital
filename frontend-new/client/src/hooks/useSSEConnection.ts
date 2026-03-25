@@ -140,7 +140,7 @@ export function useSSEConnection({
     });
 
     // Forward any named event types (agent_status, step_update, etc.)
-    const namedEvents = ["agent_status", "step_update", "task_complete", "budget_update", "notification"];
+    const namedEvents = ["agent_status", "step_update", "task_complete", "budget_update", "notification", "auth_required", "browser_takeover", "research_step", "tool_progress"];
     for (const eventType of namedEvents) {
       es.addEventListener(eventType, (e) => {
         try {
@@ -216,7 +216,7 @@ export function useSSEConnectionSafe(url: string) {
     window.location.port === "3000";
 
   // For the prototype, disable real connection — use demo mode
-  const PROTOTYPE_MODE = true; // flip to false when backend is ready
+  const PROTOTYPE_MODE = false; // FIX: backend is ready, using real SSE connection
 
   const real = useSSEConnection({
     url,

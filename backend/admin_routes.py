@@ -125,7 +125,14 @@ def get_analytics():
     for c in user_chats:
         for msg in c.get("messages", []):
             if msg.get("role") == "assistant":
-                day = msg.get("timestamp", "")[:10]
+                _ts = msg.get("timestamp", "")
+                if isinstance(_ts, (int, float)):
+                    from datetime import datetime as _dt
+                    day = _dt.utcfromtimestamp(_ts).strftime("%Y-%m-%d")
+                elif isinstance(_ts, str) and _ts:
+                    day = _ts[:10]
+                else:
+                    day = ""
                 if day:
                     if day not in daily_data:
                         daily_data[day] = {"cost": 0, "requests": 0}
@@ -150,7 +157,7 @@ def get_analytics():
             "monthly_limit_rub": round(user.get("monthly_limit", 999999) * 105, 2),
             "limit_used_percent": round(user_cost / max(user.get("monthly_limit", 999999), 1) * 100, 1),
             # BUG-BACKEND-3 FIX: frontend expects username/full_name
-            "username": user.get("email", uid),
+            "username": user.get("email", request.user_id),
             "full_name": user.get("name", ""),
             "total_spent": user_cost,
             "is_blocked": user.get("is_blocked", False)
@@ -255,7 +262,7 @@ def admin_create_user():
         },
         "settings": {
             "variant": "premium",
-            "chat_model": "qwen3",
+            "chat_model": "gpt54mini",
             "enhanced_mode": False,
             "design_pro": False,
             "language": "ru"
@@ -540,7 +547,11 @@ def get_usage_analytics():
                     # Track daily messages
                     ts = msg.get("timestamp", "")
                     if ts:
-                        day = ts[:10]
+                        if isinstance(ts, (int, float)):
+                            from datetime import datetime as _dt2
+                            day = _dt2.utcfromtimestamp(ts).strftime("%Y-%m-%d")
+                        else:
+                            day = str(ts)[:10]
                         daily_messages[day] = daily_messages.get(day, 0) + 1
                     
                     # Track tool usage from agent actions

@@ -4,7 +4,7 @@
 
 import { useState, useRef, useCallback, useEffect } from "react";
 import { cn } from "@/lib/utils";
-import { Paperclip, ArrowUp, Mic, X, Search, Globe, Terminal, FolderOpen, Image, AtSign, Server, Database, Code2, FileText, AlertTriangle, ShieldOff } from "lucide-react";
+import { Paperclip, ArrowUp, Mic, X, Search, Globe, Terminal, FolderOpen, Image, AtSign, Server, Database, Code2, FileText, AlertTriangle, ShieldOff, Square } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
 
@@ -35,10 +35,24 @@ interface ComposerProps {
   onSend: (text: string) => void;
   budgetExhausted?: boolean;
   onAdminRefill?: () => void;
+  isRunning?: boolean;
+  onStop?: () => void;
 }
 
-export function Composer({ onSend, budgetExhausted = false, onAdminRefill }: ComposerProps) {
-  const [value, setValue] = useState("");
+const DRAFT_KEY = "orion_composer_draft";
+
+function getDraft(): string {
+  try { return localStorage.getItem(DRAFT_KEY) || ""; } catch { return ""; }
+}
+function saveDraft(v: string) {
+  try { localStorage.setItem(DRAFT_KEY, v); } catch { /* ignore */ }
+}
+function clearDraft() {
+  try { localStorage.removeItem(DRAFT_KEY); } catch { /* ignore */ }
+}
+
+export function Composer({ onSend, budgetExhausted = false, onAdminRefill, isRunning = false, onStop }: ComposerProps) {
+  const [value, setValue] = useState(getDraft);
   const [uploadFiles, setUploadFiles] = useState<UploadFile[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
@@ -56,6 +70,7 @@ export function Composer({ onSend, budgetExhausted = false, onAdminRefill }: Com
   const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const v = e.target.value;
     setValue(v);
+    saveDraft(v);
     adjustHeight();
     // Detect @mention trigger
     const cursor = e.target.selectionStart ?? v.length;
@@ -75,6 +90,7 @@ export function Composer({ onSend, budgetExhausted = false, onAdminRefill }: Com
     if (!text) return;
     onSend(text);
     setValue("");
+    clearDraft();
     if (textareaRef.current) textareaRef.current.style.height = "auto";
   };
 
@@ -136,7 +152,23 @@ export function Composer({ onSend, budgetExhausted = false, onAdminRefill }: Com
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     setIsDragging(false);
-    Array.from(e.dataTransfer.files).forEach(simulateUpload);
+    const files = Array.from(e.dataTransfer.files);
+    files.forEach(file => {
+      // For text files, read content and insert into textarea
+      const isText = file.type.startsWith('text/') || /\.(txt|md|json|yaml|yml|xml|csv|log|sh|py|js|ts|jsx|tsx|html|css|conf|env|ini|toml)$/i.test(file.name);
+      if (isText && file.size < 50000) {
+        const reader = new FileReader();
+        reader.onload = (ev) => {
+          const content = ev.target?.result as string;
+          const snippet = `\n\`\`\`${file.name}\n${content.slice(0, 3000)}${content.length > 3000 ? '\n... (обрезано)' : ''}\n\`\`\``;
+          setValue(prev => prev + snippet);
+          setTimeout(adjustHeight, 10);
+        };
+        reader.readAsText(file);
+      } else {
+        simulateUpload(file);
+      }
+    });
   };
 
   const handleVoice = () => {
@@ -339,7 +371,7 @@ export function Composer({ onSend, budgetExhausted = false, onAdminRefill }: Com
           value={value}
           onChange={handleChange}
           onKeyDown={handleKeyDown}
-          placeholder="Поставьте задачу агенту..."
+          placeholder={isRunning ? "Отправьте дополнение к задаче..." : "Поставьте задачу агенту..."}
           rows={1}
           className={cn(
             "flex-1 resize-none bg-transparent text-sm text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500",
@@ -361,6 +393,16 @@ export function Composer({ onSend, budgetExhausted = false, onAdminRefill }: Com
           <Mic size={15} />
         </button>
 
+        {/* Stop button — shown when agent is running */}
+        {isRunning && onStop && (
+          <button
+            onClick={onStop}
+            className="shrink-0 w-8 h-8 rounded-full flex items-center justify-center bg-red-500 hover:bg-red-600 text-white transition-all mb-0.5 shadow-sm"
+            title="Остановить"
+          >
+            <Square size={12} fill="currentColor" />
+          </button>
+        )}
         {/* Send */}
         <button
           onClick={handleSend}

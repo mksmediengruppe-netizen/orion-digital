@@ -865,7 +865,8 @@ def tool_parallel_tasks(tasks: list, max_workers: int = 5,
 # ══════════════════════════════════════════════════════════════════════════
 
 def tool_research_deep(query: str, depth: int = 3, sources: int = 5,
-                       output_format: str = "report") -> Dict[str, Any]:
+                       output_format: str = "report",
+                       progress_callback=None) -> Dict[str, Any]:
     """Deep multi-source research with AI synthesis."""
     try:
         import requests
@@ -876,6 +877,8 @@ def tool_research_deep(query: str, depth: int = 3, sources: int = 5,
         sources = max(1, min(sources, 10))
 
         # Step 1: Search
+        if progress_callback:
+            progress_callback({"step": "search", "status": "running", "detail": f"Searching: {query}"})
         search_results = []
         try:
             # Use DuckDuckGo HTML search (no API key needed)
@@ -896,7 +899,12 @@ def tool_research_deep(query: str, depth: int = 3, sources: int = 5,
         except Exception as search_err:
             logger.warning(f"DuckDuckGo search failed: {search_err}")
 
+        if progress_callback:
+            progress_callback({"step": "search", "status": "done", "detail": f"Found {len(search_results)} sources"})
+
         # Step 2: Fetch content from top sources
+        if progress_callback:
+            progress_callback({"step": "fetch", "status": "running", "detail": f"Fetching {min(depth, len(search_results))} sources..."})
         fetched_content = []
         if depth >= 2:
             for sr in search_results[:min(depth, sources)]:
@@ -918,8 +926,13 @@ def tool_research_deep(query: str, depth: int = 3, sources: int = 5,
                 except Exception:
                     pass
 
-        # Step 3: AI synthesis
-        api_key = os.environ.get("OPENAI_API_KEY")
+        if progress_callback:
+            progress_callback({"step": "fetch", "status": "done", "detail": f"Fetched {len(fetched_content)} sources"})
+
+        # Step 3: AI synthesis (via OpenRouter — same provider as main agent)
+        if progress_callback:
+            progress_callback({"step": "synthesis", "status": "running", "detail": "AI synthesizing findings..."})
+        api_key = os.environ.get("OPENROUTER_API_KEY") or os.environ.get("OPENAI_API_KEY")
         if not api_key:
             # Return raw results without synthesis
             return {
@@ -932,7 +945,12 @@ def tool_research_deep(query: str, depth: int = 3, sources: int = 5,
                 }
             }
 
-        client = openai.OpenAI(api_key=api_key)
+        # Use OpenRouter if OPENROUTER_API_KEY is set, otherwise fallback to OpenAI
+        base_url = "https://openrouter.ai/api/v1" if os.environ.get("OPENROUTER_API_KEY") else None
+        client_kwargs = {"api_key": api_key}
+        if base_url:
+            client_kwargs["base_url"] = base_url
+        client = openai.OpenAI(**client_kwargs)
 
         # Build context
         context_parts = []
@@ -959,8 +977,10 @@ Sources found:
 
 Be factual, cite sources where possible, and be thorough."""
 
+        # Use OpenRouter model ID when going through OpenRouter
+        synthesis_model = "openai/gpt-5.4-mini" if base_url else "gpt-4.1-mini"
         response = client.chat.completions.create(
-            model="gpt-4.1-mini",
+            model=synthesis_model,
             messages=[{"role": "user", "content": prompt}],
             max_tokens=2000,
             temperature=0.3
@@ -1056,6 +1076,15 @@ def tool_long_memory_search(query: str, user_id: str = None,
 # DISPATCHER — вызывается из agent_loop.py
 # ══════════════════════════════════════════════════════════════════════════
 
+def _tool_text_to_speech_wrapper(**kwargs):
+    """Wrapper for TTS tool."""
+    try:
+        from tts_tool import tool_text_to_speech
+        return tool_text_to_speech(**kwargs)
+    except ImportError:
+        return {"success": False, "error": "TTS module not available"}
+
+
 MANUS_TOOL_HANDLERS = {
     "web_scrape": tool_web_scrape,
     "pdf_read": tool_pdf_read,
@@ -1067,6 +1096,7 @@ MANUS_TOOL_HANDLERS = {
     "parallel_tasks": tool_parallel_tasks,
     "research_deep": tool_research_deep,
     "long_memory_search": tool_long_memory_search,
+    "text_to_speech": _tool_text_to_speech_wrapper,
 }
 
 

@@ -323,7 +323,7 @@ TOOLS_SCHEMA = [
                     "append": {
                         "type": "boolean",
                         "description": "If true, append content to existing file instead of overwriting. Use for writing large files in parts.",
-                        "default": false
+                        "default": False
                     }
                 },
                 "required": [

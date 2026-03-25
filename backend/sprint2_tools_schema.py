@@ -185,7 +185,7 @@ SPRINT2_TOOLS_SCHEMA = [
 try:
     from tools_schema import TOOLS_SCHEMA
     # Check if already added
-    existing_names = {t["function"]["name"] for t in TOOLS_SCHEMA}
+    existing_names = {(t["function"]["name"] if "function" in t else t["name"]) for t in TOOLS_SCHEMA}
     for tool in SPRINT2_TOOLS_SCHEMA:
         if tool["function"]["name"] not in existing_names:
             TOOLS_SCHEMA.append(tool)

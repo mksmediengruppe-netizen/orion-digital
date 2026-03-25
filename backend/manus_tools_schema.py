@@ -104,7 +104,10 @@ MANUS_TOOLS_SCHEMA = [
                                 },
                                 "data": {
                                     "type": "array",
-                                    "items": {"type": "array"},
+                                    "items": {
+                                        "type": "array",
+                                        "items": {"type": ["string", "number", "boolean", "null"]}
+                                    },
                                     "description": "2D array of data rows"
                                 },
                                 "formulas": {
@@ -160,7 +163,10 @@ MANUS_TOOLS_SCHEMA = [
                                 "right": {"type": "string", "description": "Right column content for two_col type"},
                                 "table_data": {
                                     "type": "array",
-                                    "items": {"type": "array"},
+                                    "items": {
+                                        "type": "array",
+                                        "items": {"type": ["string", "number", "boolean", "null"]}
+                                    },
                                     "description": "2D array for table slides (first row = headers)"
                                 }
                             }

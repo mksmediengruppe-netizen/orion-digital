@@ -66,7 +66,7 @@ function renderInline(text: string): React.ReactNode {
     if (linkMatch) {
       if (linkMatch[1]) parts.push(<span key={key++}>{renderInlineBasic(linkMatch[1])}</span>);
       parts.push(
-        <a key={key++} href={linkMatch[3]} className="text-indigo-600 underline underline-offset-2 hover:text-indigo-800 transition-colors">
+        <a key={key++} href={linkMatch[3]} target="_blank" rel="noopener noreferrer" className="text-indigo-600 underline underline-offset-2 hover:text-indigo-800 transition-colors">
           {linkMatch[2]}
         </a>
       );

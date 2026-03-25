@@ -39,11 +39,12 @@ interface RightPanelProps {
   completedSteps?: number;
   activeStepTitle?: string;
   isRunning?: boolean;
+  currentTool?: string | null;
   pendingArtifact?: ViewerArtifact | null;
   onArtifactConsumed?: () => void;
 }
 
-export function RightPanel({ activeStep, onStepSelect, defaultTab = "live", steps, plan, completedSteps, activeStepTitle, isRunning, pendingArtifact, onArtifactConsumed }: RightPanelProps) {
+export function RightPanel({ activeStep, onStepSelect, defaultTab = "live", steps, plan, completedSteps, activeStepTitle, isRunning, currentTool, pendingArtifact, onArtifactConsumed }: RightPanelProps) {
   const [activeTab, setActiveTab] = useState(defaultTab);
   const [selectedArtifact, setSelectedArtifact] = useState<Artifact | null>(null);
   const [browserOfflineReason, setBrowserOfflineReason] = useState<BrowserOfflineReason>("none");
@@ -77,19 +78,20 @@ export function RightPanel({ activeStep, onStepSelect, defaultTab = "live", step
   return (
     <aside className="flex flex-col h-full bg-white dark:bg-[#0f1117] border-l border-[#E8E6E1] dark:border-[#2a2d3a] w-full">
       {/* Tab bar */}
-      <div className="flex items-center border-b border-[#E8E6E1] dark:border-[#2a2d3a] px-1 shrink-0 overflow-x-auto">
+      <div className="flex items-center border-b border-[#E8E6E1] dark:border-[#2a2d3a] px-0.5 shrink-0 overflow-x-auto" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
+        <style>{`.right-panel-tabs::-webkit-scrollbar { display: none; }`}</style>
         {TABS.map(tab => (
           <button
             key={tab.id}
             onClick={() => setActiveTab(tab.id)}
             className={cn(
-              "flex items-center gap-1.5 px-2.5 py-3 text-xs font-medium border-b-2 transition-colors whitespace-nowrap",
+              "flex items-center gap-1 px-1.5 py-2.5 text-[11px] font-medium border-b-2 transition-colors whitespace-nowrap shrink-0",
               activeTab === tab.id
                 ? "border-indigo-600 text-indigo-700 dark:text-indigo-400"
                 : "border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
             )}
+            title={tab.label}
           >
-            {tab.icon}
             {tab.label}
           </button>
         ))}
@@ -106,7 +108,7 @@ export function RightPanel({ activeStep, onStepSelect, defaultTab = "live", step
             transition={{ duration: 0.15 }}
             className="h-full"
           >
-            {activeTab === "live"      && <LiveTab plan={plan} completedSteps={completedSteps} activeStepTitle={activeStepTitle} totalSteps={steps?.length} />}
+            {activeTab === "live"      && <LiveTab plan={plan} completedSteps={completedSteps} activeStepTitle={activeStepTitle} totalSteps={steps?.length} isRunning={isRunning} currentTool={currentTool} />}
             {activeTab === "browser"   && (
               <div className="h-full flex flex-col">
                 {/* Takeover banner */}
@@ -196,64 +198,70 @@ export function RightPanel({ activeStep, onStepSelect, defaultTab = "live", step
 
 // ─── Live Tab ────────────────────────────────────────────────────────────────
 
-function LiveTab({ plan, completedSteps = 0, activeStepTitle, totalSteps }: {
+function LiveTab({ plan, completedSteps = 0, activeStepTitle, totalSteps, isRunning, currentTool }: {
   plan?: string[];
   completedSteps?: number;
   activeStepTitle?: string;
   totalSteps?: number;
+  isRunning?: boolean;
+  currentTool?: string | null;
 }) {
+  const hasPlan = plan && plan.length > 0;
+
+  // Empty state — agent is not running and no plan
+  if (!isRunning && !hasPlan) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full min-h-[200px] p-6 text-center">
+        <div className="w-10 h-10 rounded-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center mb-3">
+          <Loader2 size={18} className="text-gray-300 dark:text-gray-600" />
+        </div>
+        <div className="text-sm font-medium text-gray-400 dark:text-gray-500">Задача не запущена</div>
+        <div className="text-xs text-gray-300 dark:text-gray-600 mt-1">Отправьте задачу агенту чтобы начать</div>
+      </div>
+    );
+  }
+
   return (
     <div className="p-4 space-y-4">
-      {/* Current action */}
-      <div className="p-3 rounded-xl bg-indigo-50 border border-indigo-100">
-        <div className="flex items-center gap-2 mb-2">
-          <span className="w-2 h-2 rounded-full bg-indigo-500 animate-pulse" />
-          <span className="text-xs font-semibold text-indigo-700">Текущее действие</span>
+      {/* Running indicator */}
+      {isRunning && (
+        <div className="p-3 rounded-xl bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-100 dark:border-indigo-900">
+          <div className="flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-indigo-500 animate-pulse" />
+            <span className="text-xs font-semibold text-indigo-700 dark:text-indigo-300">Агент работает</span>
+            <Loader2 size={11} className="text-indigo-400 animate-spin ml-auto" />
+          </div>
+          {(currentTool || activeStepTitle) && (
+            <div className="text-xs text-indigo-600 dark:text-indigo-400 mt-1.5 font-mono truncate">
+              {currentTool ? `Tool: ${currentTool}` : activeStepTitle}
+            </div>
+          )}
         </div>
-        <div className="text-sm font-medium text-indigo-900">Агент использует браузер</div>
-        <div className="text-xs text-indigo-600 mt-1 font-mono">http://185.22.xx.xx/bitrix/admin/</div>
-      </div>
+      )}
 
-      {/* Active tool */}
-      <div className="space-y-2">
-        <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Активный инструмент</div>
-        <div className="flex items-center gap-2.5 p-2.5 rounded-lg bg-gray-50 border border-gray-200">
-          <div className="w-7 h-7 rounded-lg bg-blue-100 flex items-center justify-center">
-            <Globe size={14} className="text-blue-600" />
-          </div>
-          <div>
-            <div className="text-xs font-medium text-gray-800">Browser</div>
-            <div className="text-[11px] text-gray-500">Открывает страницу</div>
-          </div>
-          <div className="ml-auto">
-            <Loader2 size={14} className="text-blue-500 animate-spin" />
-          </div>
-        </div>
-      </div>
-
-      {/* Task Progress — Manus-style plan checklist */}
-      {plan && plan.length > 0 && (
+      {/* Task Progress — real plan checklist */}
+      {hasPlan && (
         <div className="space-y-2">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Task progress</span>
-            <span className="text-xs font-mono font-semibold text-gray-700">
-              {completedSteps} / {plan.length}
+            <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Прогресс задачи</span>
+            <span className="text-xs font-mono font-semibold text-gray-700 dark:text-gray-300">
+              {completedSteps} / {plan!.length}
             </span>
           </div>
           {/* Progress bar */}
-          <div className="w-full bg-gray-100 rounded-full h-1">
+          <div className="w-full bg-gray-100 dark:bg-gray-800 rounded-full h-1">
             <motion.div
               className="bg-indigo-500 h-1 rounded-full"
               initial={{ width: 0 }}
-              animate={{ width: plan.length > 0 ? `${(completedSteps / plan.length) * 100}%` : "0%" }}
+              animate={{ width: plan!.length > 0 ? `${(completedSteps / plan!.length) * 100}%` : "0%" }}
               transition={{ duration: 0.4, ease: "easeOut" }}
             />
           </div>
           {/* Plan items */}
           <div className="space-y-1.5 pt-0.5">
-            {plan.map((item, i) => {
+            {plan!.map((item, i) => {
               const done = i < completedSteps;
-              const running = i === completedSteps;
+              const running = i === completedSteps && isRunning;
               return (
                 <motion.div
                   key={i}
@@ -262,7 +270,7 @@ function LiveTab({ plan, completedSteps = 0, activeStepTitle, totalSteps }: {
                   transition={{ duration: 0.2, delay: i * 0.03 }}
                   className={cn(
                     "flex items-start gap-2.5 text-xs rounded-lg px-2.5 py-2 transition-colors",
-                    running ? "bg-indigo-50 border border-indigo-100" : "bg-transparent"
+                    running ? "bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-100 dark:border-indigo-900" : "bg-transparent"
                   )}
                 >
                   <span className={cn(
@@ -278,7 +286,7 @@ function LiveTab({ plan, completedSteps = 0, activeStepTitle, totalSteps }: {
                   </span>
                   <span className={cn(
                     "leading-relaxed transition-colors",
-                    done ? "text-gray-400 line-through" : running ? "text-indigo-800 font-medium" : "text-gray-500"
+                    done ? "text-gray-400 line-through" : running ? "text-indigo-800 dark:text-indigo-200 font-medium" : "text-gray-500 dark:text-gray-400"
                   )}>
                     {item}
                   </span>
@@ -289,49 +297,20 @@ function LiveTab({ plan, completedSteps = 0, activeStepTitle, totalSteps }: {
         </div>
       )}
 
-      {/* Fallback progress bar when no plan */}
-      {(!plan || plan.length === 0) && (
+      {/* Fallback progress when running but no plan yet */}
+      {isRunning && !hasPlan && (
         <div className="space-y-2">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Прогресс задачи</span>
-            <span className="text-xs font-mono text-gray-600">{totalSteps ?? 4} / 6</span>
+            <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Прогресс</span>
+            {totalSteps !== undefined && (
+              <span className="text-xs font-mono text-gray-600 dark:text-gray-400">{totalSteps} шагов</span>
+            )}
           </div>
-          <div className="w-full bg-gray-100 rounded-full h-1.5">
-            <div className="bg-indigo-500 h-1.5 rounded-full transition-all" style={{ width: totalSteps ? `${(totalSteps / 6) * 100}%` : "66%" }} />
+          <div className="w-full bg-gray-100 dark:bg-gray-800 rounded-full h-1.5 overflow-hidden">
+            <div className="bg-indigo-500 h-1.5 rounded-full animate-pulse" style={{ width: "40%" }} />
           </div>
-          {activeStepTitle && (
-            <div className="text-xs text-gray-500">{activeStepTitle}</div>
-          )}
         </div>
       )}
-
-      {/* Budget warning */}
-      <BudgetWarning />
-
-      {/* Iteration counter */}
-      <IterationCounter />
-
-      {/* Agent terminal */}
-      <div className="space-y-2">
-        <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Терминал агента</div>
-        <div className="rounded-lg border border-gray-200 overflow-hidden">
-          <div className="bg-gray-800 px-3 py-1.5 flex items-center gap-1.5">
-            <div className="w-2 h-2 rounded-full bg-red-400" />
-            <div className="w-2 h-2 rounded-full bg-amber-400" />
-            <div className="w-2 h-2 rounded-full bg-green-400" />
-            <span className="text-[10px] text-gray-400 ml-2 font-mono">terminal</span>
-          </div>
-          <div className="bg-gray-900 p-3 font-mono text-[11px] text-green-400 min-h-[80px]">
-            <div className="text-gray-500"># Проверяю установку Bitrix</div>
-            <div className="mt-1">$ php -v → PHP 8.2.0</div>
-            <div className="mt-1">$ mysql --version → MySQL 8.0.32</div>
-            <div className="text-gray-500 mt-1">Загружаю installer...</div>
-            <div className="mt-1 flex items-center gap-1">
-              <span className="w-1.5 h-3 bg-green-400 animate-pulse" />
-            </div>
-          </div>
-        </div>
-      </div>
     </div>
   );
 }

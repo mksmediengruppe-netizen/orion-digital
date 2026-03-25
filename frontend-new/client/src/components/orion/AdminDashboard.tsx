@@ -1,10 +1,12 @@
 // ORION Admin Dashboard — "Warm Intelligence" design
 // Full admin area: KPI cards, users table, tasks, golden paths
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { cn } from "@/lib/utils";
+import { api } from "@/lib/api";
+import type { AdminStats, AdminUser, ChatSummary } from "@/lib/api";
 import {
-  ADMIN_STATS, ADMIN_USERS, ADMIN_TASKS, GOLDEN_PATHS
+  ADMIN_TASKS, GOLDEN_PATHS
 } from "@/lib/mockData";
 import { StatusBadge } from "./StatusBadge";
 import { useCurrentUser } from "@/contexts/CurrentUserContext";
@@ -142,16 +144,23 @@ export function AdminDashboard({ onBack, onRefillBudget }: AdminDashboardProps) 
 // ─── Dashboard Section ───────────────────────────────────────────────────────
 
 function DashboardSection() {
-  const kpis = [
-    { label: "Пользователи",     value: ADMIN_STATS.totalUsers,   icon: <Users size={16} />,        color: "indigo", trend: "+3" },
-    { label: "Активные задачи",  value: ADMIN_STATS.activeTasks,  icon: <Activity size={16} />,     color: "green",  trend: "+2" },
-    { label: "Успешность",       value: `${ADMIN_STATS.successRate}%`, icon: <TrendingUp size={16} />, color: "green", trend: "+1.2%" },
-    { label: "Fail Rate",        value: `${ADMIN_STATS.failRate}%`, icon: <TrendingDown size={16} />, color: "red",   trend: "-0.3%" },
-    { label: "Общая стоимость",  value: `$${ADMIN_STATS.totalCost}`, icon: <DollarSign size={16} />, color: "amber", trend: "+$12" },
-    { label: "Среднее время",    value: ADMIN_STATS.avgTaskTime,  icon: <Clock size={16} />,        color: "blue",   trend: "-15s" },
-    { label: "Verifier rejects", value: ADMIN_STATS.verifierRejects, icon: <ShieldCheck size={16} />, color: "purple", trend: "-2" },
-    { label: "Judge rejects",    value: ADMIN_STATS.judgeRejects, icon: <XCircle size={16} />,      color: "red",    trend: "0" },
-  ];
+  const [stats, setStats] = useState<AdminStats | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    api.admin.stats().then(setStats).catch(console.error).finally(() => setLoading(false));
+  }, []);
+
+  const kpis = stats ? [
+    { label: "Пользователи",     value: stats.total_users,   icon: <Users size={16} />,        color: "indigo", trend: "" },
+    { label: "Активные задачи",  value: stats.active_tasks,  icon: <Activity size={16} />,     color: "green",  trend: "" },
+    { label: "Успешность",       value: `${stats.success_rate}%`, icon: <TrendingUp size={16} />, color: "green", trend: "" },
+    { label: "Fail Rate",        value: `${stats.fail_rate}%`, icon: <TrendingDown size={16} />, color: "red",   trend: "" },
+    { label: "Общая стоимость",  value: `$${stats.total_cost}`, icon: <DollarSign size={16} />, color: "amber", trend: "" },
+    { label: "Среднее время",    value: stats.avg_task_time,  icon: <Clock size={16} />,        color: "blue",   trend: "" },
+    { label: "Verifier rejects", value: stats.verifier_rejects, icon: <ShieldCheck size={16} />, color: "purple", trend: "" },
+    { label: "Judge rejects",    value: stats.judge_rejects, icon: <XCircle size={16} />,      color: "red",    trend: "" },
+  ] : [];
 
   const colorMap: Record<string, { bg: string; icon: string; text: string }> = {
     indigo: { bg: "bg-indigo-50", icon: "text-indigo-600", text: "text-indigo-900" },
@@ -161,6 +170,8 @@ function DashboardSection() {
     blue:   { bg: "bg-blue-50",   icon: "text-blue-600",   text: "text-blue-900" },
     purple: { bg: "bg-purple-50", icon: "text-purple-600", text: "text-purple-900" },
   };
+
+  if (loading) return <div className="p-6 text-sm text-gray-400 animate-pulse">Загрузка статистики...</div>;
 
   return (
     <div className="p-6 space-y-6">
@@ -193,38 +204,39 @@ function DashboardSection() {
         })}
       </div>
 
-      {/* Recent tasks */}
-      <div className="bg-white rounded-xl border border-[#E8E6E1] overflow-hidden">
-        <div className="px-4 py-3 border-b border-[#E8E6E1] flex items-center justify-between">
-          <span className="text-sm font-semibold text-gray-800">Последние задачи</span>
-          <span className="text-xs text-indigo-600 cursor-pointer hover:underline">Все задачи</span>
-        </div>
-        <table className="w-full">
-          <thead>
-            <tr className="border-b border-[#E8E6E1] bg-[#F8F7F5]">
-              <th className="text-left text-[11px] font-semibold text-gray-500 uppercase tracking-wider px-4 py-2">Задача</th>
-              <th className="text-left text-[11px] font-semibold text-gray-500 uppercase tracking-wider px-4 py-2">Пользователь</th>
-              <th className="text-left text-[11px] font-semibold text-gray-500 uppercase tracking-wider px-4 py-2">Статус</th>
-              <th className="text-right text-[11px] font-semibold text-gray-500 uppercase tracking-wider px-4 py-2">Стоимость</th>
-            </tr>
-          </thead>
-          <tbody>
-            {ADMIN_TASKS.map(task => (
-              <tr key={task.id} className="border-b border-[#E8E6E1] last:border-0 hover:bg-[#F8F7F5] transition-colors">
-                <td className="px-4 py-3">
-                  <div className="text-sm font-medium text-gray-800">{task.title}</div>
-                  <div className="text-[11px] text-gray-400">{task.model} · {task.duration}</div>
-                </td>
-                <td className="px-4 py-3 text-sm text-gray-600">{task.user}</td>
-                <td className="px-4 py-3">
-                  <StatusBadge status={task.status as any} size="sm" />
-                </td>
-                <td className="px-4 py-3 text-right text-sm font-mono text-gray-700">${task.cost}</td>
+      {/* Recent chats from real API */}
+      {stats && stats.recent_chats && stats.recent_chats.length > 0 && (
+        <div className="bg-white rounded-xl border border-[#E8E6E1] overflow-hidden">
+          <div className="px-4 py-3 border-b border-[#E8E6E1] flex items-center justify-between">
+            <span className="text-sm font-semibold text-gray-800">Последние задачи</span>
+          </div>
+          <table className="w-full">
+            <thead>
+              <tr className="border-b border-[#E8E6E1] bg-[#F8F7F5]">
+                <th className="text-left text-[11px] font-semibold text-gray-500 uppercase tracking-wider px-4 py-2">Задача</th>
+                <th className="text-left text-[11px] font-semibold text-gray-500 uppercase tracking-wider px-4 py-2">Пользователь</th>
+                <th className="text-left text-[11px] font-semibold text-gray-500 uppercase tracking-wider px-4 py-2">Статус</th>
+                <th className="text-right text-[11px] font-semibold text-gray-500 uppercase tracking-wider px-4 py-2">Стоимость</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+            </thead>
+            <tbody>
+              {stats.recent_chats.map((chat: any) => (
+                <tr key={chat.id} className="border-b border-[#E8E6E1] last:border-0 hover:bg-[#F8F7F5] transition-colors">
+                  <td className="px-4 py-3">
+                    <div className="text-sm font-medium text-gray-800">{chat.title}</div>
+                    <div className="text-[11px] text-gray-400">{chat.model ?? '—'}</div>
+                  </td>
+                  <td className="px-4 py-3 text-sm text-gray-600">{chat.user ?? chat.user_id ?? '—'}</td>
+                  <td className="px-4 py-3">
+                    <StatusBadge status={chat.status as any} size="sm" />
+                  </td>
+                  <td className="px-4 py-3 text-right text-sm font-mono text-gray-700">${(chat.cost ?? 0).toFixed(2)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }
@@ -734,32 +746,81 @@ function UserChatsModal({
 
 function UsersSection({ searchQuery, setSearchQuery, onRefillBudget }: { searchQuery: string; setSearchQuery: (v: string) => void; onRefillBudget?: (amount: number) => void }) {
   const [refillInputs, setRefillInputs] = useState<Record<string, string>>({});
-  const [users, setUsers] = useState<ManagedUser[]>(INITIAL_USERS);
+  const [users, setUsers] = useState<ManagedUser[]>([]);
+  const [loading, setLoading] = useState(true);
   const [editingUser, setEditingUser] = useState<ManagedUser | null | "new">(null);
   const [viewingChats, setViewingChats] = useState<ManagedUser | null>(null);
   const [showPasswords, setShowPasswords] = useState<Set<string>>(new Set());
 
+  // Load users from real API
+  const loadUsers = useCallback(async () => {
+    try {
+      const resp = await api.admin.users();
+      const data = (resp as any).users || resp || [];
+      // Map API response to ManagedUser shape
+      const mapped: ManagedUser[] = (data || []).map((u: any) => ({
+        id: u.id,
+        name: u.name || u.username || u.email,
+        email: u.email || "",
+        login: u.username || u.login || u.email,
+        password: u.password || "••••••••",
+        role: u.role || "user",
+        tasks: u.task_count ?? u.tasks ?? 0,
+        cost: u.total_cost ?? u.cost ?? 0,
+        budgetLimit: u.budget_limit ?? u.budgetLimit ?? 50,
+        lastActive: u.last_active || u.lastActive || "—",
+        active: u.is_active ?? u.active ?? true,
+        permissions: u.permissions || { browser: true, ssh: false, files: true, images: false, search: true, codeExecution: false, apiAccess: false },
+        hiddenChats: new Set(u.hidden_chats || []),
+        notifyOnBudget: u.notify_on_budget ?? true,
+        adminEmail: u.admin_email || "",
+      }));
+      setUsers(mapped);
+    } catch (e) {
+      console.error("Failed to load users:", e);
+      setUsers(INITIAL_USERS); // fallback to mock
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { loadUsers(); }, [loadUsers]);
+
   const filtered = users.filter(u =>
-    u.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    u.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    u.login.toLowerCase().includes(searchQuery.toLowerCase())
+    (u.name || "").toLowerCase().includes(searchQuery.toLowerCase()) ||
+    (u.email || "").toLowerCase().includes(searchQuery.toLowerCase()) ||
+    (u.login || "").toLowerCase().includes(searchQuery.toLowerCase())
   );
 
-  const handleSave = (u: ManagedUser) => {
-    setUsers(prev => {
-      const idx = prev.findIndex(x => x.id === u.id);
-      if (idx >= 0) {
-        const next = [...prev];
-        next[idx] = u;
-        return next;
+  const handleSave = async (u: ManagedUser) => {
+    try {
+      const isNew = !users.find(x => x.id === u.id);
+      if (isNew) {
+        await api.admin.createUser({ name: u.name, email: u.email, username: u.login, password: u.password, role: u.role, budget_limit: u.budgetLimit, permissions: u.permissions });
+      } else {
+        await api.admin.updateUser(u.id, { name: u.name, email: u.email, username: u.login, role: u.role, budget_limit: u.budgetLimit, permissions: u.permissions, is_active: u.active, ...(u.password && u.password !== '••••••••' ? { password: u.password } : {}) });
       }
-      return [...prev, u];
-    });
+      await loadUsers();
+    } catch (e) {
+      console.error("Failed to save user:", e);
+      // Optimistic update as fallback
+      setUsers(prev => {
+        const idx = prev.findIndex(x => x.id === u.id);
+        if (idx >= 0) { const next = [...prev]; next[idx] = u; return next; }
+        return [...prev, u];
+      });
+    }
     setEditingUser(null);
   };
 
-  const handleDelete = (id: string) => {
-    setUsers(prev => prev.filter(u => u.id !== id));
+  const handleDelete = async (id: string) => {
+    try {
+      await api.admin.deleteUser(id);
+      setUsers(prev => prev.filter(u => u.id !== id));
+    } catch (e) {
+      console.error("Failed to delete user:", e);
+      setUsers(prev => prev.filter(u => u.id !== id));
+    }
   };
 
   const togglePasswordVisibility = (id: string) => {
@@ -770,6 +831,8 @@ function UsersSection({ searchQuery, setSearchQuery, onRefillBudget }: { searchQ
       return next;
     });
   };
+
+  if (loading) return <div className="p-6 text-sm text-gray-400 animate-pulse">Загрузка пользователей...</div>;
 
   return (
     <div className="p-6 space-y-4">
@@ -837,7 +900,7 @@ function UsersSection({ searchQuery, setSearchQuery, onRefillBudget }: { searchQ
                     <div className="relative">
                       <div className="w-8 h-8 rounded-full bg-indigo-100 flex items-center justify-center">
                         <span className="text-[10px] font-semibold text-indigo-700">
-                          {user.name.split(" ").map(n => n[0]).join("")}
+                          {(user.name || user.email || "U").split(" ").map(n => (n && n[0]) || "").join("")}
                         </span>
                       </div>
                       <div className={cn(
@@ -846,7 +909,7 @@ function UsersSection({ searchQuery, setSearchQuery, onRefillBudget }: { searchQ
                       )} />
                     </div>
                     <div>
-                      <div className="text-sm font-medium text-gray-800">{user.name}</div>
+                      <div className="text-sm font-medium text-gray-800">{user.name || user.email || "Пользователь"}</div>
                       <div className="text-[11px] text-gray-400">{user.email}</div>
                     </div>
                   </div>
@@ -1386,25 +1449,34 @@ function EvalsSection() {
 // ─── Chats Section ────────────────────────────────────────────────────────────
 
 function ChatsSection({ searchQuery, setSearchQuery }: { searchQuery: string; setSearchQuery: (v: string) => void }) {
-  const chats = [
-    { id: "ch1", title: "Установка Bitrix CMS",        user: "Алексей Петров",  project: "Bitrix Landing", status: "completed",    messages: 14, cost: 1.24, duration: "4m 12s", model: "Orion Standard" },
-    { id: "ch2", title: "Настройка SSL сертификата",   user: "Алексей Петров",  project: "Bitrix Landing", status: "completed",    messages: 8,  cost: 0.38, duration: "2m 45s", model: "Orion Standard" },
-    { id: "ch3", title: "Оптимизация скорости сайта",  user: "Мария Иванова",   project: "WordPress Studio", status: "completed",  messages: 11, cost: 0.12, duration: "1m 03s", model: "Orion Fast" },
-    { id: "ch4", title: "Настройка резервного копирования", user: "Алексей Петров", project: "Bitrix Landing", status: "needs_review", messages: 6, cost: 0.54, duration: "3m 18s", model: "Orion Standard" },
-    { id: "ch5", title: "Разработка лендинга Dream Avto", user: "Мария Иванова", project: "Dream Avto", status: "thinking",      messages: 3,  cost: 0.67, duration: "—",       model: "Orion Pro" },
-    { id: "ch6", title: "Настройка Redis кэширования", user: "Дмитрий Сидоров", project: "Bitrix Landing", status: "failed",      messages: 9,  cost: 0.21, duration: "2m 11s", model: "Orion Standard" },
-  ];
-  const filtered = chats.filter(c =>
-    c.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    c.user.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const [chats, setChats] = useState<any[]>([]);
+  const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [page, setPage] = useState(0);
+  const PAGE_SIZE = 50;
+
+  const loadChats = (p: number, q: string) => {
+    setLoading(true);
+    const params = new URLSearchParams({ limit: String(PAGE_SIZE), offset: String(p * PAGE_SIZE), ...(q ? { q } : {}) });
+    fetch(`/api/admin/chats?${params}`, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } })
+      .then(r => r.json())
+      .then(resp => { setChats(resp.chats || []); setTotal(resp.total || 0); })
+      .catch(console.error)
+      .finally(() => setLoading(false));
+  };
+
+  useEffect(() => { loadChats(0, searchQuery); setPage(0); }, [searchQuery]);
+
+  const filtered = chats;
+
+  if (loading && chats.length === 0) return <div className="p-6 text-sm text-gray-400 animate-pulse">Загрузка чатов...</div>;
 
   return (
     <div className="p-6 space-y-4">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-semibold text-gray-900">Чаты</h1>
-          <p className="text-sm text-gray-500 mt-0.5">{chats.length} чатов всего</p>
+          <p className="text-sm text-gray-500 mt-0.5">{total} чатов всего · стр. {page + 1}/{Math.ceil(total / PAGE_SIZE) || 1}</p>
         </div>
         <div className="relative">
           <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
@@ -1427,22 +1499,29 @@ function ChatsSection({ searchQuery, setSearchQuery }: { searchQuery: string; se
             </tr>
           </thead>
           <tbody>
-            {filtered.map(chat => (
+            {filtered.map((chat: any) => (
               <tr key={chat.id} className="border-b border-[#E8E6E1] last:border-0 hover:bg-[#F8F7F5] transition-colors">
                 <td className="px-4 py-3">
-                  <div className="text-sm font-medium text-gray-800">{chat.title}</div>
-                  <div className="text-[11px] text-gray-400">{chat.model} · {chat.duration}</div>
+                  <div className="text-sm font-medium text-gray-800">{chat.title || 'Без названия'}</div>
+                  <div className="text-[11px] text-gray-400">{chat.model || '—'} · {chat.duration || '—'}</div>
                 </td>
-                <td className="px-4 py-3 text-sm text-gray-600">{chat.user}</td>
-                <td className="px-4 py-3 text-xs text-gray-500">{chat.project}</td>
-                <td className="px-4 py-3"><StatusBadge status={chat.status as any} size="sm" /></td>
-                <td className="px-4 py-3 text-sm text-gray-600 text-center">{chat.messages}</td>
-                <td className="px-4 py-3 text-sm font-mono text-gray-700">${chat.cost.toFixed(2)}</td>
+                <td className="px-4 py-3 text-sm text-gray-600">{chat.user_name || chat.user_email || chat.user_id || '—'}</td>
+                <td className="px-4 py-3 text-xs text-gray-500">{chat.variant || chat.model || '—'}</td>
+                <td className="px-4 py-3"><StatusBadge status={(chat.status || 'idle') as any} size="sm" /></td>
+                <td className="px-4 py-3 text-sm text-gray-600 text-center">{chat.message_count ?? 0}</td>
+                <td className="px-4 py-3 text-sm font-mono text-gray-700">${(chat.total_cost ?? 0).toFixed(2)}</td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
+      {total > PAGE_SIZE && (
+        <div className="flex items-center justify-center gap-2 pt-2">
+          <button onClick={() => { const p = Math.max(0, page - 1); setPage(p); loadChats(p, searchQuery); }} disabled={page === 0} className="px-3 py-1.5 text-sm rounded-lg border border-[#E8E6E1] disabled:opacity-40 hover:bg-[#F8F7F5]">← Назад</button>
+          <span className="text-sm text-gray-500">{page + 1} / {Math.ceil(total / PAGE_SIZE)}</span>
+          <button onClick={() => { const p = Math.min(Math.ceil(total / PAGE_SIZE) - 1, page + 1); setPage(p); loadChats(p, searchQuery); }} disabled={page >= Math.ceil(total / PAGE_SIZE) - 1} className="px-3 py-1.5 text-sm rounded-lg border border-[#E8E6E1] disabled:opacity-40 hover:bg-[#F8F7F5]">Вперёд →</button>
+        </div>
+      )}
     </div>
   );
 }
@@ -1551,30 +1630,23 @@ function AntiPatternsSection() {
 // ─── Analytics Section ────────────────────────────────────────────────────────
 
 function AnalyticsSection() {
-  const dailyData = [
-    { day: "Пн", tasks: 12, cost: 4.20, success: 11 },
-    { day: "Вт", tasks: 18, cost: 6.80, success: 17 },
-    { day: "Ср", tasks: 9,  cost: 3.10, success: 8  },
-    { day: "Чт", tasks: 24, cost: 9.40, success: 22 },
-    { day: "Пт", tasks: 31, cost: 12.50, success: 29 },
-    { day: "Сб", tasks: 7,  cost: 2.30, success: 7  },
-    { day: "Вс", tasks: 5,  cost: 1.80, success: 5  },
-  ];
-  const maxTasks = Math.max(...dailyData.map(d => d.tasks));
+  const [analyticsData, setAnalyticsData] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
 
-  const modelUsage = [
-    { model: "Orion Standard", pct: 58, color: "bg-indigo-500" },
-    { model: "Orion Fast",     pct: 27, color: "bg-blue-400" },
-    { model: "Orion Pro",      pct: 15, color: "bg-purple-500" },
-  ];
+  useEffect(() => {
+    api.analytics.get()
+      .then(setAnalyticsData)
+      .catch(console.error)
+      .finally(() => setLoading(false));
+  }, []);
 
-  const topTasks = [
-    { name: "Установка CMS",    count: 34 },
-    { name: "Настройка SSL",    count: 28 },
-    { name: "Оптимизация БД",   count: 21 },
-    { name: "Деплой сайта",     count: 19 },
-    { name: "Настройка Nginx",  count: 15 },
-  ];
+  // Use real data if available, fallback to empty
+  const dailyData = analyticsData?.daily_tasks || [];
+  const maxTasks = dailyData.length > 0 ? Math.max(...dailyData.map((d: any) => d.tasks ?? d.count ?? 0)) : 1;
+  const modelUsage = analyticsData?.model_usage || [];
+  const topTasks = analyticsData?.top_tasks || [];
+
+  if (loading) return <div className="p-6 text-sm text-gray-400 animate-pulse">Загрузка аналитики...</div>;
 
   return (
     <div className="p-6 space-y-6">
@@ -1587,14 +1659,16 @@ function AnalyticsSection() {
       <div className="bg-white border border-[#E8E6E1] rounded-xl p-5">
         <div className="text-sm font-semibold text-gray-800 mb-4">Задачи по дням</div>
         <div className="flex items-end gap-2 h-32">
-          {dailyData.map(d => (
-            <div key={d.day} className="flex-1 flex flex-col items-center gap-1">
-              <div className="text-[10px] text-gray-500 font-mono">{d.tasks}</div>
+          {dailyData.length === 0 ? (
+            <div className="flex-1 flex items-center justify-center text-sm text-gray-400">Нет данных</div>
+          ) : dailyData.map((d: any) => (
+            <div key={d.day || d.date} className="flex-1 flex flex-col items-center gap-1">
+              <div className="text-[10px] text-gray-500 font-mono">{d.tasks ?? d.count ?? 0}</div>
               <div
                 className="w-full rounded-t-md bg-indigo-500 transition-all"
-                style={{ height: `${(d.tasks / maxTasks) * 100}%` }}
+                style={{ height: `${((d.tasks ?? d.count ?? 0) / maxTasks) * 100}%` }}
               />
-              <div className="text-[10px] text-gray-400">{d.day}</div>
+              <div className="text-[10px] text-gray-400">{d.day || d.date}</div>
             </div>
           ))}
         </div>
@@ -1605,17 +1679,22 @@ function AnalyticsSection() {
         <div className="bg-white border border-[#E8E6E1] rounded-xl p-5">
           <div className="text-sm font-semibold text-gray-800 mb-4">Использование моделей</div>
           <div className="space-y-3">
-            {modelUsage.map(m => (
-              <div key={m.model}>
-                <div className="flex justify-between text-xs text-gray-600 mb-1">
-                  <span>{m.model}</span>
-                  <span className="font-mono font-medium">{m.pct}%</span>
+            {modelUsage.length === 0 ? (
+              <div className="text-sm text-gray-400">Нет данных</div>
+            ) : modelUsage.map((m: any, idx: number) => {
+              const colors = ["bg-indigo-500", "bg-blue-400", "bg-purple-500", "bg-green-500", "bg-amber-500"];
+              return (
+                <div key={m.model || idx}>
+                  <div className="flex justify-between text-xs text-gray-600 mb-1">
+                    <span>{m.model}</span>
+                    <span className="font-mono font-medium">{m.pct ?? m.percent ?? 0}%</span>
+                  </div>
+                  <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+                    <div className={cn("h-full rounded-full", m.color || colors[idx % colors.length])} style={{ width: `${m.pct ?? m.percent ?? 0}%` }} />
+                  </div>
                 </div>
-                <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
-                  <div className={cn("h-full rounded-full", m.color)} style={{ width: `${m.pct}%` }} />
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
 
@@ -1623,8 +1702,10 @@ function AnalyticsSection() {
         <div className="bg-white border border-[#E8E6E1] rounded-xl p-5">
           <div className="text-sm font-semibold text-gray-800 mb-4">Топ типов задач</div>
           <div className="space-y-2">
-            {topTasks.map((t, i) => (
-              <div key={t.name} className="flex items-center gap-2.5">
+            {topTasks.length === 0 ? (
+              <div className="text-sm text-gray-400">Нет данных</div>
+            ) : topTasks.map((t: any, i: number) => (
+              <div key={t.name || i} className="flex items-center gap-2.5">
                 <span className="text-xs text-gray-400 w-4 text-right">{i + 1}</span>
                 <div className="flex-1 text-xs text-gray-700">{t.name}</div>
                 <span className="text-xs font-mono font-semibold text-indigo-600">{t.count}</span>

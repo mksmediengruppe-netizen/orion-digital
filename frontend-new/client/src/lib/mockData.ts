@@ -80,13 +80,20 @@ export interface Message {
   plan?: string[];
   artifact?: Artifact;
   viewerArtifacts?: ViewerArtifact[];
+  // Task progress tracking
+  taskPlan?: { name: string; status: "pending" | "running" | "done" | "failed" }[];
+  currentTool?: string;
+  isStreaming?: boolean;
+  thinkingContent?: string;
 }
 
 export interface Artifact {
   id: string;
   name: string;
-  type: "code" | "report" | "site" | "image" | "document" | "html";
+  type: "code" | "report" | "site" | "image" | "document" | "html" | "pdf" | "spreadsheet" | "file";
   url?: string;
+  download_url?: string;
+  preview_url?: string;
   preview?: string;
   size?: string;
   createdAt: string;

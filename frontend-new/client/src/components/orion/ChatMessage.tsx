@@ -103,6 +103,31 @@ function ViewerArtifactCards({
 
 const HTML_PREVIEW_DOC = `<!DOCTYPE html><html><head><meta charset="utf-8"><style>body{font-family:-apple-system,sans-serif;margin:0;padding:16px;background:#fff;font-size:13px}h1{color:#e31e24;font-size:18px;margin:0 0 4px}.badge{display:inline-block;background:#e8f4fd;color:#1565c0;border-radius:4px;padding:2px 8px;font-size:11px;margin-bottom:12px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px}.card{border:1px solid #e0e0e0;border-radius:8px;padding:12px}.card-title{font-weight:600;color:#333;margin-bottom:4px;font-size:12px}.card-val{font-size:18px;font-weight:700;color:#1a1a1a}.ok{color:#2e7d32;font-size:11px}.url{background:#f5f5f5;border-radius:4px;padding:8px 10px;font-family:monospace;font-size:11px;color:#333;margin-bottom:8px}.status{display:flex;align-items:center;gap:6px;font-size:12px;color:#2e7d32}.dot{width:8px;height:8px;border-radius:50%;background:#4caf50}</style></head><body><h1>1С-Битрикс: Управление сайтом</h1><span class="badge">Версия 23.850 · Установлен</span><div class="grid"><div class="card"><div class="card-title">PHP</div><div class="card-val">8.2.10</div><div class="ok">✓ Все модули активны</div></div><div class="card"><div class="card-title">MySQL</div><div class="card-val">8.0.35</div><div class="ok">✓ База данных создана</div></div></div><div class="url">http://185.22.xx.xx/bitrix/admin/</div><div class="status"><div class="dot"></div>Сайт работает · Административная панель доступна</div></body></html>`;
 
+
+// Thinking/Reasoning Block
+function ThinkingBlock({ content }: { content: string }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="mt-2 mb-1">
+      <button
+        onClick={() => setOpen(v => !v)}
+        className="flex items-center gap-1.5 text-[11px] text-indigo-500 hover:text-indigo-700 font-medium transition-colors"
+      >
+        <span style={{display:"inline-block", transform: open ? "rotate(90deg)" : "rotate(0deg)", transition:"transform 0.2s"}}>&#9658;</span>
+        <span className="flex items-center gap-1">
+          <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-pulse inline-block" />
+          Рассуждения агента
+        </span>
+      </button>
+      {open && (
+        <div className="mt-1.5 px-3 py-2 rounded-lg bg-indigo-50 border border-indigo-100 text-[11px] text-gray-600 font-mono whitespace-pre-wrap leading-relaxed max-h-64 overflow-y-auto">
+          {content}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ArtifactCard({ artifact }: { artifact: NonNullable<Message["artifact"]> }) {
   const [showPreview, setShowPreview] = useState(false);
   const [expanded, setExpanded] = useState(false);
@@ -112,7 +137,7 @@ function ArtifactCard({ artifact }: { artifact: NonNullable<Message["artifact"]>
     <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3, delay: 0.1 }} className="mt-2">
       <div
         className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl border border-[#E8E6E1] bg-[#F8F7F5] hover:bg-white transition-colors cursor-pointer group"
-        onClick={() => canPreview ? setShowPreview(v => !v) : toast.info("Скачивание файла...")}
+        onClick={() => canPreview ? setShowPreview(v => !v) : window.open(artifact.download_url || artifact.url || "#", "_blank")}
       >
         <div className="w-7 h-7 rounded-lg bg-white border border-[#E8E6E1] flex items-center justify-center shrink-0">
           {ARTIFACT_ICONS[artifact.type] ?? <FileText size={14} className="text-gray-400" />}
@@ -133,7 +158,7 @@ function ArtifactCard({ artifact }: { artifact: NonNullable<Message["artifact"]>
           )}
           <button
             className="p-1 rounded hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors opacity-0 group-hover:opacity-100"
-            onClick={e => { e.stopPropagation(); toast.info("Скачивание..."); }}
+            onClick={e => { e.stopPropagation(); if (artifact.download_url || artifact.url) { window.open(artifact.download_url || artifact.url, "_blank"); } else { toast.info("Файл недоступен"); } }}
             title="Скачать"
           >
             <Download size={12} />
@@ -160,10 +185,10 @@ function ArtifactCard({ artifact }: { artifact: NonNullable<Message["artifact"]>
               </button>
             </div>
             <iframe
-              srcDoc={HTML_PREVIEW_DOC}
+              src={artifact.preview_url || artifact.download_url || artifact.url}
               className="w-full border-0"
               style={{ height: expanded ? 360 : 180 }}
-              sandbox="allow-same-origin"
+              sandbox="allow-scripts allow-same-origin allow-popups"
               title="Предпросмотр"
             />
           </motion.div>
@@ -396,6 +421,10 @@ export function ChatMessage({ message, activeStep, onStepClick, isLast, isComple
         </div>
         {message.viewerArtifacts && message.viewerArtifacts.length > 0 && onArtifactOpen && (
           <div className="w-full max-w-sm px-4">
+            {/* Thinking/Reasoning block — shown when agent has reasoning content */}
+            {message.thinkingContent && (
+              <ThinkingBlock content={message.thinkingContent} />
+            )}
             <ViewerArtifactCards artifacts={message.viewerArtifacts} onOpen={onArtifactOpen} />
           </div>
         )}

@@ -1,1 +1,0 @@
-subprocess.Popen заблокирован sandbox-ом. Нужно использовать threading для фонового запуска внутри одного code_interpreter вызова. Запущу monitor логику в Thread, подождём несколько итераций, покажем лог.

@@ -1,5 +1,0 @@
-Задача 7: Создать FastAPI приложение, запустить на порту 8765, проверить curl
-1. Написать /tmp/test_api.py
-2. Установить fastapi + uvicorn
-3. Запустить сервер в фоне
-4. Проверить curl http://localhost:8765/api/status

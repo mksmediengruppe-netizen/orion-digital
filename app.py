@@ -53,6 +53,54 @@ app = Flask(__name__)
 app.secret_key = secrets.token_hex(32)
 app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024  # 100MB max
 
+# ── Observability Middleware ──────────────────────────────────
+try:
+    from observability import (
+        generate_request_id, start_trace, end_trace, add_span,
+        get_metrics_collector, HealthChecker
+    )
+    _obs_metrics = get_metrics_collector()
+    _obs_health = HealthChecker()
+
+    @app.before_request
+    def _obs_before():
+        """Attach trace_id to every request for distributed tracing."""
+        from flask import g
+        g.trace_id = generate_request_id()
+        g.trace_start = time.time()
+        start_trace(g.trace_id, f"{request.method} {request.path}")
+        _obs_metrics.increment("http_requests_total")
+
+    @app.after_request
+    def _obs_after(response):
+        """Complete trace and add trace_id header to response."""
+        from flask import g
+        trace_id = getattr(g, 'trace_id', None)
+        if trace_id:
+            duration = (time.time() - g.trace_start) * 1000
+            status = "success" if response.status_code < 400 else "error"
+            end_trace(trace_id, status)
+            response.headers['X-Trace-Id'] = trace_id
+            response.headers['X-Duration-Ms'] = f"{duration:.1f}"
+            _obs_metrics.record("http_duration_ms", duration)
+            if response.status_code >= 500:
+                _obs_metrics.increment("http_errors_5xx")
+        return response
+
+    @app.route("/api/health", methods=["GET"])
+    def _obs_health_check():
+        """Health check endpoint with metrics."""
+        return jsonify({
+            "status": "ok",
+            "uptime": time.time() - _app_start_time,
+            "metrics": _obs_metrics.get_metrics()
+        })
+
+    _app_start_time = time.time()
+    logging.info("[OBSERVABILITY] Middleware integrated: trace_id, metrics, health check")
+except ImportError as _obs_err:
+    logging.warning(f"[OBSERVABILITY] Not available: {_obs_err}")
+
 # ── Configuration ──────────────────────────────────────────────
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1/chat/completions"
@@ -132,9 +180,9 @@ MODEL_CONFIGS = {
 }
 
 CHAT_MODELS = {
-    "qwen3": {"model": "deepseek/deepseek-v3.2", "name": "Qwen3 235B", "lang": "RU ⭐⭐⭐⭐⭐", "input_price": 0.10, "output_price": 0.60},
-    "deepseek": {"model": "deepseek/deepseek-v3.2", "name": "DeepSeek V3.2", "lang": "RU ⭐⭐⭐⭐⭐", "input_price": 0.26, "output_price": 0.38},
-    "gpt5nano": {"model": "openai/gpt-4.1-nano", "name": "GPT-5 Nano", "lang": "RU ⭐⭐⭐⭐", "input_price": 0.05, "output_price": 0.40},
+    "gpt54mini": {"model": "openai/gpt-5.4-mini", "name": "GPT-5.4 Mini", "lang": "RU ⭐⭐⭐⭐⭐", "input_price": 0.75, "output_price": 4.50},
+    "mimo":      {"model": "xiaomi/mimo-v2-flash", "name": "MiMo-V2-Flash", "lang": "RU ⭐⭐⭐⭐", "input_price": 0.09, "output_price": 0.29},
+    "gpt54nano": {"model": "openai/gpt-5.4-nano", "name": "GPT-5.4 Nano", "lang": "RU ⭐⭐⭐⭐", "input_price": 0.20, "output_price": 1.25},
 }
 
 # ── File processing constants ─────────────────────────────────
@@ -188,7 +236,7 @@ _DEFAULT_DB = {
             "total_spent": 0.0,
             "settings": {
                 "variant": "premium",
-                "chat_model": "qwen3",
+                "chat_model": "gpt54mini",
                 "enhanced_mode": False,
                 "self_check_level": "none",
                 "design_pro": False,
@@ -356,10 +404,15 @@ def get_me():
     total_spent = user.get("total_spent", 0.0)
     monthly_limit = user.get("monthly_limit", 999999)
     limit_pct = round(total_spent / max(monthly_limit, 0.01) * 100, 1) if monthly_limit < 999999 else 0
-    return jsonify({
+    _name = user.get("name", user.get("email", ""))
+    _email = user.get("email", "")
+    # FIX: wrap in {user: {...}} to match frontend contract
+    return jsonify({"user": {
         "id": request.user_id,
-        "email": user["email"],
-        "name": user["name"],
+        "email": _email,
+        "name": _name,
+        "username": _email,
+        "full_name": _name,
         "role": user.get("role", "user"),
         "settings": user.get("settings", {}),
         "total_spent": total_spent,
@@ -368,7 +421,7 @@ def get_me():
         "monthly_limit_rub": round(monthly_limit * 105, 2) if monthly_limit < 999999 else None,
         "limit_used_percent": limit_pct,
         "balance_remaining": round((monthly_limit - total_spent) * 105, 2) if monthly_limit < 999999 else None
-    })
+    }})
 
 
 # ── Settings ───────────────────────────────────────────────────
@@ -1166,7 +1219,7 @@ def send_message(chat_id):
     variant = user_settings.get("variant", "premium")
     enhanced = user_settings.get("enhanced_mode", False)
     self_check_level = user_settings.get("self_check_level", "none")  # none | light | medium | deep
-    chat_model = user_settings.get("chat_model", "qwen3")
+    chat_model = user_settings.get("chat_model", "gpt54mini")
 
     # Get SSH credentials from user settings
     ssh_credentials = {
@@ -1437,7 +1490,7 @@ def send_message(chat_id):
                 if routed_complexity <= 2:
                     active_model = routed_model_id  # Simple → fast/cheap model
                 else:
-                    active_model = CHAT_MODELS.get(chat_model, CHAT_MODELS["qwen3"])["model"]
+                    active_model = CHAT_MODELS.get(chat_model, CHAT_MODELS["gpt54mini"])["model"]
                 system_prompt = """Ты — полезный AI-ассистент ORION Digital v1.0. Отвечай на русском языке.
 Ты умеешь:
 - Писать код и создавать приложения
@@ -1770,7 +1823,19 @@ def direct_chat():
     user_message = data.get("message", "").strip()
     file_content = data.get("file_content", "")
     chat_id = data.get("chat_id")
-    orion_mode = data.get("mode", "turbo_standard")
+    _raw_mode = data.get("mode") or data.get("variant") or "turbo_standard"
+    # ── MODE NORMALIZE: map legacy/turbo names to model_router MODES keys ──
+    _MODE_NORMALIZE = {
+        "turbo-basic": "fast", "turbo_basic": "fast", "turbo": "fast",
+        "turbo-standard": "fast", "turbo_standard": "fast",
+        "fast": "fast",
+        "pro-basic": "standard", "pro_basic": "standard",
+        "standard": "standard",
+        "turbo-premium": "premium", "pro-premium": "premium",
+        "premium": "premium",
+        "auto": "auto",
+    }
+    orion_mode = _MODE_NORMALIZE.get(_raw_mode, "fast")
     multi_agent = data.get("multi_agent", False) or request.path.endswith("multi-agent")
 
     if not user_message and not file_content:
@@ -1937,8 +2002,8 @@ def quick_chat():
     data = request.get_json() or {}
     message = data.get("message", "")
     user_settings = request.user.get("settings", {})
-    chat_model_key = user_settings.get("chat_model", "qwen3")
-    chat_model = CHAT_MODELS.get(chat_model_key, CHAT_MODELS["qwen3"])
+    chat_model_key = user_settings.get("chat_model", "gpt54mini")
+    chat_model = CHAT_MODELS.get(chat_model_key, CHAT_MODELS["gpt54mini"])
 
     headers = {
         "Authorization": f"Bearer {OPENROUTER_API_KEY}",
@@ -2010,7 +2075,15 @@ def get_analytics():
     for c in user_chats:
         for msg in c.get("messages", []):
             if msg.get("role") == "assistant":
-                day = msg.get("timestamp", "")[:10]
+                _ts = msg.get("timestamp", "")
+                # FIX: timestamp may be float (Unix) or ISO string
+                if isinstance(_ts, (int, float)):
+                    from datetime import datetime as _dt
+                    day = _dt.utcfromtimestamp(_ts).strftime("%Y-%m-%d")
+                elif isinstance(_ts, str) and _ts:
+                    day = _ts[:10]
+                else:
+                    day = ""
                 if day:
                     if day not in daily_data:
                         daily_data[day] = {"cost": 0, "requests": 0}
@@ -2133,7 +2206,7 @@ def admin_create_user():
         },
         "settings": {
             "variant": "premium",
-            "chat_model": "qwen3",
+            "chat_model": "gpt54mini",
             "enhanced_mode": False,
             "design_pro": False,
             "language": "ru"
@@ -2883,7 +2956,11 @@ def get_usage_analytics():
                     # Track daily messages
                     ts = msg.get("timestamp", "")
                     if ts:
-                        day = ts[:10]
+                        if isinstance(ts, (int, float)):
+                            from datetime import datetime as _dt3
+                            day = _dt3.utcfromtimestamp(ts).strftime("%Y-%m-%d")
+                        else:
+                            day = str(ts)[:10]
                         daily_messages[day] = daily_messages.get(day, 0) + 1
                     
                     # Track tool usage from agent actions
@@ -3410,7 +3487,9 @@ def api_clarify_intent():
         from intent_clarifier import clarify, format_clarification_for_user
         data = request.get_json() or {}
         message = data.get("message", "")
-        orion_mode = data.get("mode", "turbo_standard")
+        _raw_mode = data.get("mode") or data.get("variant") or "turbo_standard"
+        _NORM = {"turbo-basic": "fast", "turbo_basic": "fast", "turbo": "fast", "turbo-standard": "fast", "turbo_standard": "fast", "fast": "fast", "pro-basic": "standard", "pro_basic": "standard", "standard": "standard", "turbo-premium": "premium", "pro-premium": "premium", "premium": "premium", "auto": "auto"}
+        orion_mode = _NORM.get(_raw_mode, "fast")
         history = data.get("history", [])
         result = clarify(message, history=history, orion_mode=orion_mode)
         result["label"] = format_clarification_for_user(result)
@@ -3426,7 +3505,9 @@ def get_session_cost():
     try:
         from model_router import get_cost_analytics, check_cost_limit
         session_id = request.args.get("session_id", request.user_id)
-        orion_mode = request.args.get("mode", "turbo_standard")
+        _raw_m = request.args.get("mode", "turbo_standard")
+        _NORM2 = {"turbo-basic": "fast", "turbo_basic": "fast", "turbo": "fast", "turbo-standard": "fast", "turbo_standard": "fast", "fast": "fast", "pro-basic": "standard", "pro_basic": "standard", "standard": "standard", "turbo-premium": "premium", "pro-premium": "premium", "premium": "premium", "auto": "auto"}
+        orion_mode = _NORM2.get(_raw_m, "fast")
         cost_check = check_cost_limit(session_id, orion_mode)
         analytics = get_cost_analytics(user_id=request.user_id, days=1)
         return jsonify({
@@ -3460,3 +3541,74 @@ def get_agent_zones():
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 
+
+
+# ══════════════════════════════════════════════════════════════
+# SCHEDULED TASKS — API + Background Executor
+# ══════════════════════════════════════════════════════════════
+
+try:
+    from schedule_routes import schedule_bp
+    app.register_blueprint(schedule_bp)
+    logging.info("[APP] Schedule routes registered")
+except ImportError as e:
+    logging.warning(f"[APP] Schedule routes not available: {e}")
+
+try:
+    from schedule_executor import init_scheduler
+    _bg_scheduler = init_scheduler(app)
+    logging.info("[APP] Background scheduler initialized")
+except ImportError as e:
+    logging.warning(f"[APP] Schedule executor not available: {e}")
+except Exception as e:
+    logging.warning(f"[APP] Scheduler init failed: {e}")
+
+
+# ══════════════════════════════════════════════════════════════════
+# ██ MCP SERVER REGISTRY API ██
+# ══════════════════════════════════════════════════════════════════
+
+try:
+    from mcp_hub import MCPHub
+    _mcp_hub = MCPHub()
+    logging.info("[APP] MCPHub initialized")
+
+    @app.route("/api/mcp/servers", methods=["GET"])
+    @require_auth
+    def list_mcp_servers():
+        """List registered MCP servers."""
+        return jsonify({"success": True, "servers": _mcp_hub.list_mcp_servers()})
+
+    @app.route("/api/mcp/servers", methods=["POST"])
+    @require_auth
+    def register_mcp_server():
+        """Register a new MCP server."""
+        data = request.get_json() or {}
+        server_id = data.get("id") or data.get("server_id")
+        if not server_id:
+            return jsonify({"success": False, "error": "server_id required"}), 400
+        _mcp_hub.register_mcp_server(server_id, data)
+        return jsonify({"success": True, "server_id": server_id})
+
+    @app.route("/api/mcp/connections", methods=["GET"])
+    @require_auth
+    def list_mcp_connections():
+        """List user's MCP connections."""
+        user_id = request.args.get("user_id", "default")
+        return jsonify({"success": True, "connections": _mcp_hub.get_user_connections(user_id)})
+
+except ImportError as e:
+    logging.warning(f"[APP] MCPHub not available: {e}")
+
+# ══════════════════════════════════════════════════════════════════
+# ██ MULTI-TENANCY INIT ██
+# ══════════════════════════════════════════════════════════════════
+
+try:
+    from multi_tenancy import init_multi_tenancy
+    init_multi_tenancy(app)
+    logging.info("[APP] Multi-tenancy initialized")
+except ImportError as e:
+    logging.warning(f"[APP] Multi-tenancy not available: {e}")
+except Exception as e:
+    logging.warning(f"[APP] Multi-tenancy init failed: {e}")

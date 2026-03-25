@@ -276,7 +276,7 @@ MODEL_CONFIGS = {
     "premium": {
         "name": "Премиум",
         "emoji": "🟢",
-        "coding": {"model": "openai/gpt-5.4-mini", "name": "MiniMax M2.5", "input_price": 0.20, "output_price": 1.10},
+        "coding": {"model": "openai/gpt-5.4-mini", "name": "GPT-5.4 Mini", "input_price": 0.75, "output_price": 4.50},
         "planner": {"model": "anthropic/claude-sonnet-4.6", "name": "Claude Sonnet 4.6", "input_price": 3.00, "output_price": 15.00},
         "tools": {"model": "xiaomi/mimo-v2-flash", "name": "MiMo-V2-Flash", "input_price": 0.09, "output_price": 0.29},
         "quality": 80.2,
@@ -286,19 +286,19 @@ MODEL_CONFIGS = {
         "name": "Бюджет",
         "emoji": "🔵",
         "coding": {"model": "xiaomi/mimo-v2-flash", "name": "MiMo-V2-Flash", "input_price": 0.09, "output_price": 0.29},
-        "planner": {"model": "openai/gpt-5.4-mini", "name": "MiniMax M2.5", "input_price": 0.20, "output_price": 1.10},
+        "planner": {"model": "openai/gpt-5.4-mini", "name": "GPT-5.4 Mini", "input_price": 0.75, "output_price": 4.50},
         "tools": {"model": "xiaomi/mimo-v2-flash", "name": "MiMo-V2-Flash", "input_price": 0.09, "output_price": 0.29},
         "quality": 75.8,
         "monthly_cost": "$750"
     }
-}  # PATCH fix: replaced deepseek with mimo/minimax
+}  # FIX: corrected model names and prices to match OpenRouter
 
-# CHAT_MODELS: реальные ID моделей (PATCH 12 fix2)
+# CHAT_MODELS: реальные ID моделей (FIX: corrected names and prices)
 CHAT_MODELS = {
-    "qwen3":    {"model": "openai/gpt-5.4-mini",   "name": "MiniMax M2.5",    "lang": "RU ⭐⭐⭐⭐⭐", "input_price": 0.20, "output_price": 1.10},
-    "mimo":     {"model": "xiaomi/mimo-v2-flash",   "name": "MiMo-V2-Flash",  "lang": "RU ⭐⭐⭐⭐",  "input_price": 0.09, "output_price": 0.29},
-    "gpt5nano": {"model": "openai/gpt-5.4-mini",   "name": "MiniMax M2.5",   "lang": "RU ⭐⭐⭐⭐",  "input_price": 0.20, "output_price": 1.10},
-}  # PATCH fix: replaced deepseek with mimo
+    "gpt54mini": {"model": "openai/gpt-5.4-mini",   "name": "GPT-5.4 Mini",   "lang": "RU ⭐⭐⭐⭐⭐", "input_price": 0.75, "output_price": 4.50},
+    "mimo":      {"model": "xiaomi/mimo-v2-flash",   "name": "MiMo-V2-Flash",  "lang": "RU ⭐⭐⭐⭐",  "input_price": 0.09, "output_price": 0.29},
+    "gpt54nano": {"model": "openai/gpt-5.4-nano",    "name": "GPT-5.4 Nano",   "lang": "RU ⭐⭐⭐⭐",  "input_price": 0.20, "output_price": 1.25},
+}  # FIX: corrected model names, IDs and prices to match OpenRouter
 
 # ── File processing constants ─────────────────────────────────
 TEXT_EXTENSIONS = {
@@ -375,7 +375,7 @@ _DEFAULT_DB = {
             "total_spent": 0.0,
             "settings": {
                 "variant": "premium",
-                "chat_model": "qwen3",
+                "chat_model": "gpt54mini",
                 "enhanced_mode": False,
                 "self_check_level": "none",
                 "design_pro": False,

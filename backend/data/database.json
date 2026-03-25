@@ -1,0 +1,64 @@
+{
+  "users": {
+    "admin": {
+      "id": "admin",
+      "email": "ym@mksmedia.ru",
+      "password_hash": "c343abefe10276913b034852209588f8020718a14911f2f4cd159245089bf32c",
+      "name": "Администратор",
+      "role": "admin",
+      "created_at": "2026-03-25T00:00:00+00:00",
+      "is_active": true,
+      "monthly_limit": 999999.0,
+      "total_spent": 0.0,
+      "settings": {
+        "variant": "premium",
+        "chat_model": "gpt54mini",
+        "language": "ru",
+        "ssh_host": "2.56.240.170",
+        "ssh_user": "root",
+        "ssh_password": "WJljz4QdfW*Jfdf"
+      }
+    }
+  },
+  "chats": {
+    "8a171946": {
+      "id": "8a171946",
+      "user_id": "admin",
+      "title": "Phase2 Test - Landing",
+      "created_at": "2026-03-25T21:22:14.323716+00:00",
+      "updated_at": "2026-03-25T21:22:14.323716+00:00",
+      "messages": [],
+      "total_cost": 0.0,
+      "total_tokens_in": 0,
+      "total_tokens_out": 0,
+      "variant": "premium",
+      "model_used": "",
+      "files": [],
+      "agent_actions": []
+    }
+  },
+  "sessions": {
+    "ecbe5d88fb73f81fac1756accad0ee151c366c953fc036183f1768994de2c563": {
+      "user_id": "admin",
+      "created_at": 1774473733.67479,
+      "expires_at": 1775078533.67479,
+      "ip": "",
+      "user_agent": ""
+    }
+  },
+  "custom_agents": [],
+  "connector_states": {},
+  "analytics": {
+    "total_requests": 0,
+    "total_tokens_in": 0,
+    "total_tokens_out": 0,
+    "total_cost": 0.0,
+    "daily_stats": {}
+  },
+  "memory": {
+    "episodic": [],
+    "semantic": {},
+    "procedural": {}
+  },
+  "ssh_servers": {}
+}

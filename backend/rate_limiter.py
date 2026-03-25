@@ -299,3 +299,66 @@ def get_rate_limiter() -> RateLimitManager:
     if _rate_limit_manager is None:
         _rate_limit_manager = RateLimitManager()
     return _rate_limit_manager
+
+
+# ══════════════════════════════════════════════════════════════════
+# ██ FLASK MIDDLEWARE ██
+# ══════════════════════════════════════════════════════════════════
+
+def rate_limit_middleware(app):
+    """Add rate limiting middleware to Flask app."""
+    from flask import request, jsonify
+
+    mgr = get_rate_limiter()
+
+    @app.before_request
+    def _check_rate_limit():
+        # Skip health checks and static files
+        if request.path in ("/api/health", "/metrics", "/favicon.ico"):
+            return None
+        if request.path.startswith("/assets/"):
+            return None
+
+        ip = request.remote_addr or "unknown"
+        user_id = getattr(request, "user_id", None)
+
+        # Check API rate limit by IP
+        allowed, info = mgr.check_api(ip)
+        if not allowed:
+            logger.warning(f"[RATE_LIMIT] IP blocked: {ip} on {request.path}")
+            response = jsonify({
+                "error": "Rate limit exceeded",
+                "retry_after": round(info.get("retry_after", 1), 1),
+            })
+            response.status_code = 429
+            response.headers["Retry-After"] = str(int(info.get("retry_after", 1)) + 1)
+            response.headers["X-RateLimit-Remaining"] = "0"
+            return response
+
+    @app.after_request
+    def _add_rate_headers(response):
+        if request.path.startswith("/api/"):
+            response.headers["X-RateLimit-Limit"] = "60"
+        return response
+
+
+def register_rate_limit_routes(app):
+    """Register rate limit management routes."""
+    from flask import request, jsonify
+
+    @app.route("/api/rate-limit/stats", methods=["GET"])
+    def rate_limit_stats():
+        mgr = get_rate_limiter()
+        user_id = getattr(request, "user_id", None)
+        ip = request.remote_addr
+        usage = mgr.get_all_usage(user_id=user_id, ip=ip)
+        return jsonify(usage)
+
+    @app.route("/api/rate-limit/reset", methods=["POST"])
+    def rate_limit_reset():
+        mgr = get_rate_limiter()
+        for limiter in mgr.limiters.values():
+            limiter.reset()
+        return jsonify({"reset": True})
+
+    logger.info("[RATE_LIMIT] Routes registered")

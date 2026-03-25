@@ -313,6 +313,21 @@ class Orchestrator:
         self.orion_mode = orion_mode
         self.project_context = ""
 
+
+    def _apply_mode_model(self, plan):
+        """Apply the correct model based on orion_mode to the plan."""
+        if not plan or not isinstance(plan, dict):
+            return plan
+        mode_model_map = {
+            "fast": "google/gemini-2.5-flash",
+            "turbo-basic": "google/gemini-2.5-flash",
+            "standard": "openai/gpt-5.4",
+            "premium": "anthropic/claude-opus-4",
+        }
+        if self.orion_mode in mode_model_map:
+            plan["primary_model"] = mode_model_map[self.orion_mode]
+        return plan
+
     def plan(self, message, chat_history=None, has_ssh=False, ssh_info=""):
         logger.info(f"[Orchestrator] Planning with mode={self.orion_mode}")
         
@@ -329,21 +344,23 @@ class Orchestrator:
         # Фича 8: распознаём шаблонные запросы и возвращаем готовый план
         template_plan = self._match_template(msg, message)
         if template_plan:
-            return template_plan
+            return self._apply_mode_model(template_plan)
 
         # BUGFIX: Серверные задачи (деплой, SSH, FTP, сайт-визитка) — всегда через LLM planner
         if self._needs_sonnet(msg) or self._is_full_site_task(msg):
-            return self._llm_plan(message, chat_history, has_ssh, ssh_info)
+            return self._apply_mode_model(self._llm_plan(message, chat_history, has_ssh, ssh_info))
 
         if self._is_obvious_design(msg):
+            _dm = "gemini_flash" if self.orion_mode == "fast" else "sonnet"
             return {"mode":"single","phases":[{"name":"Дизайн","agents":["designer"],"model":"gemini",
                     "description":"Создать HTML/CSS","expected_output":"html_file"}],
-                    "primary_model":"sonnet","primary_agent":"designer","understanding":"Создание веб-страницы","ask_user":None}
+                    "primary_model":_dm,"primary_agent":"designer","understanding":"Создание веб-страницы","ask_user":None}
 
         if self._is_image_request(msg):
+            _im = "gemini_flash" if self.orion_mode == "fast" else "sonnet"
             return {"mode":"single","phases":[{"name":"Генерация","agents":["designer"],
                     "model":"gemini","description":"Создать изображение"}],
-                    "primary_model":"sonnet","primary_agent":"designer",
+                    "primary_model":_im,"primary_agent":"designer",
                     "understanding":"Генерация изображения","ask_user":None}
 
         if self._is_obvious_code(msg):
@@ -363,7 +380,7 @@ class Orchestrator:
                 "ask_user": None
             }
 
-        return self._llm_plan(message, chat_history, has_ssh, ssh_info)
+        return self._apply_mode_model(self._llm_plan(message, chat_history, has_ssh, ssh_info))
 
 
     def _match_template(self, msg, original_message):

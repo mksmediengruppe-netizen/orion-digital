@@ -166,11 +166,11 @@ def get_me():
     limit_pct = round(total_spent / max(monthly_limit, 0.01) * 100, 1) if monthly_limit < 999999 else 0
     _name = user.get("name", user.get("email", ""))
     _email = user.get("email", "")
-    return jsonify({
+    # FIX: wrap in {user: {...}} to match frontend contract (api.ts expects { user: User })
+    return jsonify({"user": {
         "id": request.user_id,
         "email": _email,
         "name": _name,
-        # BUG-BACKEND-1 FIX: frontend expects username/full_name
         "username": _email,
         "full_name": _name,
         "role": user.get("role", "user"),
@@ -181,7 +181,7 @@ def get_me():
         "monthly_limit_rub": round(monthly_limit * 105, 2) if monthly_limit < 999999 else None,
         "limit_used_percent": limit_pct,
         "balance_remaining": round((monthly_limit - total_spent) * 105, 2) if monthly_limit < 999999 else None
-    })
+    }})
 
 
 # ── Settings ───────────────────────────────────────────────────
