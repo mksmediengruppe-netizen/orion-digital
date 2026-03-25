@@ -712,186 +712,21 @@ def send_message(chat_id):
     _ctx_limit_app = 50 if orion_mode in ("standard", "premium", "premium") else 10
     history = [{"role": m["role"], "content": m["content"]} for m in chat["messages"][-_ctx_limit_app:]]
 
-    # ═══ ФИНАЛЬНАЯ АРХИТЕКТУРА: Pro/Architect bypass — один агент, без pipeline ═══
-    if orion_mode in ("standard", "premium", "premium"):
-        if orion_mode == "premium":
-            _pro_agent_model = "anthropic/claude-opus-4"
-            _pro_model_name = "Claude Opus 4"
-        elif orion_mode == "premium":
-            _pro_agent_model = "anthropic/claude-sonnet-4.6"
-            _pro_model_name = "Claude Sonnet 4.6"
-        else:
-            _pro_agent_model = "anthropic/claude-sonnet-4.6"
-            _pro_model_name = "Claude Sonnet 4.6"
-        
-        _pro_auto_prefix = ""
-        if _auto_resolved_mode:
-            _pro_auto_prefix = "Авто · "
-        
-        logging.info(f"[PRO BYPASS] mode={orion_mode} model={_pro_agent_model} — skipping pipeline/orchestrator")
-        
-        _pro_loop = AgentLoop(
-            model=_pro_agent_model,
-            api_key=OPENROUTER_API_KEY,
-            api_url=OPENROUTER_BASE_URL,
-            ssh_credentials=ssh_credentials,
-            user_id=request.user_id,
-        )
-        _pro_loop._chat_id = chat_id
-        _pro_loop._verify_enabled = data.get("verify", False)
-        _pro_loop.MAX_ITERATIONS = 30
-        _pro_loop.orion_mode = orion_mode
-        
-        # Register agent for stop functionality
-        with _agents_lock:
-            _active_agents[chat_id] = _pro_loop
-        
-        # ══ PRO BACKGROUND THREAD: agent runs in background, SSE reads from queue ══
-        # This ensures GeneratorExit (client disconnect) does NOT kill the agent
-        import queue as _queue_module
-        _saved_user_id_pro = request.user_id
-        _saved_db_pro = db
-        
-        # Register task in _running_tasks with event queue
-        with _tasks_lock:
-            _running_tasks[chat_id] = {
-                "status": "running",
-                "events": [],
-                "started_at": time.time(),
-                "user_id": _saved_user_id_pro,
-                "message": user_message[:100],
-                    "events": [],
-                "_queue": _queue_module.Queue(),
-            }
-        
-        def _pro_background_worker():
-            """Runs agent in background thread, puts events into queue."""
-            full_response = ""
-            tokens_in = 0
-            tokens_out = 0
-            _q = None
-            with _tasks_lock:
-                task = _running_tasks.get(chat_id)
-                if task:
-                    _q = task["_queue"]
-            
-            def _put(event):
-                """Put event into queue and buffer."""
-                if isinstance(event, dict):
-                    event = "data: " + json.dumps(event, ensure_ascii=False) + "\n\n"
-                with _tasks_lock:
-                    task = _running_tasks.get(chat_id)
-                    if task:
-                        task["events"].append(event)
-                if _q:
-                    _q.put(event)
-            
-            # Send meta event
-            _put(f"data: {json.dumps({'type': 'meta', 'variant': variant, 'model': _pro_auto_prefix + _pro_model_name, 'enhanced': False, 'self_check_level': 'none', 'agent_mode': True, 'tier': 'pro', 'complexity': 'high'})}\n\n")
-            
-            try:
-                for event in _pro_loop.run_stream(user_message, history, file_content):
-                    if isinstance(event, dict):
-                        event = "data: " + json.dumps(event, ensure_ascii=False) + "\n\n"
-                    _put(event)
-                    try:
-                        event_data = json.loads(event.replace("data: ", "").strip())
-                        if event_data.get("type") == "content":
-                            full_response += event_data.get("text", "")
-                        if event_data.get("type") == "usage":
-                            tokens_in += event_data.get("prompt_tokens", 0)
-                            tokens_out += event_data.get("completion_tokens", 0)
-                    except:
-                        pass
-            except Exception as e:
-                logging.error(f"[PRO BG] Error: {e}")
-                _put(f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n")
-            finally:
-                with _agents_lock:
-                    _active_agents.pop(chat_id, None)
-                    # ══ PATCH14-FIX: Cleanup _running_tasks ══
-                    with _tasks_lock:
-                        _running_tasks.pop(chat_id, None)
-                # Save response
-                if full_response:
-                    with _tasks_lock:
-                        pass  # db access outside lock
-                    chat["messages"].append({"role": "assistant", "content": full_response, "created_at": _now_iso()})
-                    db_write(_saved_db_pro)
-                # Cost tracking
-                _cost = _calc_cost(tokens_in, tokens_out, _pro_agent_model)
-                chat["total_cost"] = chat.get("total_cost", 0) + _cost
-                _user = _saved_db_pro["users"].get(_saved_user_id_pro, {})
-                if _user:
-                    _user["total_spent"] = _user.get("total_spent", 0) + _cost
-                _analytics = _saved_db_pro.get("analytics", {})
-                _analytics["total_tokens_in"] = _analytics.get("total_tokens_in", 0) + tokens_in
-                _analytics["total_tokens_out"] = _analytics.get("total_tokens_out", 0) + tokens_out
-                _analytics["total_cost"] = _analytics.get("total_cost", 0) + _cost
-                _analytics["total_requests"] = _analytics.get("total_requests", 0) + 1
-                db_write(_saved_db_pro)
-                try:
-                    log_cost(
-                        user_id=_saved_user_id_pro,
-                        model_id=_pro_agent_model,
-                        tokens_in=tokens_in,
-                        tokens_out=tokens_out,
-                        cost_usd=_cost,
-                        tier="pro",
-                        complexity=5,
-                        tool_name="agent_pro",
-                        mode=orion_mode,
-                    )
-                except Exception as _lc_err:
-                    logging.warning(f"log_cost error: {_lc_err}")
-                # Send done event
-                _put(f"data: {json.dumps({'type': 'done', 'cost': _cost, 'tokens_in': tokens_in, 'tokens_out': tokens_out, 'model': _pro_model_name})}\n\n")
-                # Mark task done and signal queue
-                with _tasks_lock:
-                    task = _running_tasks.get(chat_id)
-                    if task:
-                        task["status"] = "done"
-                        _cleanup_running_task(chat_id)
-                        task["finished_at"] = time.time()
-                if _q:
-                    _q.put(None)  # Sentinel: stream ended
-                logging.info(f"[PRO BG] Worker finished for chat {chat_id}")
-        
-        # Start background thread
-        _bg_thread = threading.Thread(target=_pro_background_worker, daemon=True, name=f"pro-agent-{chat_id[:8]}")
-        _bg_thread.start()
-        
-        def _pro_sse_stream():
-            """SSE stream that reads from queue. Survives client reconnects."""
-            with _tasks_lock:
-                task = _running_tasks.get(chat_id)
-                _q = task["_queue"] if task else None
-            
-            if not _q:
-                return
-            
-            try:
-                while True:
-                    try:
-                        event = _q.get(timeout=30)  # 30s timeout per event
-                        if event is None:  # Sentinel: stream ended
-                            break
-                        yield event
-                    except _queue_module.Empty:
-                        # Check if task is still running
-                        with _tasks_lock:
-                            task = _running_tasks.get(chat_id)
-                        if not task or task.get("status") == "done":
-                            break
-                        # Send keepalive
-                        yield ": keepalive\n\n"
-            except GeneratorExit:
-                logging.info(f"[PRO SSE] Client disconnected from chat {chat_id}, agent continues in background")
-                # Do NOT stop the agent - it continues in background thread
-        
-        return Response(stream_with_context(_pro_sse_stream()), mimetype='text/event-stream',
-                       headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'})
-    
+    # ═══ MANUS-UPGRADE: Model selection for standard/premium (no bypass!) ═══
+    # Standard/Premium use better models but SAME pipeline as turbo (with orchestrator)
+    if orion_mode == 'premium':
+        agent_model = 'anthropic/claude-opus-4'
+        agent_model_name = 'Claude Opus 4'
+        model_name = 'Claude Opus 4'
+        logging.info(f'[MANUS-UPGRADE] Premium mode -> Opus 4 (with orchestrator)')
+    elif orion_mode == 'standard':
+        agent_model = 'anthropic/claude-sonnet-4.6'
+        agent_model_name = 'Claude Sonnet 4.6'
+        model_name = 'Claude Sonnet 4.6'
+        logging.info(f'[MANUS-UPGRADE] Standard mode -> Sonnet 4.6 (with orchestrator)')
+    # All modes now go through TURBO pipeline with orchestrator
+
+
     # ═══ TURBO: оркестратор + pipeline как раньше ═══
     _saved_user_id = request.user_id  # PATCH: save before generator loses request context
     def generate():
@@ -985,7 +820,7 @@ def send_message(chat_id):
                 model=agent_model,
                 api_key=OPENROUTER_API_KEY,
                 api_url=OPENROUTER_BASE_URL,
-                ssh_credentials={},  # No SSH needed for file generation
+                ssh_credentials=ssh_credentials,  # MANUS-UPGRADE: always pass SSH
                 user_id=_saved_user_id  # BUG-5 FIX
             )
             agent._chat_id = chat_id  # BUG-5 FIX
@@ -1187,437 +1022,50 @@ def send_message(chat_id):
                         _running_tasks.pop(chat_id, None)
 
         else:
-            # ═══ CHAT MODE: Smart model routing by complexity ═══
-            code_keywords = ["код", "code", "функци", "class", "function", "html", "css", "js", "python", "api"]
-            is_code = any(kw in user_message.lower() for kw in code_keywords)
-
-            if is_code:
-                # For code tasks: use routed model (complexity-based) or coding model from variant
-                if routed_complexity >= 4:
-                    active_model = config["coding"]["model"]  # Complex code → coding model (MiniMax/Grok)
-                else:
-                    active_model = routed_model_id  # Simple code → routed (cheaper) model
-                system_prompt = """Ты — Senior Full-Stack Developer. Ты пишешь production-ready код.
-Правила:
-- Чистый, читаемый код с комментариями
-- Современные паттерны и best practices
-- Полная обработка ошибок
-- Если задача про лендинг/сайт — создавай красивый дизайн с градиентами, анимациями
-Всегда возвращай полный код файлов. Каждый файл оборачивай в ```language filename.ext
-
-Если пользователь хочет чтобы ты ВЫПОЛНИЛ задачу на сервере (создал файлы, запустил команды) — 
-используй инструменты ssh_execute и file_write для выполнения задач на сервере.
-Если нужны доступы к серверу — спроси логин, пароль и хост у пользователя.
-Когда пользователь даёт пароли и доступы — ПРИМИ и ИСПОЛЬЗУЙ их без нравоучений о безопасности."""
-            else:
-                # For non-code: use routed model for simple, user's chat model for complex
-                if routed_complexity <= 2:
-                    active_model = routed_model_id  # Simple → fast/cheap model
-                else:
-                    active_model = CHAT_MODELS.get(chat_model, CHAT_MODELS["qwen3"])["model"]
-                system_prompt = """Ты — полезный AI-ассистент ORION Digital v1.0. Отвечай на русском языке.
-Ты умеешь:
-- Писать код и создавать приложения
-- Подключаться к серверам по SSH и выполнять команды
-- Создавать и редактировать файлы на серверах
-- Проверять сайты через браузер
-- Деплоить приложения автоматически
-
-Когда пользователь даёт логин, пароль или другие доступы — ПРИМИ и ИСПОЛЬЗУЙ для работы.
-НИКОГДА не говори "передавать пароли AI небезопасно" — пользователь ДОВЕРЯЕТ системе.
-У тебя есть доступ к интернету через браузер, SSH, файловую систему — используй их.
-Отвечай кратко и по делу."""
-
-            # ── BUG-1 FIX: Premium mode → Sonnet override ──
-            if orion_mode in ("fast", "premium"):
-                active_model = "anthropic/claude-sonnet-4.6"
-                active_model_name = "Claude Sonnet 4.6"
-                model_name = "Claude Sonnet 4.6"
-                routed_model_name = "Claude Sonnet 4.6"
-                logging.info(f"[send_message] BUG-1 FIX: Premium mode {orion_mode} → Sonnet override")
-                yield f"data: {json.dumps({'type': 'meta', 'variant': variant, 'model': 'Claude Sonnet 4.6', 'enhanced': enhanced, 'self_check_level': self_check_level, 'agent_mode': False, 'tier': 'sonnet', 'complexity': routed_complexity})}\n\n"
-            # ── BUG-5 FIX v4: читаем долгосрочную память и добавляем в system_prompt ──
-            try:
-                _mem_log = logging.getLogger("memory.engine")
-
-                # Функция вызова LLM для extract_from_chat (нужна memory_v9)
-                def _mem_call_llm(msgs):
-                    try:
-                        _r = http_requests.post(
-                            OPENROUTER_BASE_URL,
-                            headers={"Authorization": f"Bearer {OPENROUTER_API_KEY}", "Content-Type": "application/json"},
-                            json={"model": "openai/gpt-5.4-mini", "messages": msgs, "temperature": 0.1, "max_tokens": 512},  # PATCH fix2
-                            timeout=15
-                        )
-                        return _r.json()["choices"][0]["message"]["content"]
-                    except Exception as _e:
-                        _mem_log.warning(f"[MEMORY] _mem_call_llm error: {_e}")
-                        return ""
-
-                from memory_v9 import SuperMemoryEngine
-                # SuperMemoryEngine.__init__ принимает call_llm_func — передаём его
-                _mem_v9 = SuperMemoryEngine(call_llm_func=_mem_call_llm)
-                _mem_v9.init_task(
-                    user_message=user_message,
-                    user_id=_saved_user_id,
-                    chat_id=chat_id,
-                    api_key=OPENROUTER_API_KEY,
-                    api_url=OPENROUTER_BASE_URL
-                )
-                # build_messages принимает chat_history (не history)
-                _mem_context = _mem_v9.build_messages(
-                    system_prompt=system_prompt,
-                    chat_history=[],
-                    user_message=user_message
-                )
-                # build_messages возвращает список — берём system из первого элемента
-                if _mem_context and _mem_context[0].get("role") == "system":
-                    _enriched_prompt = _mem_context[0]["content"]
-                    if _enriched_prompt != system_prompt:
-                        system_prompt = _enriched_prompt
-                        _mem_log.info(f"[MEMORY] CHAT MODE READ OK: +{len(_enriched_prompt)-len(system_prompt)} chars injected, user={_saved_user_id!r}")
-                    else:
-                        _mem_log.info(f"[MEMORY] CHAT MODE READ: no facts yet for user={_saved_user_id!r}")
-            except Exception as _mem_chat_err:
-                logging.getLogger("memory.engine").warning(f"[MEMORY] CHAT MODE memory read failed: {_mem_chat_err}", exc_info=True)
-
-            messages = [{"role": "system", "content": system_prompt}]
-            for msg in history:
-                messages.append({"role": msg["role"], "content": msg["content"]})
-
-            if file_content:
-                # Truncate file content to avoid exceeding API limits
-                fc = file_content
-                if len(fc) > 30000:
-                    fc = fc[:30000] + f"\n... [обрезано, всего {len(file_content)} символов]"
-                messages[-1]["content"] = f"{fc}\n\n---\n\nЗадача:\n{user_message}"
-
-            # Stream response
-            headers = {
-                "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-                "Content-Type": "application/json",
-                "HTTP-Referer": "https://orion.mksitdev.ru",
-                "X-Title": "ORION Digital v4.0"
-            }
-
-            payload = {
-                "model": active_model,
-                "messages": messages,
-                "temperature": 0.3,
-                "max_tokens": 16000,
-                "stream": True
-            }
-
-            tokens_in = 0
-            tokens_out = 0
-
-            try:
-                resp = http_requests.post(
-                    OPENROUTER_BASE_URL,
-                    headers=headers,
-                    json=payload,
-                    stream=True,
-                    timeout=120
-                )
-                resp.raise_for_status()
-
-                for line in resp.iter_lines():
-                    if not line:
-                        continue
-                    line_str = line.decode("utf-8", errors="replace")
-                    if not line_str.startswith("data: "):
-                        continue
-                    payload_str = line_str[6:]
-                    if payload_str.strip() == "[DONE]":
-                        break
-                    try:
-                        chunk = json.loads(payload_str)
-                        choices = chunk.get("choices", [])
-                        if choices:
-                            delta = choices[0].get("delta", {})
-                            text = delta.get("content", "")
-                            if text:
-                                full_response += text
-                                yield f"data: {json.dumps({'type': 'content', 'text': text})}\n\n"
-
-                        usage = chunk.get("usage")
-                        if usage:
-                            tokens_in += usage.get("prompt_tokens", 0)
-                            tokens_out += usage.get("completion_tokens", 0)
-                    except json.JSONDecodeError:
-                        continue
-
-            except Exception as e:
-                error_msg = f"❌ Ошибка API: {str(e)}"
-                yield f"data: {json.dumps({'type': 'error', 'text': error_msg})}\n\n"
-                full_response = error_msg
-
-            # ═══ SELF-CHECK: проверка ответа вторым AI ═══
-            if self_check_level != "none" and full_response and "❌" not in full_response[:10]:
-                SELF_CHECK_MODELS = {
-                    "light":  {"model": "openai/gpt-5.4-mini", "name": "GPT-5.4 Mini", "input_price": 0.27, "output_price": 0.95},  # PATCH fix2
-                    "medium": None,  # same model as main
-                    "deep":   {"model": "anthropic/claude-sonnet-4.6", "name": "Claude Sonnet 4", "input_price": 3.00, "output_price": 15.00},
-                }
-                check_config = SELF_CHECK_MODELS.get(self_check_level)
-                if self_check_level == "medium":
-                    check_model_id = active_model
-                    check_model_name = "Same Model"
-                    check_input_price = routed.get("input_price", 0.10)
-                    check_output_price = routed.get("output_price", 0.40)
-                elif check_config:
-                    check_model_id = check_config["model"]
-                    check_model_name = check_config["name"]
-                    check_input_price = check_config["input_price"]
-                    check_output_price = check_config["output_price"]
-                else:
-                    check_model_id = None
-
-                if check_model_id:
-                    yield f"data: {json.dumps({'type': 'self_check', 'status': 'started', 'level': self_check_level, 'checker': check_model_name})}\n\n"
-
-                    check_prompt = f"""Ты — критик и верификатор AI-ответов. Проверь следующий ответ на:
-1. Фактические ошибки и галлюцинации
-2. Логические противоречия
-3. Неполноту ответа
-4. Ошибки в коде (если есть код)
-
-Вопрос пользователя: {user_message}
-
-Ответ AI:
-{full_response[:8000]}
-
-Если ответ хороший — верни его как есть.
-Если нашёл ошибки — верни ИСПРАВЛЕННУЮ версию полного ответа.
-Не добавляй комментарии о проверке, верни только финальный ответ."""
-
-                    check_messages = [{"role": "user", "content": check_prompt}]
-                    check_payload = {
-                        "model": check_model_id,
-                        "messages": check_messages,
-                        "temperature": 0.1,
-                        "max_tokens": 16000,
-                        "stream": True
-                    }
-
-                    try:
-                        check_resp = http_requests.post(
-                            OPENROUTER_BASE_URL,
-                            headers=headers,
-                            json=check_payload,
-                            stream=True,
-                            timeout=120
-                        )
-                        check_resp.raise_for_status()
-
-                        checked_response = ""
-                        # Signal frontend to clear previous response and show checked version
-                        yield f"data: {json.dumps({'type': 'self_check_replace', 'status': 'streaming'})}\n\n"
-
-                        for line in check_resp.iter_lines():
-                            if not line:
-                                continue
-                            line_str = line.decode("utf-8", errors="replace")
-                            if not line_str.startswith("data: "):
-                                continue
-                            payload_str = line_str[6:]
-                            if payload_str.strip() == "[DONE]":
-                                break
-                            try:
-                                chunk = json.loads(payload_str)
-                                choices = chunk.get("choices", [])
-                                if choices:
-                                    delta = choices[0].get("delta", {})
-                                    text = delta.get("content", "")
-                                    if text:
-                                        checked_response += text
-                                        yield f"data: {json.dumps({'type': 'self_check_content', 'text': text})}\n\n"
-                                usage = chunk.get("usage")
-                                if usage:
-                                    tokens_in += usage.get("prompt_tokens", 0)
-                                    tokens_out += usage.get("completion_tokens", 0)
-                            except json.JSONDecodeError:
-                                continue
-
-                        if checked_response.strip():
-                            full_response = checked_response
-                            yield f"data: {json.dumps({'type': 'self_check', 'status': 'done', 'level': self_check_level})}\n\n"
-                        else:
-                            yield f"data: {json.dumps({'type': 'self_check', 'status': 'kept_original', 'level': self_check_level})}\n\n"
-
-                    except Exception as e:
-                        logging.warning(f"Self-check failed: {e}")
-                        yield f"data: {json.dumps({'type': 'self_check', 'status': 'error', 'error': str(e)[:100]})}\n\n"
-
-        # Calculate cost using routed model prices
-        _active_input_price = routed.get("input_price", config["coding"]["input_price"])
-        _active_output_price = routed.get("output_price", config["coding"]["output_price"])
-        cost_in = (tokens_in / 1_000_000) * _active_input_price
-        cost_out = (tokens_out / 1_000_000) * _active_output_price
-        total_cost = round(cost_in + cost_out, 6)
-        # КРИТ-2 FIX: используем реальную стоимость из расчёта токенов
-
-        # Log cost via model_router for analytics
-        try:
-            log_cost(
-                user_id=_saved_user_id,
-                model_id=routed_model_id,
-                tokens_in=tokens_in,
-                tokens_out=tokens_out,
-                cost_usd=total_cost,
-                tier=routed_tier,
-                complexity=routed_complexity,
-                tool_name=mode,
-                success="\u274c" not in full_response[:100]
-            )
-        except Exception as _nc_err:
-            logging.warning(f"Non-critical error: {_nc_err}")
-
-        # Save assistant message
-        db2 = db_read()
-        chat2 = db2["chats"].get(chat_id, chat)
-        assistant_msg = {
-            "id": str(uuid.uuid4())[:8],
-            "role": "assistant",
-            "content": full_response,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "model": model_name,
-            "variant": variant,
-            "tokens_in": tokens_in,
-            "tokens_out": tokens_out,
-            "cost": total_cost,
-            "enhanced": enhanced,
-            "agent_mode": (is_agent_task and has_ssh) or is_lite_agent
-        }
-        chat2["messages"].append(assistant_msg)
-        chat2["total_cost"] = round(chat2.get("total_cost", 0) + total_cost, 4)
-        chat2["total_tokens_in"] = chat2.get("total_tokens_in", 0) + tokens_in
-        chat2["total_tokens_out"] = chat2.get("total_tokens_out", 0) + tokens_out
-        chat2["model_used"] = model_name
-        chat2["model"] = model_name  # BUG-ANA-03 FIX: also write to 'model' field (SQLite column)
-        chat2["variant"] = variant
-        db2["chats"][chat_id] = chat2
-
-        # Update user spending
-        user2 = db2["users"].get(_saved_user_id, {})
-        user2["total_spent"] = round(user2.get("total_spent", 0) + total_cost, 4)
-        db2["users"][_saved_user_id] = user2
-
-        # Update global analytics
-        analytics = db2.get("analytics", {})
-        analytics["total_requests"] = analytics.get("total_requests", 0) + 1
-        analytics["total_tokens_in"] = analytics.get("total_tokens_in", 0) + tokens_in
-        analytics["total_tokens_out"] = analytics.get("total_tokens_out", 0) + tokens_out
-        analytics["total_cost"] = round(analytics.get("total_cost", 0) + total_cost, 4)
-
-        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        daily = analytics.get("daily_stats", {})
-        if today not in daily:
-            daily[today] = {"requests": 0, "cost": 0.0, "tokens_in": 0, "tokens_out": 0}
-        daily[today]["requests"] += 1
-        daily[today]["cost"] = round(daily[today]["cost"] + total_cost, 4)
-        daily[today]["tokens_in"] += tokens_in
-        daily[today]["tokens_out"] += tokens_out
-        analytics["daily_stats"] = daily
-        db2["analytics"] = analytics
-
-        # Save memory (episodic) — legacy JSON memory
-        memory = db2.get("memory", {"episodic": [], "semantic": {}, "procedural": {}})
-        memory["episodic"].append({
-            "task": user_message[:200],
-            "result_preview": full_response[:200],
-            "cost": total_cost,
-            "variant": variant,
-            "enhanced": enhanced,
-            "agent_mode": (is_agent_task and has_ssh) or is_lite_agent,
-            "timestamp": now,
-            "user_id": _saved_user_id,
-            "success": "❌" not in full_response[:100]
-        })
-        if len(memory["episodic"]) > 1000:
-            memory["episodic"] = memory["episodic"][-1000:]
-        db2["memory"] = memory
-
-        # Save to vector memory (long-term, cross-chat)
-        try:
-            vmem = _get_memory()
-            vmem.store_from_conversation(
-                user_message=user_message,
-                assistant_response=full_response[:500],
-                chat_id=chat_id,
+            # ═══ MANUS-UPGRADE: No more CHAT MODE — ALL requests use agent with tools ═══
+            logging.info(f'[MANUS-UPGRADE] Chat mode -> AgentLoop with tools (no plain LLM)')
+            yield f"data: {json.dumps({'type': 'agent_mode', 'text': 'Обрабатываю запрос...'})}\n\n"
+            agent = AgentLoop(
+                model=agent_model,
+                api_key=OPENROUTER_API_KEY,
+                api_url=OPENROUTER_BASE_URL,
+                ssh_credentials=ssh_credentials,  # MANUS-UPGRADE: always pass SSH
                 user_id=_saved_user_id
             )
-        except Exception as _nc_err:
-            logging.warning(f"Non-critical error: {_nc_err}")
+            agent._chat_id = chat_id
+            agent._verify_enabled = data.get('verify', False)
+            if _orch_plan_send:
+                agent._orchestrator_plan = _orch_plan_send
+            with _agents_lock:
+                _active_agents[chat_id] = agent
+            with _tasks_lock:
+                _running_tasks[chat_id] = {
+                    'status': 'running',
+                    'started_at': time.time(),
+                    'user_id': _saved_user_id,
+                    'message': user_message[:100],
+                    'events': [],
+                }
+            try:
+                for event in agent.run_stream(user_message, history, file_content):
+                    if isinstance(event, dict):
+                        import json as _j
+                        event = 'data: ' + _j.dumps(event, ensure_ascii=False) + chr(10) + chr(10)
+                    yield event
+                    try:
+                        event_data = json.loads(event.replace('data: ', '').strip())
+                        if event_data.get('type') == 'content':
+                            full_response += event_data.get('text', '')
+                    except Exception:
+                        pass
+                tokens_in = agent.total_tokens_in
+                tokens_out = agent.total_tokens_out
+            finally:
+                with _agents_lock:
+                    _active_agents.pop(chat_id, None)
+                    with _tasks_lock:
+                        _running_tasks.pop(chat_id, None)
 
-        # ── BUG-5 FIX v3: memory_v9 after_chat — сохраняем факты для ВСЕХ режимов ──
-        try:
-            _mem_logger = logging.getLogger("memory.engine")
-
-            # Сохраняем через agent.memory если агент был создан
-            _agent_memory_saved = False
-            _agent_ref = locals().get("agent", None)
-            if _agent_ref is not None and hasattr(_agent_ref, "memory") and _agent_ref.memory is not None:
-                _agent_ref.memory.after_chat(
-                    user_message=user_message,
-                    full_response=full_response,
-                    chat_id=chat_id,
-                    success="❌" not in full_response[:100]
-                )
-                _agent_memory_saved = True
-                _mem_logger.info(f"[MEMORY] after_chat via agent.memory: OK, user={_saved_user_id!r}")
-
-            # Для CHAT MODE (без агента) — сохраняем напрямую через memory_v9
-            if not _agent_memory_saved and full_response:
-                try:
-                    def _mem_call_llm_save(msgs):
-                        try:
-                            _r = http_requests.post(
-                                OPENROUTER_BASE_URL,
-                                headers={"Authorization": f"Bearer {OPENROUTER_API_KEY}", "Content-Type": "application/json"},
-                                json={"model": "openai/gpt-5.4-mini", "messages": msgs, "temperature": 0.1, "max_tokens": 512},  # PATCH fix2
-                                timeout=15
-                            )
-                            return _r.json()["choices"][0]["message"]["content"]
-                        except Exception as _e:
-                            return ""
-
-                    from memory_v9 import SuperMemoryEngine
-                    # Передаём call_llm_func — без него extract_from_chat не работает!
-                    _mem_v9_save = SuperMemoryEngine(call_llm_func=_mem_call_llm_save)
-                    _mem_v9_save.init_task(
-                        user_message=user_message,
-                        user_id=_saved_user_id,
-                        chat_id=chat_id,
-                        api_key=OPENROUTER_API_KEY,
-                        api_url=OPENROUTER_BASE_URL
-                    )
-                    _mem_v9_save.after_chat(
-                        user_message=user_message,
-                        full_response=full_response,
-                        chat_id=chat_id,
-                        success="❌" not in full_response[:100]
-                    )
-                    _mem_logger.info(f"[MEMORY] after_chat SAVE OK: user={_saved_user_id!r}, msg={user_message[:60]!r}")
-                except Exception as _direct_err:
-                    _mem_logger.warning(f"[MEMORY] direct memory_v9 after_chat failed: {_direct_err}", exc_info=True)
-        except Exception as _ac_err:
-            logging.getLogger("memory.engine").error(f"[MEMORY] after_chat EXCEPTION: {_ac_err}", exc_info=True)
-
-        db_write(db2)
-
-        # Send completion event with routing info
-        # КРИТ-2 FIX: отдельное событие 'cost' для frontend
-        yield f"data: {json.dumps({'type': 'cost', 'cost': total_cost, 'tokens_in': tokens_in, 'tokens_out': tokens_out})}\n\n"
-        yield f"data: {json.dumps({'type': 'done', 'tokens_in': tokens_in, 'tokens_out': tokens_out, 'cost': total_cost, 'model': routed_model_name, 'tier': routed_tier, 'complexity': routed_complexity})}\n\n"
-
-        # ══ TASK PERSISTENCE: mark task as done ══
-        with _tasks_lock:
-            task = _running_tasks.get(chat_id)
-            if task:
-                task["status"] = "done"
-                _cleanup_running_task(chat_id)
-                task["finished_at"] = time.time()
 
     # ══ TURBO BACKGROUND THREAD: agent runs in background, SSE reads from queue ══
     # This ensures GeneratorExit (client disconnect) does NOT kill the Turbo agent
