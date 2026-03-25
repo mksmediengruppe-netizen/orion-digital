@@ -319,6 +319,11 @@ TOOLS_SCHEMA = [
                     "password": {
                         "type": "string",
                         "description": "SSH password"
+                    },
+                    "append": {
+                        "type": "boolean",
+                        "description": "If true, append content to existing file instead of overwriting. Use for writing large files in parts.",
+                        "default": false
                     }
                 },
                 "required": [
@@ -1808,5 +1813,51 @@ try:
     for _s3t in SPRINT3_TOOLS_SCHEMA:
         if _s3t["function"]["name"] not in _s3_existing:
             TOOLS_SCHEMA.append(_s3t)
+except ImportError:
+    pass
+
+# ── TTS Tool ──────────────────────────────────────────────────────────────────
+try:
+    from tts_tool import TTS_TOOL_SCHEMA
+    _tts_existing = {t["function"]["name"] for t in TOOLS_SCHEMA}
+    if TTS_TOOL_SCHEMA["function"]["name"] not in _tts_existing:
+        TOOLS_SCHEMA.append(TTS_TOOL_SCHEMA)
+except ImportError:
+    pass
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# EPHEMERAL SANDBOX TOOLS — Per-task Docker isolation
+# ══════════════════════════════════════════════════════════════════════════
+try:
+    from ephemeral_sandbox import EPHEMERAL_SANDBOX_TOOLS
+    _esb_existing = {t["function"]["name"] for t in TOOLS_SCHEMA}
+    for _esbt in EPHEMERAL_SANDBOX_TOOLS:
+        if _esbt["function"]["name"] not in _esb_existing:
+            TOOLS_SCHEMA.append(_esbt)
+except ImportError:
+    pass
+
+# ══════════════════════════════════════════════════════════════════════════
+# VISUAL BROWSER TOOLS — Manus-style element tagging with bounding boxes
+# ══════════════════════════════════════════════════════════════════════════
+try:
+    from visual_browser import VISUAL_BROWSER_TOOLS
+    _vb_existing = {t["function"]["name"] for t in TOOLS_SCHEMA}
+    for _vbt in VISUAL_BROWSER_TOOLS:
+        if _vbt["function"]["name"] not in _vb_existing:
+            TOOLS_SCHEMA.append(_vbt)
+except ImportError:
+    pass
+
+# ══════════════════════════════════════════════════════════════════════════
+# SURGICAL FILE EDIT TOOLS — Diff-based find/replace editing
+# ══════════════════════════════════════════════════════════════════════════
+try:
+    from surgical_file_edit import SURGICAL_FILE_TOOLS
+    _sfe_existing = {t["function"]["name"] for t in TOOLS_SCHEMA}
+    for _sfet in SURGICAL_FILE_TOOLS:
+        if _sfet["function"]["name"] not in _sfe_existing:
+            TOOLS_SCHEMA.append(_sfet)
 except ImportError:
     pass

@@ -90,10 +90,10 @@ try:
         add_session_cost, log_cost, DEFAULT_MODE, MODES
     )
 except ImportError:
-    pass
+    logger.debug("Silent exception in agent_loop", exc_info=True)
 
 # ══════════════════════════════════════════════════════════════
-# TURBO DUAL-BRAIN: BRAIN (MiniMax) vs HANDS (MiMo)
+# TURBO DUAL-BRAIN: BRAIN (GPT-5.4-Mini) vs HANDS (MiMo-V2-Flash)
 # ══════════════════════════════════════════════════════════════
 
 # Инструменты для HANDS (MiMo-V2-Flash) — действия на сервере
@@ -108,30 +108,30 @@ HANDS_TOOLS = frozenset([
     "browser_ask_user", "browser_takeover_done",
 ])
 
-# Инструменты для BRAIN (MiniMax M2.5) — думает, пишет код
+# Инструменты для BRAIN (GPT-5.4-Mini) — думает, пишет код
 BRAIN_TOOLS = frozenset([
     "create_artifact", "file_write", "generate_image",
     "search_web", "read_url", "python_exec",
 ])
 
-TURBO_BRAIN_MODEL = "gpt54_mini/gpt54_mini-m2.5"
+TURBO_BRAIN_MODEL = "openai/gpt-5.4-mini"
 TURBO_HANDS_MODEL = "xiaomi/mimo-v2-flash"
-TURBO_FALLBACK_MODEL = "gpt54_mini/gpt54_mini-m2.5"  # PATCH fix: real model ID
+TURBO_FALLBACK_MODEL = "openai/gpt-5.4-mini"  # FIX: corrected to real OpenRouter model ID
 
 
 def _get_dual_brain_model(tool_name: str, orion_mode: str, base_model: str) -> str:
     """
     Для Turbo режима выбирает модель по типу инструмента:
     - HANDS tools (SSH, FTP, браузер) → MiMo-V2-Flash
-    - BRAIN tools (код, дизайн, генерация) → MiniMax M2.5
-    - Остальные → MiniMax M2.5 (по умолчанию думает)
+    - BRAIN tools (код, дизайн, генерация) → GPT-5.4-Mini
+    - Остальные → GPT-5.4-Mini (по умолчанию думает)
     Для Pro/Architect — возвращает base_model без изменений.
     """
-    if orion_mode not in ("fast", "fast", "standard"):
+    if orion_mode not in ("fast", "standard"):
         return base_model
     if tool_name in HANDS_TOOLS:
         return TURBO_HANDS_MODEL
-    # BRAIN или неизвестный инструмент → MiniMax
+    # BRAIN или неизвестный инструмент → GPT-5.4-Mini
     return TURBO_BRAIN_MODEL
 
 
@@ -171,21 +171,21 @@ AGENT_ZONES = {
     "orchestrator": {
         "tools": ["store_memory", "recall_memory", "canvas_create", "task_complete"],
         "description": "Планирование, память, координация",
-        "models": {"fast": "gpt54_mini", "fast": "gpt54_mini",  # PATCH fix
+        "models": {"fast": "gpt54_mini",
                    "standard": "sonnet", "premium": "sonnet"}
     },
     "designer": {
         "tools": ["generate_design", "generate_image", "edit_image",
                   "create_artifact", "browser_navigate", "browser_get_text"],
         "description": "UI/UX, дизайн, визуальный контент",
-        "models": {"fast": "gemini", "fast": "gemini",
+        "models": {"fast": "gemini",
                    "standard": "gemini", "premium": "gemini"}
     },
     "developer": {
         "tools": ["ssh_execute", "file_write", "file_read",
                   "code_interpreter", "generate_file"],
         "description": "Код, разработка, файлы",
-        "models": {"fast": "mimo", "fast": "mimo",  # PATCH fix: hands
+        "models": {"fast": "mimo",
                    "standard": "mimo", "premium": "mimo"}
     },
     "devops": {
@@ -193,14 +193,14 @@ AGENT_ZONES = {
                   "browser_check_site", "browser_check_api",
                   "ftp_upload", "ftp_download", "ftp_list"],
         "description": "Серверы, деплой, инфраструктура, FTP",
-        "models": {"fast": "mimo", "fast": "mimo",  # PATCH fix: hands
+        "models": {"fast": "mimo",
                    "standard": "mimo", "premium": "mimo"}
     },
     "analyst": {
         "tools": ["web_search", "web_fetch", "code_interpreter",
                   "generate_chart", "generate_report", "read_any_file"],
         "description": "Анализ данных, исследования, отчёты",
-        "models": {"fast": "gpt54_mini", "fast": "gpt54_mini",  # PATCH fix: brain
+        "models": {"fast": "gpt54_mini",
                    "standard": "gpt54_mini", "premium": "sonnet"}
     },
     "tester": {
@@ -209,14 +209,14 @@ AGENT_ZONES = {
                   "browser_submit", "browser_select", "browser_ask_auth",
                   "code_interpreter", "ssh_execute"],
         "description": "Тестирование, QA, проверка, браузерная автоматизация",
-        "models": {"fast": "gpt54_mini", "fast": "gpt54_mini",  # PATCH fix: brain
+        "models": {"fast": "gpt54_mini",
                    "standard": "gpt54_mini", "premium": "gpt54_mini"}
     },
     "integrator": {
         "tools": ["ssh_execute", "file_write", "file_read",
                   "browser_check_api", "code_interpreter", "web_fetch"],
         "description": "Интеграции, API, вебхуки",
-        "models": {"fast": "mimo", "fast": "mimo",  # PATCH fix: hands
+        "models": {"fast": "mimo",
                    "standard": "mimo", "premium": "mimo"}
     },
     "website_builder": {
@@ -657,7 +657,7 @@ class AgentLoop:
         _model = self.model_override if self.model_override else self.model
         # DUAL-BRAIN: для Turbo режима выбираем модель по следующему tool call
         _orion_mode = getattr(self, 'orion_mode', 'fast')
-        if _orion_mode in ("fast", "fast") and not self.model_override:
+        if _orion_mode == "fast" and not self.model_override:
             # Определяем следующий tool call из последнего assistant сообщения
             _next_tool = None
             for _msg in reversed(messages):
@@ -670,8 +670,8 @@ class AgentLoop:
                 _model = _get_dual_brain_model(_next_tool, _orion_mode, _model)
                 logging.debug(f"[DUAL-BRAIN] tool={_next_tool} → model={_model}")
             else:
-                # Нет tool call → думаем → MiniMax
-                if _orion_mode in ("fast", "fast"):
+                # Нет tool call → думаем → GPT-5.4-Mini
+                if _orion_mode == "fast":
                     _model = TURBO_BRAIN_MODEL
 
         payload = {
@@ -725,7 +725,7 @@ class AgentLoop:
                 try:
                     resp.close()
                 except Exception:
-                    pass
+                    logger.debug("Silent exception in agent_loop", exc_info=True)
                 logger.warning("[PATCH-STREAM-V2] Force-closed hung stream after 600s")
 
             _stream_timer = _threading.Timer(600, _kill_stream)
@@ -742,7 +742,7 @@ class AgentLoop:
                     elif hasattr(_inner, '_sock'):
                         _inner._sock.settimeout(300)
             except Exception:
-                pass
+                logger.debug("Silent exception in agent_loop", exc_info=True)
 
             try:
               for line in resp.iter_lines():
@@ -805,7 +805,7 @@ class AgentLoop:
               try:
                   resp.close()
               except Exception:
-                  pass
+                  logger.debug("Silent exception in agent_loop", exc_info=True)
 
             # Fallback: estimate tokens if API didn't return usage
             if self.total_tokens_in == _tokens_in_baseline and self.total_tokens_out == _tokens_out_baseline:
@@ -845,7 +845,7 @@ class AgentLoop:
                 try:
                     _err_body = e.response.text[:500]
                 except Exception:
-                    pass
+                    logger.debug("Silent exception in agent_loop", exc_info=True)
             _log.warning(f"[agent_loop] LLM stream error on {self.model}: {e}. Response: {_err_body}")
             
             # ── FALLBACK 1: Strip base64/large content from messages and retry same model ──
@@ -911,7 +911,7 @@ class AgentLoop:
             
             # ── FALLBACK 2: try different model ──
             _orion_mode_fb = getattr(self, 'orion_mode', 'fast')
-            if _orion_mode_fb in ("fast", "fast"):
+            if _orion_mode_fb == "fast":
                 # Dual-brain fallback: если HANDS упал → BRAIN, если BRAIN упал → FALLBACK
                 if _model == TURBO_HANDS_MODEL:
                     _fallback_model_id = TURBO_BRAIN_MODEL
@@ -920,7 +920,7 @@ class AgentLoop:
                 else:
                     _fallback_model_id = TURBO_FALLBACK_MODEL
             else:
-                _fallback_model_id = "gpt54_mini/gpt54_mini-m2.5"  # PATCH fix: real model ID
+                _fallback_model_id = "openai/gpt-5.4-mini"  # PATCH fix: real model ID
             if self.model != _fallback_model_id and _model != _fallback_model_id:
                 _log.warning(f"[agent_loop] Trying fallback model {_fallback_model_id}")
                 try:
@@ -1026,7 +1026,7 @@ class AgentLoop:
                 elif tool_name == "file_write":
                     self._autonomy_manager.increment_file_write()
             except Exception:
-                pass
+                logger.debug("Silent exception in agent_loop", exc_info=True)
         result = self._execute_tool_raw(tool_name, arguments)
         # Пост-обработка: сохраняем большие результаты в файл
         _fs_context_tools = ("ssh_execute", "browser_navigate", "browser_get_text", "web_fetch", "browser_check_site")
@@ -1084,7 +1084,7 @@ class AgentLoop:
                             self._ssh_execute_with_retry(host, username, password, _bak_cmd)
                             logger.info(f"[PATCH-W1-3] Auto-backup: {_fp}")
                         except Exception:
-                            pass
+                            logger.debug("Silent exception in agent_loop", exc_info=True)
 
                 # Idempotency check for mutating commands
                 if is_mutating_command(command):
@@ -1109,8 +1109,21 @@ class AgentLoop:
             elif tool_name == "file_write":
                 path = args.get("path", "")
                 content = args.get("content", "")
+                append_mode = args.get("append", False)
                 if not host or not path:
                     return {"success": False, "error": "host and path are required"}
+                # MANUS-UPGRADE: append mode — append content to existing file
+                if append_mode:
+                    try:
+                        ssh_conn = ssh_pool.get_connection(host=host, username=username, password=password)
+                        # Read existing content, append new content, write back
+                        existing = ssh_conn.file_read(path)
+                        existing_content = existing.get("content", "") if existing.get("success") else ""
+                        content = existing_content + content
+                        logger.info(f"[file_write_append] Appending to {path}: {len(existing_content)} + {len(args.get('content',''))} = {len(content)} bytes")
+                    except Exception as e:
+                        logger.warning(f"[file_write_append] Could not read existing file {path}: {e}, writing as new")
+                        pass
 
                 # ── ПАТЧ W1-3: Автобэкап перед перезаписью ──
                 try:
@@ -1120,7 +1133,7 @@ class AgentLoop:
                         self._ssh_execute_with_retry(host, username, password, _bak_cmd)
                         logger.info(f"[PATCH-W1-3] Auto-backup before write: {path}")
                 except Exception:
-                    pass
+                    logger.debug("Silent exception in agent_loop", exc_info=True)
 
                 # BUG-13 FIX: Detect broken binary writes
                 if content in ('<binary content>', '[binary data]', '') or (len(content) < 100 and 'binary' in content.lower()):
@@ -1750,7 +1763,7 @@ class AgentLoop:
                                "slides_create", "transcribe_audio",
                                "git_execute", "http_request",
                                "parallel_tasks", "research_deep",
-                               "long_memory_search"):
+                               "long_memory_search", "text_to_speech"):
                 try:
                     from manus_tools import dispatch_manus_tool
                     return dispatch_manus_tool(tool_name, args)
@@ -2441,16 +2454,16 @@ os.chdir("{GENERATED_DIR}")
 try:
     import requests
 except ImportError:
-    pass
+    logger.debug("Silent exception in agent_loop", exc_info=True)
 try:
     import pandas as pd
     import numpy as np
 except ImportError:
-    pass
+    logger.debug("Silent exception in agent_loop", exc_info=True)
 try:
     import openpyxl
 except ImportError:
-    pass
+    logger.debug("Silent exception in agent_loop", exc_info=True)
 os.chdir("{GENERATED_DIR}")
 
 {code}
@@ -2506,7 +2519,7 @@ os.chdir("{GENERATED_DIR}")
             try:
                 os.remove(code_file)
             except Exception:
-                pass
+                logger.debug("Silent exception in agent_loop", exc_info=True)
 
     # ── Chart Generation ──────────────────────────────────────────────────────────
 
@@ -3400,7 +3413,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);
                 _b3_cost_info = self.check_cost_limit()
                 _b3_max_cost = _b3_cost_info.get('max_cost', 5.0)
             except Exception:
-                pass
+                logger.debug("Silent exception in agent_loop", exc_info=True)
             _b3_charter = self._charter_store.create(
                 task_id=_b3_task_id,
                 chat_id=_b3_chat_id,
@@ -3471,7 +3484,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);
             try:
                 self._autonomy_manager.reset_counters()
             except Exception:
-                pass
+                logger.debug("Silent exception in agent_loop", exc_info=True)
         if _INTENT_CLARIFIER_AVAILABLE:
             try:
                 self._intent_result = clarify_intent(
@@ -3639,7 +3652,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);
                 if _mem_preview:
                     yield self._sse({"type": "memory_context", "items": _mem_preview, "total": len(_mem_lines)})
             except Exception as _ltm_sse_err:
-                pass
+                logger.debug("Silent exception in agent_loop", exc_info=True)
 
 
         # ── Extended Thinking: анализ перед выполнением сложных задач ──
@@ -3895,7 +3908,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);
                     if _sc_task_id:
                         self._scorecard_store.record_iteration(_sc_task_id)
                 except Exception:
-                    pass
+                    logger.debug("Silent exception in agent_loop", exc_info=True)
             # ═══ BLOCK 4: AutonomyManager — check iteration limit ═══
             if hasattr(self, '_autonomy_manager') and self._autonomy_manager:
                 try:
@@ -3904,7 +3917,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);
                     if _iter_check.get("exceeded"):
                         logger.warning(f"[BLOCK4] Iteration limit exceeded by autonomy manager")
                 except Exception:
-                    pass
+                    logger.debug("Silent exception in agent_loop", exc_info=True)
 
             # ── Update per-task cost from session tracker ──
             _task_cost = max(0.0, self._session_cost - _task_cost_prev)
@@ -4132,8 +4145,9 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);
                     _retry_hint = (
                         "IMPORTANT: Your previous tool call arguments were truncated during streaming "
                         "because the content was too large. Please retry with SMALLER content:\n"
-                        "- For file_write: split into multiple calls, max 6000 chars per call, "
-                        "use append=true for subsequent parts\n"
+                        "- For file_write: split into multiple calls, max 5000 chars per call. "
+                        "First call: file_write(path=..., content='first part'). "
+                        "Subsequent calls: file_write(path=..., content='next part', append=true)\n"
                         "- For ssh_execute: use heredoc with shorter content\n"
                         "- For generate_file: reduce content size or split into sections\n"
                         f"Original error: {_inv_err}"
@@ -4395,17 +4409,17 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);
                             thread_id=str(getattr(self, '_current_task_id', ''))
                         )
                     except Exception:
-                        pass
+                        logger.debug("Silent exception in agent_loop", exc_info=True)
                     # ── TASK 12: Complete persistent runtime state ──
                     try:
                         self._runtime_state.complete_task(str(getattr(self, '_chat_id', '')))
                     except Exception:
-                        pass
+                        logger.debug("Silent exception in agent_loop", exc_info=True)
                     # ── TASK 10: Complete checkpoint on success ──
                     try:
                         self._crash_recovery.complete_checkpoint(str(getattr(self, '_chat_id', '')))
                     except Exception:
-                        pass
+                        logger.debug("Silent exception in agent_loop", exc_info=True)
                     return
 
                 # ── BUG-1 FIX: handle memory tools first ──
@@ -4636,7 +4650,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);
                 try:
                     self._crash_recovery.heartbeat(str(getattr(self, '_chat_id', '')))
                 except Exception:
-                    pass
+                    logger.debug("Silent exception in agent_loop", exc_info=True)
                     # ── TASK 12: Update persistent runtime state ──
                     try:
                         self._runtime_state.update_task(
@@ -4646,7 +4660,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);
                             task_cost=_task_cost
                         )
                     except Exception:
-                        pass
+                        logger.debug("Silent exception in agent_loop", exc_info=True)
                     # ── TASK 13: Save langgraph state to SQLite ──
                     try:
                         if iteration % 3 == 0 or tool_name == 'task_complete':  # Save every 3rd iteration + on complete
@@ -4660,7 +4674,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);
                                 tool_history=[h for h in list(_tool_call_history.keys())[-10:]]
                             )
                     except Exception:
-                        pass
+                        logger.debug("Silent exception in agent_loop", exc_info=True)
                     # ── TASK 12: Register task in persistent runtime state ──
                     try:
                         self._runtime_state.register_task(
@@ -4670,7 +4684,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);
                             user_message=user_message[:500] if user_message else ''
                         )
                     except Exception:
-                        pass
+                        logger.debug("Silent exception in agent_loop", exc_info=True)
                     # ── TASK 10: Persistent checkpoint in SQLite ──
                     try:
                         self._crash_recovery.save_checkpoint(
@@ -4684,7 +4698,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);
                             orion_mode=str(getattr(self, 'mode', 'turbo'))
                         )
                     except Exception:
-                        pass
+                        logger.debug("Silent exception in agent_loop", exc_info=True)
 
                 # ── ПАТЧ W1-5: Автоанализ скриншота после browser_navigate ──
                 if tool_name == "browser_navigate" and _screenshot and result.get("success"):
@@ -5149,8 +5163,8 @@ class MultiAgentLoop(AgentLoop):
             try:
                 from orchestrator_v2 import AGENT_PROMPTS
                 agent_prompt_extra = AGENT_PROMPTS.get(agent_key, "")
-            except:
-                pass
+            except Exception:
+                logger.debug("Silent exception in agent_loop", exc_info=True)
             
             # Build messages for this phase
             system_prompt = get_system_prompt(getattr(self, "orion_mode", "fast"))
@@ -5279,8 +5293,7 @@ class MultiAgentLoop(AgentLoop):
             })
 
 
-            # ── PREMIUM DESIGN QUALITY CHECK v2 (MiniMax→Opus→MiniMax pipeline) ────────
-            # Initialize _is_deploy_phase here for PremiumQC (also defined again below for standard QC)
+            # ── PREMIUM DESIGN QUALITY CHECK v2 (GPT-5.4-Mini→Opus→GPT-5.4-Mini pipeline) ────────     # Initialize _is_deploy_phase here for PremiumQC (also defined again below for standard QC)
             _is_deploy_phase = (
                 agent_key.lower() in ('devops', 'deployer', 'deploy') or
                 any(kw in phase_name.lower() for kw in ('деплой', 'deploy', 'настройк', 'сервер', 'nginx'))
@@ -5288,11 +5301,11 @@ class MultiAgentLoop(AgentLoop):
             _qc_host = self.ssh_credentials.get('host', '')
             if _is_deploy_phase and _qc_host and getattr(self, 'premium_design', False):
                 import logging as _pqc_log, requests as _pqc_req, base64 as _pqc_b64
-                _pqc_log.info("[PremiumQC v2] Starting MiniMax→Opus→MiniMax pipeline")
-                yield self._sse({"type": "content", "text": "\n\n✨ **Premium QC v2**: MiniMax создаёт → Opus проверяет → MiniMax исправляет\n", "agent": "Premium QC"})
+                _pqc_log.info("[PremiumQC v2] Starting GPT-5.4-Mini→Opus→GPT-5.4-Mini pipeline")
+                yield self._sse({"type": "content", "text": "\n\n✨ **Premium QC v2**: GPT-5.4-Mini создаёт → Opus проверяет → GPT-5.4-Mini исправляет\n", "agent": "Premium QC"})
                 _pqc_api_key = self.api_key
                 _pqc_headers = {"Authorization": f"Bearer {_pqc_api_key}", "Content-Type": "application/json", "HTTP-Referer": "https://orion.mksitdev.ru"}
-                _pqc_gpt54_mini_model = "gpt54_mini/gpt54_mini-m2.5"
+                _pqc_gpt54_mini_model = "openai/gpt-5.4-mini"
                 _pqc_opus_model = "anthropic/claude-opus-4"
                 _pqc_html_content = _qc_html_content if '_qc_html_content' in dir() else None
                 _pqc_site_url = f"http://{_qc_host}"
@@ -5323,8 +5336,8 @@ class MultiAgentLoop(AgentLoop):
                         return False
                 
                 try:
-                    # ── STEP 1: MiniMax creates full HTML ($0.50-1.00) ──
-                    yield self._sse({"type": "content", "text": "  📝 Шаг 1/4: MiniMax создаёт полный HTML...\n", "agent": "Premium QC"})
+                    # ── STEP 1: GPT-5.4-Mini creates full HTML ($0.50-1.00) ──
+                    yield self._sse({"type": "content", "text": "  📝 Шаг 1/4: GPT-5.4-Mini создаёт полный HTML...\n", "agent": "Premium QC"})
                     if not _pqc_html_content:
                         _mm_create = _pqc_req.post(self.api_url, headers=_pqc_headers, json={
                             "model": _pqc_gpt54_mini_model,
@@ -5344,7 +5357,7 @@ class MultiAgentLoop(AgentLoop):
                         if _mm_html and _mm_html.strip().startswith('<'):
                             _pqc_html_content = _mm_html
                             _pqc_deploy_html(_pqc_html_content)
-                            yield self._sse({"type": "content", "text": "  ✅ MiniMax создал HTML, задеплоен\n", "agent": "Premium QC"})
+                            yield self._sse({"type": "content", "text": "  ✅ GPT-5.4-Mini создал HTML, задеплоен\n", "agent": "Premium QC"})
                     
                     # ── STEP 2: MiMo deploys + screenshot ──
                     yield self._sse({"type": "content", "text": "  📸 Шаг 2/4: Скриншот после деплоя...\n", "agent": "Premium QC"})
@@ -5372,9 +5385,9 @@ class MultiAgentLoop(AgentLoop):
                         _score = int(_score_m.group(1)) if _score_m else 5
                         yield self._sse({"type": "content", "text": f"  📋 Opus: оценка {_score}/10\n{_opus_issues[:300]}\n", "agent": "Premium QC"})
                         
-                        # ── STEP 4: MiniMax fixes based on Opus list ($0.30) ──
+                        # ── STEP 4: GPT-5.4-Mini fixes based on Opus list ($0.30) ──
                         if _score < 9 and _pqc_html_content:
-                            yield self._sse({"type": "content", "text": "  🔧 Шаг 4/4: MiniMax исправляет по списку Opus...\n", "agent": "Premium QC"})
+                            yield self._sse({"type": "content", "text": "  🔧 Шаг 4/4: GPT-5.4-Mini исправляет по списку Opus...\n", "agent": "Premium QC"})
                             _mm_fix = _pqc_req.post(self.api_url, headers=_pqc_headers, json={
                                 "model": _pqc_gpt54_mini_model,
                                 "messages": [{"role": "user", "content": (
@@ -5392,7 +5405,7 @@ class MultiAgentLoop(AgentLoop):
                             if _fixed_html and _fixed_html.strip().startswith('<'):
                                 _pqc_html_content = _fixed_html
                                 _pqc_deploy_html(_pqc_html_content)
-                                yield self._sse({"type": "content", "text": "  ✅ MiniMax исправил HTML, задеплоен\n", "agent": "Premium QC"})
+                                yield self._sse({"type": "content", "text": "  ✅ GPT-5.4-Mini исправил HTML, задеплоен\n", "agent": "Premium QC"})
                                 # ── Opus final check ($0.50) ──
                                 _ss2 = _pqc_take_screenshot(_pqc_site_url)
                                 if _ss2:
@@ -5516,7 +5529,7 @@ class MultiAgentLoop(AgentLoop):
                             "X-Title": "ORION Digital v1.0"
                         }
                         _review_payload = {
-                            "model": "gpt54_mini/gpt54_mini-m2.5",
+                            "model": "openai/gpt-5.4-mini",
                             "messages": _review_messages,
                             "temperature": 0.1,
                             "max_tokens": 800,
@@ -5560,7 +5573,7 @@ class MultiAgentLoop(AgentLoop):
 
                     try:
                         _fix_payload = {
-                            "model": "gpt54_mini/gpt54_mini-m2.5",
+                            "model": "openai/gpt-5.4-mini",
                             "messages": _fix_messages,
                             "temperature": 0.3,
                             "max_tokens": 16000,
@@ -5604,7 +5617,7 @@ class MultiAgentLoop(AgentLoop):
                         from orchestrator_v2 import get_model_for_agent
                         self.model = get_model_for_agent('devops', _current_orion_mode)
                     except Exception:
-                        pass
+                        logger.debug("Silent exception in agent_loop", exc_info=True)
 
                     _deploy_result = self._execute_tool('file_write', {
                         'host': _qc_host,
