@@ -22,6 +22,7 @@ import time
 import re
 import sqlite3
 from solution_cache import SolutionCache, SolutionExtractor  # ПАТЧ 9
+from context_compression import compress_context, estimate_tokens, truncate_tool_result  # Phase 5
 import traceback
 import logging
 import hashlib
@@ -35,6 +36,12 @@ from langgraph.checkpoint.sqlite import SqliteSaver
 
 from ssh_executor import SSHExecutor, ssh_pool
 from browser_agent import BrowserAgent
+# Phase 3: Visual Browser with Manus-style element tagging
+try:
+    from visual_browser import VisualBrowser
+    _visual_browser_available = True
+except ImportError:
+    _visual_browser_available = False
 from retry_policy import (
     retry, retry_generator, retry_http_call,
     get_breaker, CircuitBreakerOpen,
@@ -1796,6 +1803,76 @@ class AgentLoop:
                 except Exception as s3_err:
                     logger.exception(f"Sprint3 tool {tool_name} failed")
                     return {"success": False, "error": f"Sprint3 tool error: {s3_err}"}
+            # ══════════════════════════════════════════════════════
+            # ══════════════════════════════════════════════════════
+            # PHASE 7: Parallel Map dispatch
+            # ══════════════════════════════════════════════════════
+            elif tool_name == "parallel_map":
+                try:
+                    from parallel_map import parallel_map as do_parallel_map
+                    return do_parallel_map(
+                        prompt_template=args.get("prompt_template", ""),
+                        inputs=args.get("inputs", []),
+                        output_schema=args.get("output_schema", []),
+                        call_ai_fn=self._call_ai_simple,
+                        max_workers=args.get("max_workers", 5)
+                    )
+                except Exception as pm_err:
+                    logger.exception(f"parallel_map failed")
+                    return {"success": False, "error": f"Parallel map error: {pm_err}"}
+            # PHASE 3: Visual Browser dispatch (Manus-style)
+            # ══════════════════════════════════════════════════════
+            elif tool_name == "browser_view":
+                if self._visual_browser:
+                    return self._visual_browser.view()
+                return {"success": False, "error": "Visual browser not available"}
+            elif tool_name == "browser_input":
+                if self._visual_browser:
+                    return self._visual_browser.input_text(
+                        text=args.get("text", ""),
+                        index=args.get("index"),
+                        coordinate_x=args.get("coordinate_x"),
+                        coordinate_y=args.get("coordinate_y"),
+                        press_enter=args.get("press_enter", False)
+                    )
+                return {"success": False, "error": "Visual browser not available"}
+            elif tool_name == "browser_find_keyword":
+                if self._visual_browser:
+                    return self._visual_browser.find_keyword(args.get("keyword", ""))
+                return {"success": False, "error": "Visual browser not available"}
+            # ══════════════════════════════════════════════════════
+            # PHASE 4: Ephemeral Sandbox dispatch
+            # ══════════════════════════════════════════════════════
+            elif tool_name in ("sandbox_create", "sandbox_write_file",
+                               "sandbox_read_file", "sandbox_destroy"):
+                try:
+                    from ephemeral_sandbox import (
+                        tool_sandbox_create, tool_sandbox_exec,
+                        tool_sandbox_write_file, tool_sandbox_read_file,
+                        tool_sandbox_destroy
+                    )
+                    if tool_name == "sandbox_create":
+                        return tool_sandbox_create(
+                            task_id=args.get("task_id"),
+                            chat_id=args.get("chat_id"),
+                            image=args.get("image", "python:3.11-slim")
+                        )
+                    elif tool_name == "sandbox_write_file":
+                        return tool_sandbox_write_file(
+                            args.get("sandbox_id", ""),
+                            args.get("path", ""),
+                            args.get("content", "")
+                        )
+                    elif tool_name == "sandbox_read_file":
+                        return tool_sandbox_read_file(
+                            args.get("sandbox_id", ""),
+                            args.get("path", "")
+                        )
+                    elif tool_name == "sandbox_destroy":
+                        return tool_sandbox_destroy(args.get("sandbox_id", ""))
+                except Exception as eph_err:
+                    logger.exception(f"Ephemeral sandbox tool {tool_name} failed")
+                    return {"success": False, "error": f"Ephemeral sandbox error: {eph_err}"}
             else:
                 return {"success": False, "error": f"Unknown tool: {tool_name}"}
 
@@ -4033,6 +4110,14 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);
 
             logger.info(f"[DEBUG-IT] iteration={iteration}, credentials injected, about to call AI stream")
             try:
+                # Phase 5: Context compression before AI call
+                try:
+                    _pre_compress_len = len(messages)
+                    messages = compress_context(messages, max_tokens=100000, call_ai_fn=self._call_ai_simple)
+                    if len(messages) < _pre_compress_len:
+                        logger.info(f"[PHASE5] Compressed context: {_pre_compress_len} -> {len(messages)} messages")
+                except Exception as _comp_err:
+                    logger.debug(f"[PHASE5] Compression error: {_comp_err}")
                 logger.info(f"[DEBUG] Calling AI stream, iteration {iteration}, messages: {len(messages)}")
                 _iter_text_buffer = ""  # accumulate text for thinking_text
                 # ═══ BLOCK 4: ToolSandbox — filter tools by mode/autonomy ═══

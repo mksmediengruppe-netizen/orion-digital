@@ -1850,6 +1850,14 @@ try:
 except ImportError:
     pass
 
+# Phase 7: Parallel Map tool
+try:
+    from parallel_map import PARALLEL_MAP_TOOL
+    if PARALLEL_MAP_TOOL['function']['name'] not in {t['function']['name'] for t in TOOLS_SCHEMA}:
+        TOOLS_SCHEMA.append(PARALLEL_MAP_TOOL)
+except ImportError:
+    pass
+
 # ══════════════════════════════════════════════════════════════════════════
 # SURGICAL FILE EDIT TOOLS — Diff-based find/replace editing
 # ══════════════════════════════════════════════════════════════════════════
