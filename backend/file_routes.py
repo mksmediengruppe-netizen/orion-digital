@@ -455,3 +455,26 @@ def export_chat(chat_id):
 
 
 # ── Health Check ───────────────────────────────────────────────
+
+# ── CDN Public URL ─────────────────────────────────────────────────────────
+@file_bp.route("/api/files/<file_id>/public-url", methods=["GET"])
+def get_public_url(file_id):
+    """Get public CDN URL for a generated file (no auth required)."""
+    filepath, filename = get_file_path(file_id)
+    if not filepath or not os.path.exists(filepath):
+        return jsonify({"error": "File not found"}), 404
+    # Build CDN URL using nginx /files/ location
+    host = request.headers.get("X-Forwarded-Host") or request.host
+    proto = request.headers.get("X-Forwarded-Proto", "https")
+    if "localhost" in host or "127.0.0.1" in host:
+        proto = "http"
+    # Use actual filename on disk (includes file_id prefix)
+    disk_filename = os.path.basename(filepath)
+    public_url = f"{proto}://{host}/files/{disk_filename}"
+    return jsonify({
+        "file_id": file_id,
+        "filename": disk_filename,
+        "original_name": filename,
+        "public_url": public_url,
+        "cdn_url": public_url
+    })

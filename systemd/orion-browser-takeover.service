@@ -1,0 +1,14 @@
+[Unit]
+Description=ORION Browser Takeover (noVNC)
+After=network.target
+
+[Service]
+Type=forking
+ExecStart=/usr/local/bin/orion-browser-takeover.sh
+Restart=on-failure
+RestartSec=10
+User=root
+Environment=DISPLAY=:99
+
+[Install]
+WantedBy=multi-user.target

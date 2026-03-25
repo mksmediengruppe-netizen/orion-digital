@@ -1755,3 +1755,58 @@ TOOLS_SCHEMA = [
         }
     }
 ]
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# DEDUPLICATION: Remove duplicate tool names (BUG FIX)
+# ══════════════════════════════════════════════════════════════════════════
+_seen_tool_names = set()
+_deduped = []
+for _tool in TOOLS_SCHEMA:
+    _name = _tool.get("function", {}).get("name", "")
+    if _name not in _seen_tool_names:
+        _seen_tool_names.add(_name)
+        _deduped.append(_tool)
+TOOLS_SCHEMA = _deduped
+del _seen_tool_names, _deduped, _tool, _name
+
+# ══════════════════════════════════════════════════════════════════════════
+# MANUS TOOLS — 10 новых инструментов (Спринт 1 + 2)
+# Добавлены: web_scrape, pdf_read, excel_create, slides_create,
+#            transcribe_audio, git_execute, http_request,
+#            parallel_tasks, research_deep, long_memory_search
+# ══════════════════════════════════════════════════════════════════════════
+try:
+    from manus_tools_schema import MANUS_TOOLS_SCHEMA
+    TOOLS_SCHEMA.extend(MANUS_TOOLS_SCHEMA)
+except ImportError:
+    pass
+
+# ══════════════════════════════════════════════════════════════════════════
+# SPRINT 2 TOOLS — 10 Advanced Manus capabilities
+# dev_server_start, dev_server_stop, checkpoint_create, checkpoint_restore,
+# web_search_deep, code_run_file, data_analyze, image_process,
+# deploy_static, task_memory_save
+# ══════════════════════════════════════════════════════════════════════════
+try:
+    from sprint2_tools_schema import SPRINT2_TOOLS_SCHEMA
+    _s2_existing = {t["function"]["name"] for t in TOOLS_SCHEMA}
+    for _s2t in SPRINT2_TOOLS_SCHEMA:
+        if _s2t["function"]["name"] not in _s2_existing:
+            TOOLS_SCHEMA.append(_s2t)
+except ImportError:
+    pass
+
+# ══════════════════════════════════════════════════════════════════════════
+# SPRINT 3 TOOLS — Docker Sandbox & Runtime Logs
+# sandbox_exec, sandbox_create_session, sandbox_list_sessions,
+# sandbox_destroy_session, runtime_logs, docker_run_image
+# ══════════════════════════════════════════════════════════════════════════
+try:
+    from sprint3_sandbox_schema import SPRINT3_TOOLS_SCHEMA
+    _s3_existing = {t["function"]["name"] for t in TOOLS_SCHEMA}
+    for _s3t in SPRINT3_TOOLS_SCHEMA:
+        if _s3t["function"]["name"] not in _s3_existing:
+            TOOLS_SCHEMA.append(_s3t)
+except ImportError:
+    pass
