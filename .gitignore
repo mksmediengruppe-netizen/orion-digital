@@ -30,3 +30,4 @@ frontend-new/client/node_modules/
 .cache/
 backend/data/*.db-shm
 backend/data/*.db-wal
+.github/workflows/
