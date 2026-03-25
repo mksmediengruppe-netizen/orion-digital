@@ -47,6 +47,8 @@ export function RightPanel({ activeStep, onStepSelect, defaultTab = "live", step
   const [activeTab, setActiveTab] = useState(defaultTab);
   const [selectedArtifact, setSelectedArtifact] = useState<Artifact | null>(null);
   const [browserOfflineReason, setBrowserOfflineReason] = useState<BrowserOfflineReason>("none");
+  const [isBrowserTakeover, setIsBrowserTakeover] = useState(false);
+  const [novncReady, setNovncReady] = useState(false);
 
   // When a pending artifact arrives from a chat click, open it in the viewer
   useEffect(() => {
@@ -107,23 +109,70 @@ export function RightPanel({ activeStep, onStepSelect, defaultTab = "live", step
             {activeTab === "live"      && <LiveTab plan={plan} completedSteps={completedSteps} activeStepTitle={activeStepTitle} totalSteps={steps?.length} />}
             {activeTab === "browser"   && (
               <div className="h-full flex flex-col">
-                {/* Browser offline demo controls */}
-                {browserOfflineReason === "none" && (
-                  <div className="shrink-0 border-b border-gray-100 dark:border-[#2a2d3a] bg-gray-50 dark:bg-[#1a1d2e] px-2 py-1 flex items-center gap-1 overflow-x-auto">
-                    <span className="text-[10px] text-gray-400 shrink-0 mr-1">Demo:</span>
-                    <button onClick={() => setBrowserOfflineReason("sandbox_unavailable")} className="px-2 py-0.5 rounded text-[10px] bg-red-50 text-red-600 hover:bg-red-100 transition-colors whitespace-nowrap">Sandbox offline</button>
-                    <button onClick={() => setBrowserOfflineReason("permission_denied")} className="px-2 py-0.5 rounded text-[10px] bg-indigo-50 text-indigo-600 hover:bg-indigo-100 transition-colors whitespace-nowrap">Permission denied</button>
-                    <button onClick={() => setBrowserOfflineReason("reconnecting")} className="px-2 py-0.5 rounded text-[10px] bg-amber-50 text-amber-600 hover:bg-amber-100 transition-colors whitespace-nowrap">Reconnecting</button>
+                {/* Takeover banner */}
+                {isBrowserTakeover ? (
+                  <div className="shrink-0 border-b border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950 px-3 py-2 flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse shrink-0" />
+                    <Monitor size={12} className="text-amber-600 shrink-0" />
+                    <span className="text-[11px] font-semibold text-amber-800 dark:text-amber-300 flex-1">Режим управления браузером</span>
+                    <button
+                      onClick={() => { setIsBrowserTakeover(false); setNovncReady(false); }}
+                      className="flex items-center gap-1 px-2 py-1 rounded bg-amber-200 dark:bg-amber-800 text-amber-800 dark:text-amber-200 text-[10px] font-medium hover:bg-amber-300 transition-colors"
+                    >
+                      <X size={9} />
+                      Вернуть агенту
+                    </button>
                   </div>
+                ) : (
+                  <>
+                    {/* Takeover button bar */}
+                    <div className="shrink-0 border-b border-gray-100 dark:border-[#2a2d3a] bg-gray-50 dark:bg-[#1a1d2e] px-2 py-1 flex items-center gap-1 overflow-x-auto">
+                      <button
+                        onClick={() => { setIsBrowserTakeover(true); setNovncReady(false); }}
+                        className="flex items-center gap-1 px-2.5 py-1 rounded bg-indigo-600 text-white text-[10px] font-medium hover:bg-indigo-700 transition-colors shrink-0"
+                      >
+                        <Monitor size={10} />
+                        Управлять браузером
+                      </button>
+                      {browserOfflineReason === "none" && (
+                        <>
+                          <span className="text-[10px] text-gray-300 dark:text-gray-600 mx-1">|</span>
+                          <span className="text-[10px] text-gray-400 shrink-0">Demo:</span>
+                          <button onClick={() => setBrowserOfflineReason("sandbox_unavailable")} className="px-2 py-0.5 rounded text-[10px] bg-red-50 text-red-600 hover:bg-red-100 transition-colors whitespace-nowrap">Sandbox offline</button>
+                          <button onClick={() => setBrowserOfflineReason("permission_denied")} className="px-2 py-0.5 rounded text-[10px] bg-indigo-50 text-indigo-600 hover:bg-indigo-100 transition-colors whitespace-nowrap">Permission denied</button>
+                          <button onClick={() => setBrowserOfflineReason("reconnecting")} className="px-2 py-0.5 rounded text-[10px] bg-amber-50 text-amber-600 hover:bg-amber-100 transition-colors whitespace-nowrap">Reconnecting</button>
+                        </>
+                      )}
+                      {browserOfflineReason !== "none" && (
+                        <button onClick={() => setBrowserOfflineReason("none")} className="ml-auto px-2 py-0.5 rounded text-[10px] bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-300 transition-colors">Сбросить</button>
+                      )}
+                    </div>
+                  </>
                 )}
-                {browserOfflineReason !== "none" && (
-                  <div className="shrink-0 border-b border-gray-100 dark:border-[#2a2d3a] bg-gray-50 dark:bg-[#1a1d2e] px-2 py-1 flex items-center gap-2">
-                    <span className="text-[10px] text-gray-400">Offline state demo active</span>
-                    <button onClick={() => setBrowserOfflineReason("none")} className="ml-auto px-2 py-0.5 rounded text-[10px] bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-300 transition-colors">Сбросить</button>
-                  </div>
-                )}
-                <div className="flex-1 overflow-hidden">
-                  <AgentBrowser isRunning={isRunning} offlineReason={browserOfflineReason} onRetry={() => setBrowserOfflineReason("none")} />
+                {/* Content: noVNC iframe or AgentBrowser */}
+                <div className="flex-1 overflow-hidden relative">
+                  {isBrowserTakeover ? (
+                    <>
+                      {!novncReady && (
+                        <div className="absolute inset-0 flex items-center justify-center bg-gray-900 z-10">
+                          <div className="flex flex-col items-center gap-3 text-center">
+                            <Loader2 size={24} className="text-indigo-400 animate-spin" />
+                            <span className="text-sm text-gray-300">Подключение к браузеру...</span>
+                            <span className="text-xs text-gray-500">noVNC — интерактивное управление</span>
+                          </div>
+                        </div>
+                      )}
+                      <iframe
+                        src="/novnc/vnc.html?autoconnect=1&reconnect=1&resize=scale&show_dot=1&path=novnc/websockify"
+                        className="w-full h-full border-0"
+                        allow="clipboard-read; clipboard-write"
+                        onLoad={() => setNovncReady(true)}
+                        title="Browser Takeover — noVNC"
+                      />
+                    </>
+                  ) : (
+                    <AgentBrowser isRunning={isRunning} offlineReason={browserOfflineReason} onRetry={() => setBrowserOfflineReason("none")} />
+                  )}
                 </div>
               </div>
             )}
@@ -425,6 +474,8 @@ const BROWSER_PAGES = [
 function BrowserTab() {
   const [pageIndex, setPageIndex] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
+  const [isTakeover, setIsTakeover] = useState(false);
+  const [novncReady, setNovncReady] = useState(false);
   const page = BROWSER_PAGES[pageIndex];
 
   const navigate = (idx: number) => {
@@ -435,59 +486,119 @@ function BrowserTab() {
     }, 600);
   };
 
+  const handleTakeover = () => {
+    setIsTakeover(true);
+    setNovncReady(false);
+  };
+
+  const handleReturnToAgent = () => {
+    setIsTakeover(false);
+    setNovncReady(false);
+  };
+
+  // noVNC URL — proxied through nginx /novnc/
+  const novncUrl = `/novnc/vnc.html?autoconnect=1&reconnect=1&resize=scale&show_dot=1&path=novnc/websockify`;
+
   return (
     <div className="flex flex-col h-full">
-      {/* Browser chrome */}
-      <div className="shrink-0 border-b border-gray-100 bg-gray-50 px-3 py-2 space-y-2">
-        {/* Navigation bar */}
-        <div className="flex items-center gap-1.5">
+      {/* Takeover banner */}
+      {isTakeover && (
+        <div className="shrink-0 border-b border-amber-200 bg-amber-50 px-3 py-2 flex items-center gap-2">
+          <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse shrink-0" />
+          <Monitor size={12} className="text-amber-600 shrink-0" />
+          <span className="text-[11px] font-semibold text-amber-800 flex-1">Режим управления браузером</span>
           <button
-            onClick={() => pageIndex > 0 && navigate(pageIndex - 1)}
-            disabled={pageIndex === 0}
-            className="p-1 rounded hover:bg-gray-200 disabled:opacity-30 transition-colors"
+            onClick={handleReturnToAgent}
+            className="flex items-center gap-1 px-2 py-1 rounded bg-amber-200 text-amber-800 text-[10px] font-medium hover:bg-amber-300 transition-colors"
           >
-            <ArrowLeft size={12} className="text-gray-600" />
+            <X size={9} />
+            Вернуть агенту
           </button>
-          <button
-            onClick={() => pageIndex < BROWSER_PAGES.length - 1 && navigate(pageIndex + 1)}
-            disabled={pageIndex === BROWSER_PAGES.length - 1}
-            className="p-1 rounded hover:bg-gray-200 disabled:opacity-30 transition-colors"
-          >
-            <ArrowRight size={12} className="text-gray-600" />
-          </button>
-          <button
-            onClick={() => navigate(pageIndex)}
-            className="p-1 rounded hover:bg-gray-200 transition-colors"
-          >
-            <RefreshCw size={12} className={cn("text-gray-600", isLoading && "animate-spin")} />
-          </button>
-          {/* URL bar */}
-          <div className="flex-1 flex items-center gap-1.5 bg-white border border-gray-200 rounded-md px-2 py-1">
-            <Lock size={10} className="text-green-500 shrink-0" />
-            <span className="text-[11px] text-gray-600 font-mono truncate flex-1">{page.url}</span>
+        </div>
+      )}
+
+      {/* Browser chrome (only in normal mode) */}
+      {!isTakeover && (
+        <div className="shrink-0 border-b border-gray-100 bg-gray-50 px-3 py-2 space-y-2">
+          {/* Navigation bar */}
+          <div className="flex items-center gap-1.5">
+            <button
+              onClick={() => pageIndex > 0 && navigate(pageIndex - 1)}
+              disabled={pageIndex === 0}
+              className="p-1 rounded hover:bg-gray-200 disabled:opacity-30 transition-colors"
+            >
+              <ArrowLeft size={12} className="text-gray-600" />
+            </button>
+            <button
+              onClick={() => pageIndex < BROWSER_PAGES.length - 1 && navigate(pageIndex + 1)}
+              disabled={pageIndex === BROWSER_PAGES.length - 1}
+              className="p-1 rounded hover:bg-gray-200 disabled:opacity-30 transition-colors"
+            >
+              <ArrowRight size={12} className="text-gray-600" />
+            </button>
+            <button
+              onClick={() => navigate(pageIndex)}
+              className="p-1 rounded hover:bg-gray-200 transition-colors"
+            >
+              <RefreshCw size={12} className={cn("text-gray-600", isLoading && "animate-spin")} />
+            </button>
+            {/* URL bar */}
+            <div className="flex-1 flex items-center gap-1.5 bg-white border border-gray-200 rounded-md px-2 py-1">
+              <Lock size={10} className="text-green-500 shrink-0" />
+              <span className="text-[11px] text-gray-600 font-mono truncate flex-1">{page.url}</span>
+            </div>
+            {/* Takeover button */}
+            <button
+              onClick={handleTakeover}
+              className="flex items-center gap-1 px-2 py-1 rounded bg-indigo-600 text-white text-[10px] font-medium hover:bg-indigo-700 transition-colors shrink-0"
+              title="Перехватить управление браузером"
+            >
+              <Monitor size={10} />
+              Управлять
+            </button>
+          </div>
+          {/* Page tabs */}
+          <div className="flex items-center gap-1 overflow-x-auto">
+            {BROWSER_PAGES.map((p, i) => (
+              <button
+                key={i}
+                onClick={() => navigate(i)}
+                className={cn(
+                  "flex items-center gap-1.5 px-2 py-1 rounded text-[10px] whitespace-nowrap transition-colors shrink-0",
+                  i === pageIndex ? "bg-white border border-gray-200 text-gray-700 shadow-sm" : "text-gray-500 hover:bg-gray-100"
+                )}
+              >
+                <Globe size={9} />
+                <span className="max-w-[80px] truncate">{p.title}</span>
+              </button>
+            ))}
           </div>
         </div>
-        {/* Page tabs */}
-        <div className="flex items-center gap-1 overflow-x-auto">
-          {BROWSER_PAGES.map((p, i) => (
-            <button
-              key={i}
-              onClick={() => navigate(i)}
-              className={cn(
-                "flex items-center gap-1.5 px-2 py-1 rounded text-[10px] whitespace-nowrap transition-colors shrink-0",
-                i === pageIndex ? "bg-white border border-gray-200 text-gray-700 shadow-sm" : "text-gray-500 hover:bg-gray-100"
-              )}
-            >
-              <Globe size={9} />
-              <span className="max-w-[80px] truncate">{p.title}</span>
-            </button>
-          ))}
-        </div>
-      </div>
+      )}
 
       {/* Page content */}
-      <div className="flex-1 overflow-auto bg-white relative">
-        {isLoading ? (
+      <div className="flex-1 overflow-hidden bg-white relative">
+        {isTakeover ? (
+          /* noVNC iframe — interactive browser control */
+          <div className="w-full h-full relative">
+            {!novncReady && (
+              <div className="absolute inset-0 flex items-center justify-center bg-gray-900 z-10">
+                <div className="flex flex-col items-center gap-3 text-center">
+                  <Loader2 size={24} className="text-indigo-400 animate-spin" />
+                  <span className="text-sm text-gray-300">Подключение к браузеру...</span>
+                  <span className="text-xs text-gray-500">noVNC — интерактивное управление</span>
+                </div>
+              </div>
+            )}
+            <iframe
+              src={novncUrl}
+              className="w-full h-full border-0"
+              allow="clipboard-read; clipboard-write"
+              onLoad={() => setNovncReady(true)}
+              title="Browser Takeover — noVNC"
+            />
+          </div>
+        ) : isLoading ? (
           <div className="flex items-center justify-center h-full">
             <div className="flex flex-col items-center gap-3">
               <Loader2 size={20} className="text-indigo-500 animate-spin" />
@@ -503,7 +614,7 @@ function BrowserTab() {
             </div>
           </div>
         ) : page.html ? (
-          <div className="p-3">
+          <div className="p-3 h-full overflow-auto">
             <div className="text-[10px] text-gray-400 mb-2 flex items-center gap-1.5">
               <Monitor size={10} />
               Предпросмотр страницы (симуляция)
@@ -532,13 +643,23 @@ function BrowserTab() {
 
       {/* Status bar */}
       <div className="shrink-0 border-t border-gray-100 bg-gray-50 px-3 py-1.5 flex items-center gap-3">
-        <span className={cn(
-          "text-[10px] font-medium",
-          isLoading ? "text-amber-600" : page.status === "loaded" ? "text-green-600" : "text-gray-500"
-        )}>
-          {isLoading ? "Загрузка..." : page.status === "loaded" ? "Готово" : "Ожидание..."}
-        </span>
-        <span className="text-[10px] text-gray-400 ml-auto">Страница {pageIndex + 1} из {BROWSER_PAGES.length}</span>
+        {isTakeover ? (
+          <>
+            <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
+            <span className="text-[10px] font-medium text-green-600">Интерактивное управление</span>
+            <span className="text-[10px] text-gray-400 ml-auto">noVNC · порт 6080</span>
+          </>
+        ) : (
+          <>
+            <span className={cn(
+              "text-[10px] font-medium",
+              isLoading ? "text-amber-600" : page.status === "loaded" ? "text-green-600" : "text-gray-500"
+            )}>
+              {isLoading ? "Загрузка..." : page.status === "loaded" ? "Готово" : "Ожидание..."}
+            </span>
+            <span className="text-[10px] text-gray-400 ml-auto">Страница {pageIndex + 1} из {BROWSER_PAGES.length}</span>
+          </>
+        )}
       </div>
     </div>
   );

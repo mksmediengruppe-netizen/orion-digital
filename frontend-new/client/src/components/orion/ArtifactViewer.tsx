@@ -8,7 +8,7 @@ import {
   Eye, Code2, FileText, Download, Copy, Check, RefreshCw,
   Maximize2, Minimize2, X, Pencil, Save, RotateCcw, ChevronRight,
   ChevronDown, Play, ExternalLink, Split, Globe, FileCode,
-  Image as ImageIcon, File, Diff
+  Image as ImageIcon, File, Diff, Link, Link2
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
@@ -19,6 +19,7 @@ export type ArtifactType = "html" | "code" | "markdown" | "image" | "diff";
 
 export interface Artifact {
   id: string;
+  fileId?: string; // backend file ID for CDN/download
   title: string;
   type: ArtifactType;
   language?: string;
@@ -318,10 +319,36 @@ export function ArtifactViewer({ artifact, onClose, className }: ArtifactViewerP
   const [editedContent, setEditedContent] = useState(artifact.content);
   const [isEditing, setIsEditing] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [linkCopied, setLinkCopied] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const iframeRef = useRef<HTMLIFrameElement>(null);
 
   const isDirty = editedContent !== artifact.content;
+
+  const handlePublicLink = async () => {
+    if (artifact.fileId) {
+      try {
+        const res = await fetch(`/api/files/${artifact.fileId}/public-url`);
+        const data = await res.json();
+        if (data.public_url) {
+          await navigator.clipboard.writeText(data.public_url);
+          setLinkCopied(true);
+          setTimeout(() => setLinkCopied(false), 2000);
+          toast.success(`Публичная ссылка скопирована: ${data.public_url}`);
+          return;
+        }
+      } catch (e) {
+        // fallback to download URL
+      }
+    }
+    // Fallback: create blob URL for content
+    const blob = new Blob([editedContent], { type: "text/plain" });
+    const url = URL.createObjectURL(blob);
+    await navigator.clipboard.writeText(url);
+    setLinkCopied(true);
+    setTimeout(() => setLinkCopied(false), 2000);
+    toast.success("Ссылка скопирована");
+  };
 
   const handleCopy = () => {
     navigator.clipboard.writeText(editedContent);
@@ -477,9 +504,16 @@ export function ArtifactViewer({ artifact, onClose, className }: ArtifactViewerP
           <button
             onClick={handleDownload}
             className="p-1 rounded hover:bg-gray-200 dark:hover:bg-[#2a2d3a] transition-colors"
-            title="Скачать"
+            title="Скачать файл"
           >
             <Download size={11} className="text-gray-500" />
+          </button>
+          <button
+            onClick={handlePublicLink}
+            className="p-1 rounded hover:bg-gray-200 dark:hover:bg-[#2a2d3a] transition-colors"
+            title="Публичная ссылка (CDN)"
+          >
+            {linkCopied ? <Check size={11} className="text-green-500" /> : <Link size={11} className="text-gray-500" />}
           </button>
           <button
             onClick={() => setIsFullscreen(f => !f)}
@@ -613,6 +647,19 @@ export function ArtifactViewer({ artifact, onClose, className }: ArtifactViewerP
           <span className="text-[10px] text-gray-400">{artifact.language}</span>
         )}
         <span className="text-[10px] text-gray-400 ml-auto">{artifact.createdAt}</span>
+        {artifact.fileId && (
+          <a
+            href={`/api/files/${artifact.fileId}/public-url`}
+            onClick={async (e) => {
+              e.preventDefault();
+              await handlePublicLink();
+            }}
+            className="flex items-center gap-1 text-[10px] text-indigo-600 hover:text-indigo-800 transition-colors"
+          >
+            <Link2 size={9} />
+            CDN
+          </a>
+        )}
         {artifact.type === "html" && (
           <button
             onClick={() => {

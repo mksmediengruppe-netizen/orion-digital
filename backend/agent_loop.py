@@ -1743,6 +1743,46 @@ class AgentLoop:
                 result = restore_backup(ssh_creds, backup_id)
                 return {"success": True, "restore_result": result}
 
+            # ══════════════════════════════════════════════════════
+            # MANUS TOOLS — Sprint 1+2 (10 new tools)
+            # ══════════════════════════════════════════════════════
+            elif tool_name in ("web_scrape", "pdf_read", "excel_create",
+                               "slides_create", "transcribe_audio",
+                               "git_execute", "http_request",
+                               "parallel_tasks", "research_deep",
+                               "long_memory_search"):
+                try:
+                    from manus_tools import dispatch_manus_tool
+                    return dispatch_manus_tool(tool_name, args)
+                except Exception as manus_err:
+                    logger.exception(f"Manus tool {tool_name} failed")
+                    return {"success": False, "error": f"Manus tool error: {manus_err}"}
+            # ══════════════════════════════════════════════════════
+            # SPRINT 2 TOOLS — Advanced Manus capabilities
+            # ══════════════════════════════════════════════════════
+            elif tool_name in ("dev_server_start", "dev_server_stop",
+                               "checkpoint_create", "checkpoint_restore",
+                               "web_search_deep", "code_run_file",
+                               "data_analyze", "image_process",
+                               "deploy_static", "task_memory_save"):
+                try:
+                    from sprint2_tools import dispatch_sprint2_tool
+                    return dispatch_sprint2_tool(tool_name, args)
+                except Exception as s2_err:
+                    logger.exception(f"Sprint2 tool {tool_name} failed")
+                    return {"success": False, "error": f"Sprint2 tool error: {s2_err}"}
+            # ══════════════════════════════════════════════════════
+            # SPRINT 3 TOOLS — Docker Sandbox & Runtime Logs
+            # ══════════════════════════════════════════════════════
+            elif tool_name in ("sandbox_exec", "sandbox_create_session",
+                               "sandbox_list_sessions", "sandbox_destroy_session",
+                               "runtime_logs", "docker_run_image"):
+                try:
+                    from sprint3_sandbox import dispatch_sprint3_tool
+                    return dispatch_sprint3_tool(tool_name, args)
+                except Exception as s3_err:
+                    logger.exception(f"Sprint3 tool {tool_name} failed")
+                    return {"success": False, "error": f"Sprint3 tool error: {s3_err}"}
             else:
                 return {"success": False, "error": f"Unknown tool: {tool_name}"}
 
