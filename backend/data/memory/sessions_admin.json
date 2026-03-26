@@ -1,0 +1,34 @@
+{
+  "b7c4447c": {
+    "chat_id": "b7c4447c",
+    "project_id": "b7c4447c",
+    "user_id": "admin",
+    "task": "Какой сегодня день недели? Используй ssh_execute для команды 'date' и скажи результат.",
+    "status": "active",
+    "decisions": [],
+    "files_modified": [],
+    "commands_executed": [],
+    "errors": [],
+    "key_facts": [],
+    "summary": "",
+    "started_at": "2026-03-26T02:11:02.657848+00:00",
+    "updated_at": "2026-03-26T02:11:02.657883+00:00",
+    "resumed_count": 0
+  },
+  "61708715": {
+    "chat_id": "61708715",
+    "project_id": "61708715",
+    "user_id": "admin",
+    "task": "Выполни команду: echo 'ORION_TEST_OK' через ssh_execute и покажи результат.",
+    "status": "active",
+    "decisions": [],
+    "files_modified": [],
+    "commands_executed": [],
+    "errors": [],
+    "key_facts": [],
+    "summary": "",
+    "started_at": "2026-03-26T02:11:07.977717+00:00",
+    "updated_at": "2026-03-26T02:11:07.977733+00:00",
+    "resumed_count": 0
+  }
+}

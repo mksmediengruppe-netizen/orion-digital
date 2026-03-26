@@ -1325,7 +1325,7 @@ def send_message(chat_id):
     if has_url and mode == "chat":
         is_browser_task = True
     # MANUS-UPGRADE: ALL requests use AgentLoop with tools (no plain LLM chat)
-    is_lite_agent = not (is_agent_task and has_ssh)  # Only SSH deploy uses full agent; everything else uses lite_agent with tools
+    is_lite_agent = True  # MANUS-UPGRADE: lite_agent handles all chat tasks with tools (full agent only for deploy mode)
     logging.info(f'[MANUS-UPGRADE] mode={mode}, is_lite_agent={is_lite_agent}, is_agent_task={is_agent_task}, has_ssh={has_ssh}')
 
     # Build chat history for context

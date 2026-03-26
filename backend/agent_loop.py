@@ -3482,7 +3482,11 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);
 
         # ═══ BLOCK 3: Create or resume Task Charter ═══
         _b3_chat_id = getattr(self, '_chat_id', 'default') or 'default'
-        _b3_charter = self._charter_store.get_by_chat(_b3_chat_id)
+        try:
+            _b3_charter = self._charter_store.get_by_chat(_b3_chat_id)
+        except Exception as _b3_err:
+            logger.warning(f"task_charter get_by_chat failed (non-fatal): {_b3_err}")
+            _b3_charter = None
         if not _b3_charter:
             _b3_task_id = f"{_b3_chat_id}_{int(time.time())}"
             _b3_max_cost = 5.0
@@ -3491,13 +3495,17 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);
                 _b3_max_cost = _b3_cost_info.get('max_cost', 5.0)
             except Exception:
                 logger.debug("Silent exception in agent_loop", exc_info=True)
-            _b3_charter = self._charter_store.create(
-                task_id=_b3_task_id,
-                chat_id=_b3_chat_id,
-                objective=user_message[:500],
-                constraints=[f"Бюджет: ${_b3_max_cost}"],
-            )
-            self._current_task_id = _b3_task_id
+            try:
+                _b3_charter = self._charter_store.create(
+                    task_id=_b3_task_id,
+                    chat_id=_b3_chat_id,
+                    objective=user_message[:500],
+                    constraints=[f"Бюджет: ${_b3_max_cost}"],
+                )
+                self._current_task_id = _b3_task_id
+            except Exception as _b3_create_err:
+                logger.warning(f"task_charter create failed (non-fatal): {_b3_create_err}")
+                _b3_charter = None
             logger.info(f"[BLOCK3] Charter created: {_b3_task_id}")
         else:
             self._current_task_id = _b3_charter['task_id']
@@ -4474,15 +4482,22 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);
                         "tool_call_id": tool_id,
                         "content": json.dumps({k: ("[screenshot sent to user]" if k == "screenshot" else v) for k, v in result.items()}, ensure_ascii=False)
                     })
-                    # ── BUG-5 FIX: Сохранить память при task_complete ──
+                    # ── BUG-5 FIX: Сохранить память при task_complete (background) ──
                     if self.memory:
                         try:
-                            self.memory.after_chat(
-                                user_message=user_message,
-                                full_response=full_response_text or summary,
-                                chat_id=getattr(self, "_chat_id", None),
-                                success=True
-                            )
+                            import threading as _threading
+                            _mem_obj = self.memory
+                            _mem_msg = user_message
+                            _mem_resp = full_response_text or summary
+                            _mem_cid = getattr(self, "_chat_id", None)
+                            _t = _threading.Thread(
+                                target=lambda: _mem_obj.after_chat(
+                                    user_message=_mem_msg,
+                                    full_response=_mem_resp,
+                                    chat_id=_mem_cid,
+                                    success=True
+                                ), daemon=True)
+                            _t.start()
                         except Exception as _mem_tc_err:
                             logger.warning(f"Memory after_chat (task_complete) failed: {_mem_tc_err}")
                     # ── PATCH 3: Clear checkpoint on successful completion ──
@@ -4896,15 +4911,22 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);
             yield self._sse({"type": "stopped", "text": "Агент остановлен пользователем"})
             return
 
-        # ── BUG-5 FIX: Сохранить диалог в долгосрочную память ───────────────
+        # ── BUG-5 FIX: Сохранить диалог в долгосрочную память (background) ──
         if self.memory:
             try:
-                self.memory.after_chat(
-                    user_message=user_message,
-                    full_response=full_response_text,
-                    chat_id=getattr(self, "_chat_id", None),
-                    success=True
-                )
+                import threading as _threading
+                _mem_obj2 = self.memory
+                _mem_msg2 = user_message
+                _mem_resp2 = full_response_text
+                _mem_cid2 = getattr(self, "_chat_id", None)
+                _t2 = _threading.Thread(
+                    target=lambda: _mem_obj2.after_chat(
+                        user_message=_mem_msg2,
+                        full_response=_mem_resp2,
+                        chat_id=_mem_cid2,
+                        success=True
+                    ), daemon=True)
+                _t2.start()
             except Exception as _mem_save_err:
                 logger.warning(f"Memory save failed: {_mem_save_err}")
         # ─────────────────────────────────────────────────────────────────────

@@ -4,7 +4,7 @@
       "id": "admin",
       "email": "ym@mksmedia.ru",
       "password_hash": "240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9",
-      "name": "\u0410\u0434\u043c\u0438\u043d\u0438\u0441\u0442\u0440\u0430\u0442\u043e\u0440",
+      "name": "Администратор",
       "role": "admin",
       "created_at": "2026-03-25T00:00:00+00:00",
       "is_active": true,
@@ -35,6 +35,190 @@
       "model_used": "",
       "files": [],
       "agent_actions": []
+    },
+    "ef2a0f24": {
+      "id": "ef2a0f24",
+      "user_id": "admin",
+      "title": "Test 1: Simple greeting",
+      "created_at": "2026-03-26T02:10:46.599588+00:00",
+      "updated_at": "2026-03-26T02:10:47.044605+00:00",
+      "messages": [
+        {
+          "id": "d4a048bc",
+          "role": "user",
+          "content": "Скажи 'Привет! Я ORION.' и вызови task_complete.",
+          "timestamp": "2026-03-26T02:10:47.044605+00:00",
+          "file_content": null
+        }
+      ],
+      "total_cost": 0.0,
+      "total_tokens_in": 0,
+      "total_tokens_out": 0,
+      "variant": "premium",
+      "model_used": "",
+      "files": [],
+      "agent_actions": []
+    },
+    "f540b1cf": {
+      "id": "f540b1cf",
+      "user_id": "admin",
+      "title": "Test 2: Math calculation",
+      "created_at": "2026-03-26T02:10:51.726794+00:00",
+      "updated_at": "2026-03-26T02:10:52.177614+00:00",
+      "messages": [
+        {
+          "id": "0167b444",
+          "role": "user",
+          "content": "Посчитай 2^32 и скажи результат. Вызови task_complete.",
+          "timestamp": "2026-03-26T02:10:52.177614+00:00",
+          "file_content": null
+        }
+      ],
+      "total_cost": 0.0,
+      "total_tokens_in": 0,
+      "total_tokens_out": 0,
+      "variant": "premium",
+      "model_used": "",
+      "files": [],
+      "agent_actions": []
+    },
+    "d0fd75aa": {
+      "id": "d0fd75aa",
+      "user_id": "admin",
+      "title": "Test 3: List 3 items",
+      "created_at": "2026-03-26T02:10:56.128028+00:00",
+      "updated_at": "2026-03-26T02:10:56.574402+00:00",
+      "messages": [
+        {
+          "id": "ad09f80f",
+          "role": "user",
+          "content": "Перечисли 3 преимущества Python перед JavaScript. Вызови task_complete.",
+          "timestamp": "2026-03-26T02:10:56.574402+00:00",
+          "file_content": null
+        }
+      ],
+      "total_cost": 0.0,
+      "total_tokens_in": 0,
+      "total_tokens_out": 0,
+      "variant": "premium",
+      "model_used": "",
+      "files": [],
+      "agent_actions": []
+    },
+    "b7c4447c": {
+      "id": "b7c4447c",
+      "user_id": "admin",
+      "title": "Test 4: Current date",
+      "created_at": "2026-03-26T02:11:00.187665+00:00",
+      "updated_at": "2026-03-26T02:11:00.635915+00:00",
+      "messages": [
+        {
+          "id": "63f1c746",
+          "role": "user",
+          "content": "Какой сегодня день недели? Используй ssh_execute для команды 'date' и скажи результат.",
+          "timestamp": "2026-03-26T02:11:00.635915+00:00",
+          "file_content": null
+        }
+      ],
+      "total_cost": 0.0,
+      "total_tokens_in": 0,
+      "total_tokens_out": 0,
+      "variant": "premium",
+      "model_used": "",
+      "files": [],
+      "agent_actions": []
+    },
+    "61708715": {
+      "id": "61708715",
+      "user_id": "admin",
+      "title": "Test 5: Echo test",
+      "created_at": "2026-03-26T02:11:05.109732+00:00",
+      "updated_at": "2026-03-26T02:11:05.557106+00:00",
+      "messages": [
+        {
+          "id": "c70d1e2b",
+          "role": "user",
+          "content": "Выполни команду: echo 'ORION_TEST_OK' через ssh_execute и покажи результат.",
+          "timestamp": "2026-03-26T02:11:05.557106+00:00",
+          "file_content": null
+        }
+      ],
+      "total_cost": 0.0,
+      "total_tokens_in": 0,
+      "total_tokens_out": 0,
+      "variant": "premium",
+      "model_used": "",
+      "files": [],
+      "agent_actions": []
+    },
+    "fb2f5d32": {
+      "id": "fb2f5d32",
+      "user_id": "admin",
+      "title": "Test 6: Create file",
+      "created_at": "2026-03-26T02:11:10.435042+00:00",
+      "updated_at": "2026-03-26T02:11:10.887856+00:00",
+      "messages": [
+        {
+          "id": "c1a3cb14",
+          "role": "user",
+          "content": "Создай файл /tmp/orion_test_6.txt с текстом 'Test 6 passed' через file_write. Потом прочитай его через file_read.",
+          "timestamp": "2026-03-26T02:11:10.887856+00:00",
+          "file_content": null
+        }
+      ],
+      "total_cost": 0.0,
+      "total_tokens_in": 0,
+      "total_tokens_out": 0,
+      "variant": "premium",
+      "model_used": "",
+      "files": [],
+      "agent_actions": []
+    },
+    "9b01a915": {
+      "id": "9b01a915",
+      "user_id": "admin",
+      "title": "Test 7: Append to file",
+      "created_at": "2026-03-26T02:11:16.422874+00:00",
+      "updated_at": "2026-03-26T02:11:16.870026+00:00",
+      "messages": [
+        {
+          "id": "7e7162d1",
+          "role": "user",
+          "content": "Создай файл /tmp/orion_append.txt с текстом 'Line 1'. Потом добавь 'Line 2' через file_write с mode=append. Прочитай файл и покажи содержимое.",
+          "timestamp": "2026-03-26T02:11:16.870026+00:00",
+          "file_content": null
+        }
+      ],
+      "total_cost": 0.0,
+      "total_tokens_in": 0,
+      "total_tokens_out": 0,
+      "variant": "premium",
+      "model_used": "",
+      "files": [],
+      "agent_actions": []
+    },
+    "9fbb69cd": {
+      "id": "9fbb69cd",
+      "user_id": "admin",
+      "title": "Debug test",
+      "created_at": "2026-03-26T02:11:34.687448+00:00",
+      "updated_at": "2026-03-26T02:11:35.141699+00:00",
+      "messages": [
+        {
+          "id": "8260dd70",
+          "role": "user",
+          "content": "Скажи Привет",
+          "timestamp": "2026-03-26T02:11:35.141699+00:00",
+          "file_content": null
+        }
+      ],
+      "total_cost": 0.0,
+      "total_tokens_in": 0,
+      "total_tokens_out": 0,
+      "variant": "premium",
+      "model_used": "",
+      "files": [],
+      "agent_actions": []
     }
   },
   "sessions": {
@@ -44,6 +228,21 @@
       "expires_at": 1775078533.67479,
       "ip": "",
       "user_agent": ""
+    },
+    "67e973c06b998ca1a07d78912de25ab8e8e2ff0ff157b6af90d1aac94ec0ec31": {
+      "user_id": "admin",
+      "created_at": 1774490986.3855,
+      "expires_at": 1775095786.3855002
+    },
+    "071c3ff2ca87a25a0531f943dd1637d1ca7ac55141604324db55c0692effaed8": {
+      "user_id": "admin",
+      "created_at": 1774491046.1503668,
+      "expires_at": 1775095846.1503668
+    },
+    "b619efac39f16fd7008af29eea8761ca16cc631a0b1769847c8ab7d4ec16a8af": {
+      "user_id": "admin",
+      "created_at": 1774491094.240544,
+      "expires_at": 1775095894.2405443
     }
   },
   "custom_agents": [],
