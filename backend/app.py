@@ -1928,13 +1928,18 @@ def direct_chat():
             with _agents_lock:
                 _active_agents[chat_id] = loop
 
-            for raw_event in loop.run_stream(user_message, chat_history=history, file_content=file_content):
-                # run_stream() возвращает либо строку SSE ("data: {...}\n\n")
-                # либо dict — нормализуем оба варианта
+            # ── GEVENT FIX: run agent in separate greenlet, stream via Queue ──
+            try:
+                import gevent
+                import gevent.queue as gqueue
+                _USE_GEVENT = True
+            except ImportError:
+                _USE_GEVENT = False
+
+            def _process_raw_event(raw_event):
+                """Normalize raw_event to SSE string and extract content."""
+                nonlocal assistant_content
                 if isinstance(raw_event, str):
-                    # Уже готовая SSE строка — парсим для накопления текста
-                    yield raw_event
-                    # Извлекаем content для сохранения
                     if raw_event.startswith("data: "):
                         try:
                             ev = _json.loads(raw_event[6:].strip())
@@ -1945,16 +1950,50 @@ def direct_chat():
                                 assistant_content += ev.get("content", ev.get("text", ""))
                         except Exception:
                             pass
+                    return raw_event
                 else:
-                    # dict — нормализуем тип и отправляем
                     ev_type = raw_event.get("type", "")
                     if ev_type == "text_delta":
                         raw_event = {"type": "content", "text": raw_event.get("text", raw_event.get("content", ""))}
                     elif ev_type == "text_complete":
                         raw_event = {"type": "content", "text": raw_event.get("content", "")}
-                    yield "data: " + _json.dumps(raw_event) + SSE
                     if ev_type in ("content", "text", "text_complete", "text_delta"):
                         assistant_content += raw_event.get("text", raw_event.get("content", ""))
+                    return "data: " + _json.dumps(raw_event) + SSE
+
+            if _USE_GEVENT:
+                _q = gqueue.Queue()
+                _SENTINEL = object()
+
+                def _agent_worker():
+                    try:
+                        for raw_event in loop.run_stream(user_message, chat_history=history, file_content=file_content):
+                            _q.put(raw_event)
+                            gevent.sleep(0)  # yield control
+                    except Exception as _e:
+                        _q.put({"type": "error", "content": "Ошибка агента: " + str(_e)})
+                    finally:
+                        _q.put(_SENTINEL)
+
+                _g = gevent.spawn(_agent_worker)
+                while True:
+                    try:
+                        raw_event = _q.get(timeout=300)
+                    except gqueue.Empty:
+                        yield "data: " + _json.dumps({"type": "heartbeat"}) + SSE
+                        continue
+                    if raw_event is _SENTINEL:
+                        break
+                    sse_str = _process_raw_event(raw_event)
+                    if sse_str:
+                        yield sse_str
+                    gevent.sleep(0)
+                _g.join(timeout=5)
+            else:
+                for raw_event in loop.run_stream(user_message, chat_history=history, file_content=file_content):
+                    sse_str = _process_raw_event(raw_event)
+                    if sse_str:
+                        yield sse_str
 
         except GeneratorExit:
             pass  # Клиент отключился — не делаем yield

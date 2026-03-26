@@ -80,6 +80,9 @@ def login():
 
     db = db_read()
     # ══ SECURITY FIX 1: bcrypt with SHA256 migration ══
+    logger.warning(f"[AUTH-DEBUG2] Total users in db: {len(db.get('users', {}))}")
+    for _uid, _u in db.get('users', {}).items():
+        logger.warning(f"[AUTH-DEBUG2] User: {_u.get('email')} hash: {_u.get('password_hash','')[:15]}")
     user = None
     user_id = None
     for uid, u in db["users"].items():
@@ -87,7 +90,10 @@ def login():
             stored_hash = u.get("password_hash", "")
             if stored_hash.startswith("$2b$") or stored_hash.startswith("$2a$"):
                 # Already bcrypt — use checkpw
-                if bcrypt.checkpw(password.encode(), stored_hash.encode()):
+                logger.warning(f"[AUTH-DEBUG] bcrypt check for {email}: hash={stored_hash[:15]}...")
+                _check_result = bcrypt.checkpw(password.encode(), stored_hash.encode())
+                logger.warning(f"[AUTH-DEBUG] bcrypt result: {_check_result}")
+                if _check_result:
                     user = u
                     user_id = uid
             else:

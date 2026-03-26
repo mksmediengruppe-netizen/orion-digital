@@ -3670,6 +3670,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);
         # ═══ PIPELINE INJECTION: classify task and inject pipeline rules ═══
         try:
             _task_type = classify_task_type(user_message if isinstance(user_message, str) else str(user_message))
+            self._task_type = _task_type  # MANUS-FIX: store for MANUS-GUARD
             if _task_type == "website":
                 _effective_system_prompt += "\n\n" + WEBSITE_PIPELINE_RULE
                 logger.info(f"[PIPELINE] Injected WEBSITE pipeline rule")
@@ -4183,7 +4184,77 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);
 
             logger.info(f"[DEBUG-IT] iteration={iteration} completed, tool_calls={'yes' if tool_calls_received else 'no'}")
             if not tool_calls_received:
-                break
+                # ═══ MANUS-STYLE: No tool calls received ═══
+                # Like Manus: NEVER break on text-only response
+                # Instead: inject reminder to use tools and continue
+                import re as _re_ntc
+                import os as _os_ntc
+
+                _no_tool_break = False
+                _no_tool_injected = False
+
+                # Check if this looks like a genuine completion
+                _completion_phrases = [
+                    "задача выполнена", "task complete", "готово", "done",
+                    "завершено", "файл создан", "сайт готов", "лендинг создан",
+                ]
+                _ai_text_lower = (ai_text or "").lower()
+                _looks_like_completion = any(p in _ai_text_lower for p in _completion_phrases)
+
+                # Website guard: check if index.html actually exists
+                _task_type_ntc = getattr(self, "_task_type", None)
+                _pipeline_type_ntc = getattr(self, "_pipeline_type", None) or _task_type_ntc
+                _website_guard_triggered = False
+
+                if _pipeline_type_ntc == "website" and iteration < 10:
+                    # Extract sitename from messages
+                    _all_msgs_str = str(messages)
+                    # Also check user_message for the path
+                    _search_str = _all_msgs_str + " " + (user_message if isinstance(user_message, str) else "")
+                    _sitename_match = _re_ntc.search(r"/var/www/orion/previews/([\w\-]+)", _search_str)
+                    if _sitename_match:
+                        _sitename_ntc = _sitename_match.group(1)
+                        logger.warning(f"[MANUS-GUARD] Found sitename: {_sitename_ntc}")
+                        _html_path_ntc = f"/var/www/orion/previews/{_sitename_ntc}/index.html"
+                        if not _os_ntc.path.exists(_html_path_ntc):
+                            logger.warning(f"[MANUS-GUARD] index.html not found at {_html_path_ntc}, forcing file_write")
+                            messages.append({
+                                "role": "user",
+                                "content": (
+                                    f"SYSTEM ALERT: index.html does NOT exist at {_html_path_ntc}. "
+                                    f"You responded with text but did NOT call file_write. "
+                                    f"This is NOT acceptable. You MUST call file_write RIGHT NOW to create the HTML file. "
+                                    f"Do not explain — just call file_write with the HTML content (part 1 of 3, ~3000 chars). "
+                                    f"The task is NOT complete without the physical file."
+                                )
+                            })
+                            _website_guard_triggered = True
+                            _no_tool_injected = True
+
+                # General Manus-style: if agent gave text without tool call
+                if not _website_guard_triggered and not _looks_like_completion and iteration < 8:
+                    logger.warning(f"[MANUS-LOOP] Agent responded with text only (iter={iteration}). Injecting tool reminder.")
+                    messages.append({
+                        "role": "user",
+                        "content": (
+                            "SYSTEM: You responded with text but did NOT call any tool. "
+                            "This is NOT allowed. You MUST call a tool to continue. "
+                            "If the task is complete, call task_complete. "
+                            "If you need to create a file, call file_write. "
+                            "If you need to run a command, call ssh_execute. "
+                            "DO NOT respond with text — call a tool NOW."
+                        )
+                    })
+                    _no_tool_injected = True
+
+                # Only break if: max iterations OR genuine completion with no pending work
+                if not _no_tool_injected:
+                    _no_tool_break = True
+
+                if _no_tool_break:
+                    break
+                else:
+                    continue  # Force another iteration with the injected message
 
             # Add assistant message with tool calls to history
             assistant_msg = {"role": "assistant", "content": ai_text or ""}
@@ -4220,6 +4291,8 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);
                                 _is_valid = False
                                 _parse_error = (f"file_write called with empty content — "
                                                 f"streaming truncated the file body")
+                                logger.warning(f"[PATCH10-DEBUG] raw args (first 500): {_tc_args_str[:500]!r}")
+                                logger.warning(f"[PATCH10-DEBUG] parsed keys: {list(_parsed_check.keys())}")
                     except json.JSONDecodeError as _je:
                         _is_valid = False
                         _parse_error = (f"Invalid JSON in tool '{_tc_name}' arguments — "
@@ -4236,13 +4309,11 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App />);
                     _inv_id = _inv_tc.get("id", f"call_{iteration}")
                     _inv_name = _inv_tc["function"].get("name", "unknown")
                     _retry_hint = (
-                        "IMPORTANT: Your previous tool call arguments were truncated during streaming "
-                        "because the content was too large. Please retry with SMALLER content:\n"
-                        "- For file_write: split into multiple calls, max 5000 chars per call. "
-                        "First call: file_write(path=..., content='first part'). "
-                        "Subsequent calls: file_write(path=..., content='next part', append=true)\n"
-                        "- For ssh_execute: use heredoc with shorter content\n"
-                        "- For generate_file: reduce content size or split into sections\n"
+                        "CRITICAL: file_write TRUNCATED - content too large for single call.\n"
+                        "DO NOT retry with full HTML. Split into parts using append=True:\n"
+                        "Part 1: file_write(path=PATH, content=FIRST_4000_CHARS)\n"
+                        "Part 2: file_write(path=PATH, content=NEXT_4000_CHARS, append=True)\n"
+                        "Part 3+: continue appending until complete. Max 4000 chars per call.\n"
                         f"Original error: {_inv_err}"
                     )
                     messages.append({
