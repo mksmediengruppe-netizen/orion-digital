@@ -538,260 +538,112 @@ class Orchestrator:
     
     async def _execute(self, result: RunResult, on_status_change: Callable | None):
         """
-        Run the agent loop. ARCANE 3.0: supports parallel execution via Director plan.
-        
-        Flow:
-          1. Load context
-          2. If web_design/complex → call Director for JSON plan
-          3. Run parallel agents (art_director + writer + researcher + image_agent)
-          4. Feed their outputs into Developer context
-          5. Run Developer → QA → Manus pipeline
+        ARCANE 4.0: Route to specific pipeline templates.
         """
-        # Load project context (structured state + relevant files)
         context = await self._load_project_context(result)
         
-        # Get primary model from team
-        primary_role = self._get_primary_role(result)
-        primary_model = result.team.get(primary_role, "claude-sonnet-4.6")
-        
-        # ── Budget pre-check ─────────────────────────────────────────────
-        if self.budget and result.project_id:
-            try:
-                if not self.budget.can_run(result.project_id, result.run_id):
-                    raise BudgetPausedError(
-                        f"Budget paused/stopped for project {result.project_id}"
+        try:
+            from core.pipeline_templates import PipelineRunner
+            from shared.memory_v9.continuity import ContinuityManager
+            _continuity = ContinuityManager()
+
+            # Auto-resume: check if there's a saved checkpoint for this project
+            # If a previous run failed mid-pipeline, resume from last stage
+            _resume_run_id = result.run_id
+            _project_resume = _continuity.get_project_resume(result.project_id)
+            if _project_resume and _project_resume.get("run_id") != result.run_id:
+                _prev_run_id = _project_resume.get("run_id")
+                _prev_state = _continuity.restore_checkpoint(_prev_run_id)
+                # If previous run completed successfully — start fresh (new task)
+                if _project_resume.get("completed") and not context.get("force_stage"):
+                    logger.info(f"[{result.run_id}] Previous run completed. Starting fresh pipeline.")
+                    _prev_state = None
+                if _prev_state and _prev_state.get("completed_stages"):
+                    # Resume from previous run's checkpoint
+                    logger.info(
+                        f"[{result.run_id}] Auto-resume: found checkpoint from run "
+                        f"{_prev_run_id} with stages {_prev_state['completed_stages']}"
                     )
-            except (AttributeError, Exception) as e:
-                logger.debug(f"Budget pre-check skipped: {e}")
-        
-        # ── ARCANE 4.0: Research via Manus (if Observer flagged needs_research) ──
-        _research_data = None
-        _obs_dec4 = getattr(result, "_observer_decision", None)
-        if _obs_dec4 and getattr(_obs_dec4, "needs_research", False) and self.manus_pipelines:
-            import os as _os4
-            _workspace4 = _os4.path.join(
-                _os4.environ.get("ARCANE_WORKSPACE", "/root/workspace"),
-                "projects", result.project_id
-            )
-            _research_data = await self._run_research_pipeline(
-                result=result,
-                project_dir=_workspace4,
-                on_status_change=on_status_change,
-            )
-            if _research_data:
-                refs_count = len(_research_data.get("awwwards_references", []))
-                logger.info(f"[{result.run_id}] Research injected: {refs_count} Awwwards refs")
+                    # Copy checkpoint to new run_id so PipelineRunner picks it up
+                    _continuity.save_checkpoint(result.run_id, _prev_state)
+                    await self._update_status(result, RunStatus.RUNNING, on_status_change, {
+                        "type": "resume",
+                        "message": f"Resuming from stage {_prev_state['completed_stages'][-1]}",
+                        "resumed_from": _prev_run_id,
+                        "completed_stages": _prev_state["completed_stages"],
+                    })
 
-        # ── ARCANE 3.0: Parallel specialist execution ────────────────────
-        # For web_design tasks with multiple specialists in team,
-        # run them in parallel before the main Developer agent
-        parallel_outputs = {}
-        # Run parallel specialists for design/content-heavy task types
-        _parallel_types = ("web_design", "media", "marketing")
-        # ARCANE 4.0: inject motion_dev if Observer detected animations
-        _obs_dec = getattr(result, "_observer_decision", None)
-        if _obs_dec and getattr(_obs_dec, "needs_motion_dev", False) and isinstance(result.team, dict):
-            if "motion_dev" not in result.team:
-                try:
-                    from shared.llm.model_registry import resolve_model
-                    result.team["motion_dev"] = resolve_model("motion_dev", result.mode)
-                    logger.info(f"[{result.run_id}] Observer: injected motion_dev into team")
-                except Exception:
-                    result.team["motion_dev"] = "claude-sonnet-4.6"
-        logger.info(
-            f"[{result.run_id}] pipeline: type={result.task_type}, "
-            f"team_roles={list(result.team.keys()) if isinstance(result.team, dict) else []}, "
-            f"mode={result.mode}, parallel_eligible={result.task_type in _parallel_types}"
-        )
-        if (result.task_type in _parallel_types
-                and len(result.team) > 1
-                and self.llm
-                and result.mode not in ("free",)):
-            try:
-                parallel_outputs = await self._run_parallel_specialists(result, context, on_status_change)
-                if parallel_outputs:
-                    # Inject specialist outputs into context for Developer
-                    enrichment_parts = []
-                    if parallel_outputs.get("art_director"):
-                        enrichment_parts.append(f"<design_spec>\n{parallel_outputs['art_director']}\n</design_spec>")
-                    if parallel_outputs.get("writer"):
-                        enrichment_parts.append(f"<content>\n{parallel_outputs['writer']}\n</content>")
-                    if parallel_outputs.get("researcher"):
-                        enrichment_parts.append(f"<research>\n{parallel_outputs['researcher']}\n</research>")
-                    
-                    if enrichment_parts:
-                        enrichment = "\n\n".join(enrichment_parts)
-                        # Cap at 14000 to balance completeness vs context bloat
-                        if len(enrichment) > 14000:
-                            _ds = parallel_outputs.get("art_director", "")[:5000]
-                            _wr = parallel_outputs.get("writer", "")[:8500]
-                            enrichment = ("" + (f"<design_spec>\n{_ds}\n</design_spec>\n\n" if _ds else "")
-                                             + (f"<content>\n{_wr}\n</content>" if _wr else ""))
-                            logger.info(f"[{result.run_id}] Enrichment capped: {len(enrichment)} chars")
-                        result.task = f"{result.task}\n\n{'='*40}\nСпециалисты уже подготовили:\n\n{enrichment}"
-                        logger.info(f"[{result.run_id}] Parallel specialists enriched task (+{len(enrichment)} chars)")
-                if not parallel_outputs:
-                    logger.warning(f"[{result.run_id}] Parallel specialists all returned empty — check specialist LLM responses")
-            except Exception as e:
-                logger.warning(f"[{result.run_id}] Parallel execution failed, continuing with single agent: {e}")
-
-        # ── SPEC §4.4: Escalation to human ──────────────────────────────
-        _ESCALATION_KEYWORDS = [
-            "платёжн", "payment", "stripe", "billing",
-            "миграц", "migration", "database migration",
-            "нативн.*мобильн", "native.*mobile", "react native", "swift", "kotlin",
-        ]
-        _task_lower = result.task.lower()
-        _keyword_escalation = any(
-            __import__("re").search(kw, _task_lower) for kw in _ESCALATION_KEYWORDS
-        )
-        if _keyword_escalation:
-            logger.warning(f"[{result.run_id}] Escalation keyword detected — flagging for senior review")
-            result.escalations.append("keyword_match")
-
-        # ToolExecutor created ONCE and reused across retries
-        # This preserves image counter and other state between retry attempts
-        _reusable_executor = None
-
-        for attempt in range(self.max_retries + 1):
-            try:
-                # Create agent loop with current model
-                loop = None
-                if self.agent_loop_factory:
-                    # Set role so AgentLoop uses correct prompt
-                    context["agent_role"] = self._get_primary_role(result)
-                    context["_reusable_executor"] = _reusable_executor  # None on first attempt
-                    loop = self.agent_loop_factory(
-                        model_id=primary_model,
-                        project_context=context,
-                        task=result.task,
-                        budget_remaining=self._get_budget_remaining(result),
-                        mode=result.mode,  # pass mode so router uses correct strategy
-                    )
-                
-                if loop is not None:
-                    # ── Golden Paths: inject hint before run (§10.2) ─────
-                    try:
-                        from core.golden_paths import GoldenPathStore as _GPS
-                        import os as _gp_os
-                        _workspace = _gp_os.environ.get("ARCANE_WORKSPACE", "/root/workspace")
-                        _project_dir = _gp_os.path.join(_workspace, "projects", result.project_id)
-                        _gp = _GPS(_project_dir)
-                        # find_similar_paths: get top path for this task_type (promoted only)
-                        _similar = _gp.find_similar_paths(result.task_type, promoted_only=False)
-                        if _similar:
-                            _best = _similar[0]
-                            context["golden_path_hint"] = _best.get("steps_summary", _best.get("steps", []))
-                            logger.info(f"[{result.run_id}] Golden path hint: {_best.get('pattern_label','')} (score={_best.get('success_count',0)})")
-                    except Exception:
-                        pass
-                    run_result = await loop.run(result.task)
-                    if isinstance(run_result, dict):
-                        status = run_result.get("status", "unknown")
-                        artifacts = run_result.get("artifacts", [])
-                        iterations = run_result.get("iterations", 0)
-                        cost = run_result.get("total_cost", run_result.get("actual_cost", 0.0))
-                        shielded = run_result.get("shielded", False)
-                        elapsed = run_result.get("elapsed_seconds", 0)
-
-                        # P0-1: TRUTHFUL STATUS — do not set DONE if agent failed
-                        if status in ("failed", "cancelled", "error", "budget_exceeded"):
-                            result.actual_cost += cost
-                            result.artifacts.extend(artifacts)
-                            raise RuntimeError(
-                                f"Agent finished with status: {status}. "
-                                f"Output: {str(run_result.get('output', ''))[:200]}"
-                            )
-
-                        if shielded and run_result.get("output"):
-                            # Shielded = IdentityShield blocked the task
-                            # For web_design this means no files were created → FAILED
-                            if result.task_type in ("web_design", "coding", "automation"):
-                                raise RuntimeError(
-                                    f"IdentityShield blocked task execution (type={result.task_type}). "
-                                    f"Task may contain words that triggered false-positive. "
-                                    f"Shield response: {run_result['output'][:100]}"
-                                )
-                            output = run_result["output"]
-                        elif status == "done" and artifacts:
-                            output = (
-                                f"Task completed in {iterations} iterations "
-                                f"({elapsed}s, ${cost:.4f}). "
-                                f"Created: {', '.join(artifacts)}"
-                            )
-                        elif status == "done":
-                            output = f"Task completed in {iterations} iterations ({elapsed}s, ${cost:.4f})."
-                        else:
-                            output = f"Task {status} after {iterations} iterations ({elapsed}s)."
-
-                        result.actual_cost += cost
-                        result.artifacts.extend(artifacts)
-                    else:
-                        output = str(run_result)
-                else:
-                    # Fallback: direct LLM call (no agent loop)
-                    output = await self._direct_llm_call(result, context, primary_model)
-                
-                # ── Budget record (spec §8: actual spend tracking) ────────
-                if self.budget and result.project_id and result.actual_cost > 0:
-                    try:
-                        self.budget.record(
-                            project_id=result.project_id,
-                            task_id=result.run_id,
-                            model=primary_model,
-                            category=self._get_budget_category(result.task_type),
-                            input_tokens=0,
-                            output_tokens=0,
-                            cost_usd_override=result.actual_cost,  # CRIT-3: use actual cost
+            # force_stage: manually start from a specific stage (e.g. "stage_3")
+            # Pass via context: {"force_stage": "stage_2"} means skip stage_1 and stage_2
+            _force_stage = context.get("force_stage")
+            if _force_stage:
+                _stage_order = ["stage_1", "stage_2", "stage_3", "stage_4"]
+                if _force_stage in _stage_order:
+                    _force_idx = _stage_order.index(_force_stage)
+                    if _force_idx > 0:
+                        _forced_state = {
+                            "completed_stages": _stage_order[:_force_idx],
+                            "artifacts": {},
+                            "gate_retries": {},
+                        }
+                        _last_resume = _continuity.get_project_resume(result.project_id)
+                        if _last_resume:
+                            _last_state = _continuity.restore_checkpoint(_last_resume.get("run_id", ""))
+                            if _last_state:
+                                _forced_state["artifacts"] = _last_state.get("artifacts", {})
+                        _continuity.save_checkpoint(result.run_id, _forced_state)
+                        logger.info(
+                            f"[{result.run_id}] force_stage={_force_stage}: "
+                            f"skipping {_forced_state['completed_stages']}"
                         )
-                    except Exception as e:
-                        logger.debug(f"Budget record skipped: {e}")
+            runner = PipelineRunner(self, result, context, on_status_change)
+
+            try:
+                if result.task_type == "web_design":
+                    await runner.run_web_design()
+                elif result.task_type == "crm_setup":
+                    await runner.run_crm_setup()
+                elif result.task_type == "api_backend" or result.task_type == "coding":
+                    await runner.run_api_backend()
+                elif result.task_type == "marketing":
+                    await runner.run_marketing()
+                else:
+                    pass  # falls through to generic below
+                # On success: save completed checkpoint (don't clear — allows inspection)
+                _continuity.save_project_resume(result.project_id, {
+                    "run_id": result.run_id,
+                    "task": result.task,
+                    "task_type": result.task_type,
+                    "mode": result.mode,
+                    "completed": True,
+                    "completed_stages": runner.state.get("completed_stages", []),
+                })
+            except Exception as _pipeline_err:
+                # Save resume pointer so next run continues from here
+                _continuity.save_project_resume(result.project_id, {
+                    "run_id": result.run_id,
+                    "task": result.task,
+                    "task_type": result.task_type,
+                    "mode": result.mode,
+                    "error": str(_pipeline_err),
+                })
+                logger.warning(
+                    f"[{result.run_id}] Pipeline failed at stage "
+                    f"{runner.state.get('completed_stages', [])}. "
+                    f"Resume pointer saved. Error: {_pipeline_err}"
+                )
+                raise
+            else:
+                # Fallback to default loop
+                await self._update_status(result, RunStatus.RUNNING, on_status_change, {"message": "Running generic task..."})
+                primary_role = self._get_primary_role(result)
+                primary_model = result.team.get(primary_role, "claude-sonnet-4.6")
+                result.output = await self._direct_llm_call(result, context, primary_model)
                 
-                result.output = output
-                
-                # ═══ QA CONTROLLER (Stage C) ═══════════════════════════════
-                if (result.task_type in ("web_design", "coding", "cms_management", "code_review", "automation")
-                    and result.output and len(result.output) > 100
-                    and not run_result.get("shielded") if isinstance(run_result, dict) else True):
-                    qa_model = result.team.get("qa", "gpt-5.4-nano") if isinstance(result.team, dict) else "gpt-5.4-nano"
-                    await self._run_qa_check(result, context, qa_model, primary_model, on_status_change)
-                
-                # ═══ VISUAL QA (Stage D) — Manus visual check (web_design only) ═══
-                # FIX: skip Manus if shielded or no artifacts (nothing to deploy)
-                _has_artifacts = bool(result.artifacts)
-                _is_shielded = run_result.get("shielded", False) if isinstance(run_result, dict) else False
-                if result.task_type == "web_design" and _has_artifacts and not _is_shielded:
-                    await self._run_visual_qa(result, primary_model, on_status_change)
-                    # Design Judge: score visual quality (web_design tasks)
-                    _dj = await self._run_design_judge(result, primary_model, on_status_change)
-                    if not _dj["passed"] and _dj.get("feedback"):
-                        _dj_score = _dj['score']; _dj_fb = _dj['feedback'][:200]
-                        result.errors.append(f"Design Judge score {_dj_score}/10: {_dj_fb}")
-                        _dj_fb_short = _dj['feedback'][:150]
-                        logger.info(f"[{result.run_id}] Design feedback: {_dj_fb_short}")
-                
-                return  # Success
-                
-            except Exception as e:
-                result.retries = attempt + 1
-                result.errors.append(f"Attempt {attempt + 1}: {str(e)}")
-                logger.warning(f"[{result.run_id}] Attempt {attempt + 1} failed: {e}")
-                
-                # Escalate to more powerful model
-                if attempt < self.max_retries:
-                    escalated = self._escalate_model(primary_model, result)
-                    if escalated and escalated != primary_model:
-                        result.escalations.append(f"{primary_model} → {escalated}")
-                        primary_model = escalated
-                        logger.info(f"[{result.run_id}] Escalated to {escalated}")
-                    else:
-                        break  # No better model available
-        
-        # All retries exhausted
-        raise RuntimeError(f"Task failed after {result.retries} attempts")
-    
-    # ─── Step 4: Update project ───────────────────────────────────────────
-    
+        except Exception as e:
+            import traceback
+            logger.error(f"[{result.run_id}] Pipeline error: {e}\n" + traceback.format_exc())
+            raise
     async def _update_project(self, result: RunResult):
         """Update project structured state after task completion."""
         if not self.projects:
@@ -1015,13 +867,10 @@ class Orchestrator:
     
     def _escalate_model(self, current_model: str, result: RunResult) -> str | None:
         """Find a more powerful model for retry."""
-        # Import here to avoid circular imports at module level
         try:
             from shared.llm.model_registry import get_fallback
-            # Fallback chains go from cheaper to more expensive
-            # For escalation we want the reverse — go UP
             escalation_map = {
-                "deepseek-v3.2": "gpt-5.4-mini",
+                "deepseek-v3.2": "claude-sonnet-4.6",
                 "gpt-5.4-nano": "gpt-5.4-mini",
                 "gpt-5.4-mini": "claude-sonnet-4.6",
                 "gemini-2.5-flash": "gemini-3.1-pro",
@@ -1030,13 +879,121 @@ class Orchestrator:
                 "gpt-5.4": "claude-opus-4.6",
                 "grok-4-fast": "gpt-5.4-mini",
             }
-            return escalation_map.get(current_model)
+            new_model = escalation_map.get(current_model)
+            
+            # CRITICAL FIX: Carry over context on escalation
+            if new_model and result.output:
+                prev_code = result.output[:8000]
+                test_logs = chr(10).join(result.errors)[:2000]
+                escalation_context = (
+                    chr(10) + chr(10) + "<previous_attempt_code>" + chr(10) + prev_code + chr(10) + "</previous_attempt_code>" + chr(10)
+                    + "<test_failures>" + chr(10) + test_logs + chr(10) + "</test_failures>" + chr(10)
+                    + "Предыдущая модель не справилась. Исправь код с учетом ошибок."
+                )
+                result.task += escalation_context
+                
+            return new_model
         except ImportError:
             return None
-    
-
-
     # ═══════════════════════════════════════════════════════════════════════
+
+    async def call_specialist(self, result: "RunResult", context: dict, role: str, model_id: str) -> str:
+        """Public method: call a single specialist LLM and return its text output.
+        
+        Used by PipelineRunner stages to call individual roles.
+        Tracks cost on result.actual_cost.
+        """
+        try:
+            from shared.prompt_templates import get_role_prompt
+        except ImportError:
+            get_role_prompt = lambda role, lang="ru": ""
+
+        system_prompt = get_role_prompt(role)
+        
+        # Build user prompt with project context
+        user_prompt = f"Проект: {result.task}\n\nТип: {result.task_type}\nСложность: {result.complexity}"
+        
+        ctx_parts = []
+        if context.get("personality"):
+            ctx_parts.append(f"Предпочтения клиента: {str(context['personality'])[:300]}")
+        if context.get("tech_stack"):
+            ts = context["tech_stack"]
+            ts_str = ", ".join(f"{k}={v}" for k, v in ts.items() if v) if isinstance(ts, dict) else str(ts)
+            if ts_str:
+                ctx_parts.append(f"Стек технологий: {ts_str}")
+        if context.get("design_system"):
+            ds = context["design_system"]
+            ds_str = ", ".join(f"{k}={v}" for k, v in ds.items() if v) if isinstance(ds, dict) else str(ds)
+            if ds_str:
+                ctx_parts.append(f"Дизайн-система: {ds_str}")
+        if context.get("design_spec"):
+            import json as _j
+            ctx_parts.append(f"design_spec: {_j.dumps(context['design_spec'], ensure_ascii=False)[:800]}")
+        if context.get("gate_feedback"):
+            ctx_parts.append(f"Фидбэк от предыдущей попытки: {context['gate_feedback']}")
+        if ctx_parts:
+            user_prompt += "\n\nКонтекст проекта:\n" + "\n".join(ctx_parts)
+
+        # Enrichment: stage-specific instructions and artifacts from pipeline
+        if context.get("enrichment"):
+            user_prompt += "\n\n" + str(context["enrichment"])
+        if not self.llm:
+            return f"[DRY RUN] role={role} model={model_id}"
+
+        resp = await self.llm.chat(
+            model=model_id,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            max_tokens=16384 if role in ("developer", "css_architect") else 4096,
+        )
+
+        if isinstance(resp, dict):
+            output = resp.get("content", "") or ""
+            cost = resp.get("cost_usd", 0.0)
+            result.actual_cost += cost
+            result.cost_breakdown.append({
+                "model": model_id,
+                "role": role,
+                "cost": cost,
+                "tokens_in": resp.get("tokens_in", 0),
+                "tokens_out": resp.get("tokens_out", 0),
+            })
+        else:
+            output = str(resp)
+            cost = 0.0
+
+        logger.info(f"[{result.run_id}] call_specialist {role} ({model_id}): {len(output)} chars, ${cost:.4f}")
+
+        # Record cost in budget_controller
+        if cost > 0 and self.budget:
+            try:
+                from core.budget_controller import TaskCategory
+                _pid = getattr(result, "project_id", None) or getattr(self, "project_id", None)
+                if _pid:
+                    self.budget.record(
+                        project_id=_pid,
+                        task_id=result.run_id,
+                        model=model_id,
+                        category=TaskCategory.LLM if hasattr(TaskCategory, "LLM") else "llm",
+                        input_tokens=result.cost_breakdown[-1].get("tokens_in", 0) if result.cost_breakdown else 0,
+                        output_tokens=result.cost_breakdown[-1].get("tokens_out", 0) if result.cost_breakdown else 0,
+                        cost_usd_override=cost,
+                    )
+            except Exception as _be:
+                logger.debug(f"budget_controller record skipped: {_be}")
+        # Side-effects: save role-specific artifacts
+        if role == "art_director" and output:
+            await self._save_design_spec(result, output)
+        if role == "marketer" and output:
+            await self._save_positioning(result, output)
+        if role == "seo_writer" and output:
+            await self._save_seo_spec(result, output)
+
+        return output
+
+
     # ARCANE 3.0: PARALLEL SPECIALIST EXECUTION
     # ═══════════════════════════════════════════════════════════════════════
 
@@ -1656,19 +1613,24 @@ IMPROVEMENTS: bullet list of 2-3 specific improvements (if FAIL)"""
             logger.warning(f"[{result.run_id}] Design Judge failed: {e}")
             return {"score": 7, "passed": True, "feedback": f"Judge unavailable: {e}"}
 
-    async def _direct_llm_call(self, result: RunResult, context: dict, model_id: str) -> str:
+    async def _direct_llm_call(self, result: RunResult, context: dict, model_id: str, override_prompt: str | None = None) -> str:
         """Fallback: direct LLM call without agent loop."""
         if not self.llm:
             return f"[DRY RUN] Task: {result.task}, Model: {model_id}"
         
         # Build prompt with project context
-        system_prompt = self._build_system_prompt(context)
+        if override_prompt:
+            system_prompt = "You are a quality gate validator. Return only JSON."
+            user_content = override_prompt
+        else:
+            system_prompt = self._build_system_prompt(context)
+            user_content = result.task
         
         response = await self.llm.chat(
             model=model_id,
             messages=[
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": result.task},
+                {"role": "user", "content": user_content},
             ],
         )
         

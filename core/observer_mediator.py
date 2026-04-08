@@ -285,8 +285,16 @@ class ObserverMediator:
             agents.insert(1, "researcher_manus")
 
         # ── Task type string ─────────────────────────────────────────────────
+        # CRM/API detection
+        is_crm = any(w in t for w in ["crm", "битрикс", "bitrix", "amocrm", "амо", "retailcrm", "1c", "1с", "воронка продаж", "crm-система"])
+        is_api_backend = any(w in t for w in ["api", "бэкенд", "backend", "fastapi", "django", "flask", "база данных", "postgresql", "mysql", "mongodb", "redis", "микросервис"])
+        
         if is_web_design:
             task_type = "web_design"
+        elif is_crm:
+            task_type = "crm_setup"
+        elif is_api_backend and not is_web_design:
+            task_type = "api_backend"
         elif is_marketing:
             task_type = "marketing"
         elif is_coding:

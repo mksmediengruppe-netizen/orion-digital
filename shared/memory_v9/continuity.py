@@ -42,3 +42,31 @@ class ContinuityManager:
                 os.remove(path)
         except Exception:
             pass
+
+    def get_project_resume(self, project_id: str):
+        """Return saved resume pointer for a project (last failed run)."""
+        import os, json
+        path = os.path.join(_CHECKPOINT_DIR, f"resume_{project_id}.json")
+        if not os.path.exists(path):
+            return None
+        try:
+            with open(path, "r") as f:
+                return json.load(f)
+        except Exception:
+            return None
+
+    def save_project_resume(self, project_id: str, data: dict):
+        """Save resume pointer so next run can continue from last stage."""
+        import os, json
+        os.makedirs(_CHECKPOINT_DIR, exist_ok=True)
+        path = os.path.join(_CHECKPOINT_DIR, f"resume_{project_id}.json")
+        with open(path, "w") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+
+    def clear_project_resume(self, project_id: str):
+        """Clear resume pointer after successful completion."""
+        import os
+        path = os.path.join(_CHECKPOINT_DIR, f"resume_{project_id}.json")
+        if os.path.exists(path):
+            os.remove(path)
+

@@ -70,7 +70,7 @@ class SimpleLLMClient:
         self.api_key = api_key or os.environ.get("OPENROUTER_API_KEY", "")
         if not self.api_key:
             logger.warning("No OPENROUTER_API_KEY set. LLM calls will fail.")
-        self._client = httpx.AsyncClient(timeout=120.0)
+        self._client = httpx.AsyncClient(timeout=90.0)
 
     def _resolve_model(self, model_id: str) -> str:
         """Convert our registry ID to OpenRouter model ID."""
@@ -102,10 +102,42 @@ class SimpleLLMClient:
         openrouter_model = self._resolve_model(model)
         
         start = time.time()
-        
+        cache_read_tokens = 0
+        cache_write_tokens = 0
+
+        # Anthropic prompt caching: inject cache_control for system + last user message
+        # This reduces cost by ~80-90% for repeated context (system prompts, project context)
+        # OpenRouter supports this natively — no special headers needed
+        _is_anthropic = any(m in openrouter_model for m in ("anthropic/", "claude-"))
+        cached_messages = messages
+        if _is_anthropic and messages:
+            cached_messages = []
+            for i, msg in enumerate(messages):
+                msg_copy = dict(msg)
+                # Cache system message (same for all calls of a role)
+                if msg.get("role") == "system" and isinstance(msg.get("content"), str):
+                    msg_copy["content"] = [
+                        {
+                            "type": "text",
+                            "text": msg["content"],
+                            "cache_control": {"type": "ephemeral"},
+                        }
+                    ]
+                # Cache last user message (contains project context repeated per call)
+                elif msg.get("role") == "user" and i == len(messages) - 1:
+                    if isinstance(msg.get("content"), str):
+                        msg_copy["content"] = [
+                            {
+                                "type": "text",
+                                "text": msg["content"],
+                                "cache_control": {"type": "ephemeral"},
+                            }
+                        ]
+                cached_messages.append(msg_copy)
+
         body: dict[str, Any] = {
             "model": openrouter_model,
-            "messages": messages,
+            "messages": cached_messages,
             "max_tokens": max_tokens,
             "temperature": temperature,
         }
@@ -166,15 +198,24 @@ class SimpleLLMClient:
             usage = data.get("usage", {})
             tokens_in = usage.get("prompt_tokens", 0)
             tokens_out = usage.get("completion_tokens", 0)
+            # Anthropic cache tokens (via OpenRouter)
+            cache_read_tokens = usage.get("cache_read_input_tokens", 0)
+            cache_write_tokens = usage.get("cache_creation_input_tokens", 0)
             
-            # Estimate cost (from our registry prices)
-            cost = self._estimate_cost(model, tokens_in, tokens_out)
+            # Estimate cost — use actual cache data if available
+            cost = self._estimate_cost_with_cache(
+                model, tokens_in, tokens_out,
+                cache_read_tokens, cache_write_tokens
+            )
             
             tc_info = f" | {len(tool_calls)} tool_calls" if tool_calls else ""
+            cache_info = ""
+            if cache_read_tokens or cache_write_tokens:
+                cache_info = f" | cache: r={cache_read_tokens} w={cache_write_tokens}"
             logger.info(
                 f"LLM call: [engine] | "
                 f"{tokens_in}→{tokens_out} tok | "
-                f"${cost:.4f} | {elapsed:.1f}s{tc_info}"
+                f"${cost:.4f} | {elapsed:.1f}s{tc_info}{cache_info}"
             )
             
             return {
@@ -185,6 +226,8 @@ class SimpleLLMClient:
                 "tokens_out": tokens_out,
                 "cost_usd": cost,
                 "time_seconds": elapsed,
+                "cache_read_tokens": cache_read_tokens,
+                "cache_write_tokens": cache_write_tokens,
             }
             
         except httpx.TimeoutException:
@@ -204,6 +247,21 @@ class SimpleLLMClient:
         except ImportError:
             pass
         return 0.0
+    def _estimate_cost_with_cache(self, model_id, tokens_in, tokens_out, cache_read_tokens=0, cache_write_tokens=0):
+        try:
+            from shared.llm.model_registry import get_model
+            m = get_model(model_id)
+            if m:
+                if not cache_read_tokens and not cache_write_tokens:
+                    return m.cost_estimate(tokens_in, tokens_out)
+                cw = (m.cached_input_price or m.input_price)*1.25
+                cr = m.cached_input_price or m.input_price
+                nc = max(0, tokens_in-cache_read_tokens-cache_write_tokens)
+                return (nc*m.input_price+cache_write_tokens*cw+cache_read_tokens*cr+tokens_out*m.output_price)/1e6
+        except Exception:
+            pass
+        return self._estimate_cost(model_id, tokens_in, tokens_out)
+
 
     # ── complete() adapter — used by intent_classifier, router, consolidation ──
 

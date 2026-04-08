@@ -111,35 +111,79 @@ DOWNGRADE_PRIORITY: list[TaskCategory] = [
 
 @dataclass(frozen=True)
 class ModelPricing:
-    """Price per 1M tokens (input/output) in USD."""
+    """Price per 1M tokens (input/output/cache) in USD.
+    cache_write_per_m: cost to write tokens into prompt cache (~125% of input)
+    cache_read_per_m:  cost to read cached tokens (~10% of input — 90% discount!)
+    """
     input_per_m: float
     output_per_m: float
+    cache_write_per_m: float = 0.0
+    cache_read_per_m: float = 0.0
 
-    def cost(self, input_tokens: int, output_tokens: int) -> float:
+    def cost(
+        self,
+        input_tokens: int,
+        output_tokens: int,
+        cached_tokens: int = 0,
+        cache_write_tokens: int = 0,
+    ) -> float:
+        """Calculate cost with optional prompt cache support.
+        cached_tokens:      tokens read from cache (billed at cache_read_per_m)
+        cache_write_tokens: tokens written to cache (billed at cache_write_per_m)
+        """
+        regular_input = max(0, input_tokens - cached_tokens - cache_write_tokens)
         return (
-            self.input_per_m * input_tokens / 1_000_000
-            + self.output_per_m * output_tokens / 1_000_000
+            regular_input * self.input_per_m / 1_000_000
+            + cached_tokens * self.cache_read_per_m / 1_000_000
+            + cache_write_tokens * self.cache_write_per_m / 1_000_000
+            + output_tokens * self.output_per_m / 1_000_000
         )
 
 
+# MODEL_PRICES — verified against OpenRouter API on 2026-04-08
+# Format: ModelPricing(input/1M, output/1M, cache_write/1M, cache_read/1M)
 MODEL_PRICES: dict[str, ModelPricing] = {
-    # Claude
-    "claude-opus-4.6":   ModelPricing(5.0, 25.0),
-    "claude-sonnet-4.6": ModelPricing(3.0, 15.0),
-    "claude-haiku-4.5":  ModelPricing(1.0, 5.0),
-    # OpenAI
-    "gpt-5.4":           ModelPricing(2.50, 15.0),
-    "gpt-5.4-mini":      ModelPricing(0.75, 4.50),
-    "gpt-5.4-nano":      ModelPricing(0.20, 1.25),
-    # Google
-    "gemini-3.1-pro":    ModelPricing(2.0, 12.0),
-    "gemini-2.5-flash":  ModelPricing(0.30, 2.50),
-    # Others
-    "deepseek-v3.2":     ModelPricing(0.28, 0.42),
-    "minimax-m2.5":      ModelPricing(0.30, 1.20),
-    "kimi-k2.5":         ModelPricing(0.0, 0.0),   # Free*
-    "step-3.5-flash":    ModelPricing(0.0, 0.0),   # Free
-    "nemotron-3-super":  ModelPricing(0.0, 0.0),   # Free
+    # ── Claude (Anthropic) — full cache support ──────────────────────────────
+    "claude-opus-4.6":          ModelPricing(5.00,  25.00, 6.2500, 0.5000),
+    "claude-opus-4.5":          ModelPricing(5.00,  25.00, 6.2500, 0.5000),
+    "claude-opus-4.6-fast":     ModelPricing(30.00, 150.00, 37.5000, 3.0000),
+    "claude-sonnet-4.6":        ModelPricing(3.00,  15.00, 3.7500, 0.3000),
+    "claude-sonnet-4.5":        ModelPricing(3.00,  15.00, 3.7500, 0.3000),
+    "claude-haiku-4.5":         ModelPricing(1.00,   5.00, 1.2500, 0.1000),
+    "claude-3.5-haiku":         ModelPricing(0.80,   4.00, 1.0000, 0.0800),
+    "claude-3-haiku":           ModelPricing(0.25,   1.25, 0.3000, 0.0300),
+    # ── OpenAI ───────────────────────────────────────────────────────────────
+    "gpt-4.1":                  ModelPricing(2.00,   8.00, 0.0,    0.5000),
+    "gpt-4.1-mini":             ModelPricing(0.40,   1.60, 0.0,    0.1000),
+    "gpt-4o":                   ModelPricing(2.50,  10.00, 0.0,    1.2500),
+    "gpt-5.4":                  ModelPricing(2.50,  15.00, 0.0,    0.0),
+    "gpt-5.4-mini":             ModelPricing(0.75,   4.50, 0.0,    0.0),
+    "gpt-5.4-nano":             ModelPricing(0.20,   1.25, 0.0,    0.0),
+    # ── Google Gemini ─────────────────────────────────────────────────────────
+    "gemini-3.1-pro":           ModelPricing(2.00,  12.00, 0.3750, 0.2000),
+    "gemini-3.1-pro-preview":   ModelPricing(2.00,  12.00, 0.3750, 0.2000),
+    "gemini-2.5-pro":           ModelPricing(1.25,  10.00, 0.3750, 0.1250),
+    "gemini-2.5-flash":         ModelPricing(0.30,   2.50, 0.0833, 0.0300),
+    "gemini-2.5-flash-image":   ModelPricing(0.30,   2.50, 0.0833, 0.0300),
+    # ── DeepSeek ─────────────────────────────────────────────────────────────
+    "deepseek-v3.2":            ModelPricing(0.26,   0.38, 0.0,    0.0),
+    "deepseek-v3.2-speciale":   ModelPricing(0.40,   1.20, 0.0,    0.2000),
+    "deepseek-chat-v3.1":       ModelPricing(0.15,   0.75, 0.0,    0.0),
+    "deepseek-r1":              ModelPricing(0.70,   2.50, 0.0,    0.0),
+    "deepseek-r1-0528":         ModelPricing(0.45,   2.15, 0.0,    0.2250),
+    # ── Kimi / MoonshotAI ────────────────────────────────────────────────────
+    "kimi-k2":                  ModelPricing(0.57,   2.30, 0.0,    0.0),
+    "kimi-k2.5":                ModelPricing(0.38,   1.72, 0.0,    0.1913),
+    "kimi-k2-thinking":         ModelPricing(0.60,   2.50, 0.0,    0.0),
+    # ── MiniMax ──────────────────────────────────────────────────────────────
+    "minimax-m1":               ModelPricing(0.40,   2.20, 0.0,    0.0),
+    "minimax-m2.5":             ModelPricing(0.0,    0.0,  0.0,    0.0),
+    "minimax-m2.7":             ModelPricing(0.30,   1.20, 0.0,    0.0600),
+    # ── FREE models (fallback tier) ──────────────────────────────────────────
+    "step-3.5-flash":           ModelPricing(0.0,    0.0,  0.0,    0.0),
+    "nemotron-3-super":         ModelPricing(0.0,    0.0,  0.0,    0.0),
+    "qwen3-coder":              ModelPricing(0.0,    0.0,  0.0,    0.0),
+    "openrouter/free":          ModelPricing(0.0,    0.0,  0.0,    0.0),
 }
 
 # Image generation pricing ($/image) — spec section 3.2
@@ -161,8 +205,9 @@ IMAGE_PRICES: dict[str, float] = {
 DOWNGRADE_MAP: dict[TaskCategory, list[str]] = {
     TaskCategory.TEXT: [
         "claude-sonnet-4.6",   # $3/$15
-        "gpt-5.4-mini",        # $0.75/$4.50
-        "deepseek-v3.2",       # $0.28/$0.42
+        "gpt-4.1-mini",        # $0.40/$1.60 — corrected
+        "deepseek-v3.2",       # $0.26/$0.38
+        "deepseek-chat-v3.1",  # $0.15/$0.75
         "step-3.5-flash",      # free
     ],
     TaskCategory.PHOTO: [
@@ -173,23 +218,26 @@ DOWNGRADE_MAP: dict[TaskCategory, list[str]] = {
         "pexels",              # free
     ],
     TaskCategory.REVIEW: [
-        "gpt-5.4",             # $2.50/$15
-        "claude-sonnet-4.6",   # $3/$15
+        "claude-sonnet-4.6",   # $3/$15   — best reviewer
+        "gpt-4.1",             # $2/$8    — corrected
         "gemini-2.5-flash",    # $0.30/$2.50
-        "deepseek-v3.2",       # $0.28/$0.42
+        "deepseek-v3.2",       # $0.26/$0.38
+        "minimax-m2.5",        # free
     ],
     TaskCategory.DESIGN: [
         "claude-sonnet-4.6",   # $3/$15
-        "gemini-3.1-pro",      # $2/$12
-        "deepseek-v3.2",       # $0.28/$0.42
-        "kimi-k2.5",           # free
+        "gemini-2.5-pro",      # $1.25/$10 — corrected
+        "deepseek-v3.2",       # $0.26/$0.38
+        "kimi-k2.5",           # $0.38/$1.72
+        "minimax-m2.5",        # free
     ],
     TaskCategory.CODE: [
-        "claude-opus-4.6",     # $5/$25
-        "gpt-5.4",             # $2.50/$15
-        "claude-sonnet-4.6",   # $3/$15
-        "gemini-3.1-pro",      # $2/$12
-        "deepseek-v3.2",       # $0.28/$0.42
+        "claude-sonnet-4.6",   # $3/$15   — best code quality
+        "gpt-4.1",             # $2/$8    — strong coder
+        "gemini-2.5-pro",      # $1.25/$10
+        "deepseek-v3.2",       # $0.26/$0.38 — excellent coder
+        "deepseek-chat-v3.1",  # $0.15/$0.75 — budget
+        "qwen3-coder",         # free
     ],
 }
 
@@ -375,6 +423,8 @@ class BudgetController:
         self._warned: set[str] = set()
         self._paused: set[str] = set()
         self._stopped: set[str] = set()
+        # O(1) spent cache: "project_id:YYYY-MM" -> spent_usd
+        self._spent_cache: dict[str, float] = {}
 
         # Thread safety
         self._lock = threading.Lock()
@@ -543,15 +593,23 @@ class BudgetController:
         model: str,
         input_tokens: int,
         output_tokens: int,
+        cached_tokens: int = 0,
+        cache_write_tokens: int = 0,
         *,
         strict: bool = True,
     ) -> float:
         """
-        Calculate LLM cost in USD.
-        strict=True (default): raises UnknownModelError if model not in registry.
-        strict=False: returns 0.0 with warning (for backward compat).
+        Calculate LLM cost in USD with prompt cache support.
+        cached_tokens:      tokens from cache (90% discount via Anthropic caching)
+        cache_write_tokens: tokens written to cache (125% of input price)
+        OpenRouter returns these in usage.cache_read_input_tokens / usage.cache_creation_input_tokens
         """
-        _validate_non_negative(input_tokens=input_tokens, output_tokens=output_tokens)
+        _validate_non_negative(
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            cached_tokens=cached_tokens,
+            cache_write_tokens=cache_write_tokens,
+        )
 
         pricing = MODEL_PRICES.get(model)
         if pricing is None:
@@ -562,7 +620,7 @@ class BudgetController:
                 )
             logger.warning("Unknown model %r — assuming $0 cost", model)
             return 0.0
-        return pricing.cost(input_tokens, output_tokens)
+        return pricing.cost(input_tokens, output_tokens, cached_tokens, cache_write_tokens)
 
     @staticmethod
     def calc_image_cost(
@@ -610,18 +668,30 @@ class BudgetController:
             )
 
     def spent_on_project_month(self, project_id: str) -> float:
-        month = self._current_month_key()
+        """O(1) lookup via _spent_cache. Falls back to O(n) scan on cache miss."""
+        key = f"{project_id}:{self._current_month_key()}"
         with self._lock:
-            return sum(
+            if key in self._spent_cache:
+                return self._spent_cache[key]
+            month = self._current_month_key()
+            total = sum(
                 e.cost_usd
                 for e in self._entries
                 if e.project_id == project_id and e.timestamp[:7] == month
             )
+            self._spent_cache[key] = total
+            return total
 
     def spent_global_month(self) -> float:
-        month = self._current_month_key()
+        """O(1) lookup via _spent_cache."""
+        key = f"__global__:{self._current_month_key()}"
         with self._lock:
-            return sum(e.cost_usd for e in self._entries if e.timestamp[:7] == month)
+            if key in self._spent_cache:
+                return self._spent_cache[key]
+            month = self._current_month_key()
+            total = sum(e.cost_usd for e in self._entries if e.timestamp[:7] == month)
+            self._spent_cache[key] = total
+            return total
 
     def get_remaining(self, project_id: str) -> float | None:
         """Get remaining budget for a project this month (USD).
@@ -983,6 +1053,8 @@ class BudgetController:
         category: TaskCategory | str,
         input_tokens: int = 0,
         output_tokens: int = 0,
+        cached_tokens: int = 0,
+        cache_write_tokens: int = 0,
         image_model: str = "",
         images: int = 0,
         manus_credits: int = 0,
@@ -994,24 +1066,28 @@ class BudgetController:
 
         LLM cost from `model`, image cost from `image_model` — no cross-lookup.
         For Manus: set model="manus" and pass manus_credits.
+        cached_tokens:      from OpenRouter usage.cache_read_input_tokens (90% discount)
+        cache_write_tokens: from OpenRouter usage.cache_creation_input_tokens (125% price)
         """
         _validate_project_id(project_id)
         _validate_non_negative(
             input_tokens=input_tokens,
             output_tokens=output_tokens,
+            cached_tokens=cached_tokens,
+            cache_write_tokens=cache_write_tokens,
             images=images,
             manus_credits=manus_credits,
         )
 
         cat = category.value if isinstance(category, TaskCategory) else category
 
-        # Calculate cost — CRIT-3: use override if provided (actual_cost from router)
+        # Calculate cost — use override if provided (actual_cost from router)
         if cost_usd_override is not None:
             cost = float(cost_usd_override)
         else:
             cost = 0.0
             if model and model != "manus" and (input_tokens or output_tokens):
-                cost += self.calc_llm_cost(model, input_tokens, output_tokens)
+                cost += self.calc_llm_cost(model, input_tokens, output_tokens, cached_tokens, cache_write_tokens)
             if image_model and images:
                 cost += self.calc_image_cost(image_model, images)
             if manus_credits:
@@ -1036,6 +1112,10 @@ class BudgetController:
         with self._lock:
             self._entries.append(entry)
             self._maybe_trim_entries()
+            # Invalidate O(1) spent cache
+            _m = entry.timestamp[:7]
+            self._spent_cache.pop(f"{project_id}:{_m}", None)
+            self._spent_cache.pop(f"__global__:{_m}", None)
 
         # Auto-save to disk
         if self._auto_save:
@@ -1092,6 +1172,97 @@ class BudgetController:
                     "BUDGET WARNING (80%%): project=%s scope=%s spent=$%.4f limit=%s",
                     project_id, snapshot.scope.value, snapshot.spent_usd, snapshot.limit_usd,
                 )
+
+
+    # -----------------------------------------------------------------------
+    # Pipeline Pre-Estimator
+    # -----------------------------------------------------------------------
+    PIPELINE_TOKEN_ESTIMATES: dict = {
+        "web_design": {
+            "observer":     (600,   200),
+            "researcher":   (0,     0,   60),
+            "director":     (3000,  1500),
+            "art_director": (2500,  1200),
+            "marketer":     (2000,  1000),
+            "developer":    (6000,  4000),
+            "motion_dev":   (4000,  3000),
+            "assembler":    (0,     0,   100),
+            "seo_writer":   (2000,  1500),
+        },
+        "marketing": {
+            "observer":     (500,   150),
+            "researcher":   (0,     0,   40),
+            "director":     (2500,  1200),
+            "marketer":     (3000,  2000),
+            "seo_writer":   (2500,  2000),
+            "writer":       (2000,  1500),
+        },
+        "coding": {
+            "observer":     (500,   150),
+            "director":     (2000,  1000),
+            "developer":    (8000,  6000),
+            "qa":           (4000,  1500),
+        },
+        "landing_page": {
+            "observer":     (500,   150),
+            "researcher":   (0,     0,   30),
+            "director":     (2000,  1000),
+            "art_director": (2000,  1000),
+            "developer":    (5000,  3500),
+            "assembler":    (0,     0,   60),
+        },
+    }
+
+    def estimate_pipeline_cost(self, task_type: str, model_overrides: dict | None = None) -> dict:
+        """Estimate full pipeline cost before launch. Returns total_usd + breakdown."""
+        try:
+            from shared.llm.model_registry import ROLES
+        except ImportError:
+            ROLES = {}
+
+        estimates = self.PIPELINE_TOKEN_ESTIMATES.get(task_type)
+        if not estimates:
+            return {"error": f"Unknown task_type {task_type!r}. Available: {list(self.PIPELINE_TOKEN_ESTIMATES.keys())}", "total_usd": 0.0, "breakdown": {}}
+
+        breakdown: dict = {}
+        total = 0.0
+
+        for role, tokens in estimates.items():
+            override = (model_overrides or {}).get(role)
+            if override:
+                model = override
+            else:
+                _role_obj = ROLES.get(role)
+                if _role_obj is not None:
+                    try:
+                        from shared.llm.model_registry import Tier
+                        model = _role_obj.tiers.get(Tier.GENIUS, _role_obj.tiers.get(Tier.STANDARD, ""))
+                    except Exception:
+                        model = ""
+                else:
+                    model = ""
+
+            if len(tokens) == 3:
+                manus_credits = tokens[2]
+                cost = self.calc_manus_cost(manus_credits)
+                breakdown[role] = {"model": "manus", "manus_credits": manus_credits, "cost_usd": round(cost, 4)}
+            else:
+                inp, out = tokens[0], tokens[1]
+                try:
+                    cost = self.calc_llm_cost(model, inp, out, strict=False)
+                except Exception:
+                    cost = 0.0
+                breakdown[role] = {"model": model, "input_tokens": inp, "output_tokens": out, "cost_usd": round(cost, 4)}
+            total += cost
+
+        return {
+            "task_type": task_type,
+            "total_usd": round(total, 4),
+            "total_with_buffer_usd": round(total * 1.20, 4),
+            "buffer_pct": 20,
+            "breakdown": breakdown,
+            "note": "Estimates based on average token usage. Actual cost may vary ±30%.",
+        }
 
     # -----------------------------------------------------------------------
     # Dashboard — single-pass aggregation

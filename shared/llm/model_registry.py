@@ -785,6 +785,64 @@ ROLES: dict[str, ModelRole] = {
         fallback_chain={"claude-sonnet-4.6": "claude-haiku-4.5"},
         default_tier=Tier.STANDARD,
     ),
+    # ── CSS Architect / SEO Copywriter (Sonnet 4.6) ─────────────────────────
+    "css_architect": ModelRole(
+        name="css_architect",
+        display_name="CSS Architect / SEO Copywriter",
+        tiers={
+            Tier.FREE:     "qwen3.6-plus-free",
+            Tier.NANO:     "claude-haiku-4.5",
+            Tier.FAST:     "claude-haiku-4.5",
+            Tier.STANDARD: "claude-sonnet-4.6",   # structured output, design_tokens.json
+            Tier.GENIUS:   "claude-sonnet-4.6",   # Sonnet excels at JSON specs
+            Tier.DEEP:     "claude-opus-4.6",
+        },
+        default_tier=Tier.STANDARD,
+    ),
+    # ── Backend Engineer (DeepSeek-Coder-V2, escalation → Sonnet) ────────────
+    "backend_eng": ModelRole(
+        name="backend_eng",
+        display_name="Backend Engineer",
+        tiers={
+            Tier.FREE:     "minimax-m2.5-free",
+            Tier.NANO:     "deepseek-v3.2",
+            Tier.FAST:     "deepseek-v3.2",        # cheap, strong backend code
+            Tier.STANDARD: "deepseek-v3.2",        # DeepSeek-Coder-V2 is specialist
+            Tier.GENIUS:   "deepseek-v3.2",        # TOP: DeepSeek for API/DB/CRM
+            Tier.DEEP:     "claude-sonnet-4.6",    # escalation after 2 failures
+        },
+        fallback_chain={"deepseek-v3.2": "claude-sonnet-4.6"},
+        default_tier=Tier.STANDARD,
+    ),
+    # ── QA Judge / Visual Inspector (Gemini 3.1 Pro Vision) ──────────────────
+    "qa_judge": ModelRole(
+        name="qa_judge",
+        display_name="QA Judge (Gemini Vision)",
+        tiers={
+            Tier.FREE:     "minimax-m2.5-free",
+            Tier.NANO:     "gemini-2.5-flash",
+            Tier.FAST:     "gemini-2.5-flash",     # flash for basic checks
+            Tier.STANDARD: "gemini-2.5-pro",       # 1M context: screenshot + 5 refs
+            Tier.GENIUS:   "gemini-3.1-pro",       # TOP: best multimodal analysis
+            Tier.DEEP:     "gemini-3.1-pro",
+        },
+        default_tier=Tier.STANDARD,
+    ),
+    # ── Photo Studio (Flux.1 Pro) ─────────────────────────────────────────────
+    "photo_studio": ModelRole(
+        name="photo_studio",
+        display_name="Photo Studio (Flux.1 Pro)",
+        tiers={
+            Tier.FREE:     "pexels",
+            Tier.NANO:     "flux-2-schnell",
+            Tier.FAST:     "imagen-4-fast",
+            Tier.STANDARD: "flux-2-pro",           # photorealism
+            Tier.GENIUS:   "flux-1-pro",            # Flux.1 Pro premium
+            Tier.DEEP:     "midjourney-v8",
+        },
+        default_tier=Tier.STANDARD,
+    ),
+
 }
 
 
@@ -891,23 +949,21 @@ STRATEGY_TIER_MAP: dict[str, dict[str, Tier]] = {
 
     # "free" strategy is registered dynamically by preset_manager.ensure_free_strategy()
 
-    "arcane4": {    # ARCANE 4.0 — Opus Director + Sonnet Engineer + Manus Executor
-        # ── Nervous System ──────────────────────────────────────────────────
-        "observer":     Tier.FAST,       # claude-haiku-4.5 — dispatcher, watchdog, budget guard
-        # ── Brain: Strategy (Opus) ──────────────────────────────────────────
-        "director":     Tier.GENIUS,     # claude-opus-4.6 — planning, delegation
-        "art_director": Tier.GENIUS,     # claude-opus-4.6 — design_spec.json, visual QA
-        "marketer":     Tier.GENIUS,     # claude-opus-4.6 — positioning.json, brand strategy
-        "writer":       Tier.GENIUS,     # claude-opus-4.6 — premium copy, tone of voice
-        # ── Brain: Engineering (Sonnet) ─────────────────────────────────────
-        "developer":    Tier.GENIUS,     # claude-sonnet-4.6 — React/Next.js, backend API
-        "motion_dev":   Tier.GENIUS,     # claude-sonnet-4.6 — GSAP, Three.js, animations
-        "seo_writer":   Tier.STANDARD,   # claude-sonnet-4.6 — semantic core, H1-H3 structure
-        # ── Brain: Research & QA ────────────────────────────────────────────
-        "researcher":   Tier.GENIUS,     # gemini-3.1-pro — 1M context, market analysis
-        "qa":           Tier.GENIUS,     # gpt-5.4 — cross-family code review
-        # ── Assets ──────────────────────────────────────────────────────────
-        "image_agent":  Tier.GENIUS,     # midjourney-v8 — premium visuals, icons
+    "arcane4": {
+        # ARCANE 4.0 Final Architecture — approved 2026-04-08
+        # 4 pipeline templates: WEB_DESIGN, CRM_SETUP, API_BACKEND, MARKETING
+        # Director=GPT-5.4, Marketer/CreativeDir=Opus, CSS/SEO=Sonnet,
+        # Backend=DeepSeek(→Sonnet), QA=Gemini3.1Pro, Photo=Flux.1, Observer=Haiku
+        "observer":      Tier.FAST,      # Haiku 4.5 — gates, cost, watchdog
+        "director":      Tier.STANDARD,  # GPT-5.4 — orchestrator, routes to pipeline
+        "marketer":      Tier.GENIUS,    # Opus 4.6 — Marketer + Creative Director
+        "css_architect": Tier.GENIUS,    # Sonnet 4.6 — SEO copy + design_tokens.json
+        "developer":     Tier.GENIUS,    # Sonnet 4.6 — frontend code
+        "motion_dev":    Tier.GENIUS,    # Sonnet 4.6 — GSAP/Three.js
+        "backend_eng":   Tier.GENIUS,    # DeepSeek-Coder-V2 — API, DB, CRM
+        "qa_judge":      Tier.GENIUS,    # Gemini 3.1 Pro — visual QA (1M context)
+        "photo_studio":  Tier.GENIUS,    # Flux.1 Pro — photorealistic assets
+        "art_director":  Tier.GENIUS,    # Opus 4.6 — alias for marketer
     },
 }
 
@@ -951,6 +1007,40 @@ def get_model_for_role(role: str, tier: str = "standard") -> "ModelSpec | None":
             return MODELS.get(model_id)
     return get_cheapest_model()
 
+
+
+# ===============================================================================
+# ARCANE 4.0 ROLE -> MODEL RESOLVER
+# ===============================================================================
+_ARCANE4_ROLE_MODEL = {
+    "director":          "gpt-5.4",
+    "marketer":          "claude-sonnet-4.6",
+    "creative_director": "claude-opus-4.6",
+    "css_architect":     "claude-sonnet-4.6",
+    "seo_copywriter":    "claude-sonnet-4.6",
+    "seo_writer":        "claude-sonnet-4.6",
+    "backend_dev":       "deepseek-v3.2",
+    "backend_eng":       "deepseek-v3.2",
+    "qa_judge":          "gemini-3.1-pro",
+    "observer":          "claude-haiku-4.5",
+    "photo_studio":      "flux-1-pro",
+    "motion_dev":        "claude-sonnet-4.6",
+    "developer":         "claude-sonnet-4.6",
+    "art_director":      "claude-opus-4.6",
+}
+
+def get_arcane4_model(role: str) -> str:
+    canonical_role = _ROLE_ALIASES.get(role, role)
+    if canonical_role in _ARCANE4_ROLE_MODEL:
+        return _ARCANE4_ROLE_MODEL[canonical_role]
+    if role in _ARCANE4_ROLE_MODEL:
+        return _ARCANE4_ROLE_MODEL[role]
+    role_def = ROLES.get(canonical_role) or ROLES.get(role)
+    if role_def:
+        model_id = role_def.tiers.get(Tier.GENIUS) or role_def.tiers.get(role_def.default_tier)
+        if model_id:
+            return model_id
+    return "claude-sonnet-4.6"
 
 def get_next_tier(current_tier: str) -> str:
     """Return the next escalation tier (backward compat, returns string)."""
