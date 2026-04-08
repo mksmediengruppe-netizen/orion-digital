@@ -107,6 +107,24 @@ class Spacing(BaseModel):
     unit_px: int = 4
     scale: list[int] = Field(default_factory=lambda: [0, 1, 2, 3, 4, 6, 8, 12, 16, 24, 32])
 
+    @field_validator('scale', mode='before')
+    @classmethod
+    def parse_scale(cls, v):
+        if isinstance(v, list):
+            result = []
+            for item in v:
+                if isinstance(item, int):
+                    result.append(item)
+                elif isinstance(item, str):
+                    # Extract number from strings like '4px', '8rem', '16'
+                    import re
+                    m = re.match(r'^(\d+)', item.strip())
+                    result.append(int(m.group(1)) if m else 0)
+                else:
+                    result.append(int(item))
+            return result
+        return v
+
 
 class DesignTokens(BaseModel):
     """Phase 4 CREATIVE DIRECTION output from Opus-Creative Director."""
