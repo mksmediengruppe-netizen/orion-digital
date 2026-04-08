@@ -575,9 +575,17 @@ class PipelineRunner:
             else:
                 # No Manus → developer fallback
                 logger.warning(f"[{self.run_id}] No Manus, using developer fallback")
+                design_tokens_json = _json.dumps(
+                    self.state["artifacts"].get("design_tokens", {}),
+                    ensure_ascii=False, indent=2
+                )
                 self.context["enrichment"] = (
                     f"<manus_brief>\n{brief_md}\n</manus_brief>\n"
-                    f"<task>Build complete HTML landing page from brief. Full HTML document. Output ONLY HTML.</task>"
+                    f"<design_tokens>\n{design_tokens_json}\n</design_tokens>\n"
+                    f"<task>Build complete HTML landing page from brief. "
+                    f"Use the design_tokens for exact colors, fonts, spacing. "
+                    f"Full HTML document with DOCTYPE, head, body, ALL sections, JS. "
+                    f"Output ONLY the complete HTML file, no markdown.</task>"
                 )
                 html_result = await self.orch.call_specialist(
                     self.result, self.context, "developer", get_arcane4_model("developer")
@@ -643,7 +651,8 @@ class PipelineRunner:
             await self._update_status("phase_8", "a11y_controller", "Проверяю accessibility WCAG AA...")
             a11y_ctx = dict(self.context)
             a11y_ctx["enrichment"] = (
-                f"<html>\n{html[:25000]}\n</html>\n"
+                f"<html_head>\n{html[:8000]}\n</html_head>\n"
+                f"<html_tail>\n{html[-8000:]}\n</html_tail>\n"
                 f"<task>Check this HTML against WCAG AA. Return JSON per schema.</task>"
             )
             a11y_raw = await self.orch.call_specialist(

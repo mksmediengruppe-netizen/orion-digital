@@ -70,7 +70,7 @@ class SimpleLLMClient:
         self.api_key = api_key or os.environ.get("OPENROUTER_API_KEY", "")
         if not self.api_key:
             logger.warning("No OPENROUTER_API_KEY set. LLM calls will fail.")
-        self._client = httpx.AsyncClient(timeout=90.0)
+        self._client = httpx.AsyncClient(timeout=300.0)  # 5 min for large HTML generation
 
     def _resolve_model(self, model_id: str) -> str:
         """Convert our registry ID to OpenRouter model ID."""
@@ -187,8 +187,17 @@ class SimpleLLMClient:
             content = ""
             tool_calls = None
             if data.get("choices"):
-                message = data["choices"][0].get("message", {})
+                choice = data["choices"][0]
+                message = choice.get("message", {})
                 content = message.get("content", "") or ""
+                # Warn if output was truncated by max_tokens
+                finish_reason = choice.get("finish_reason", "")
+                if finish_reason == "length":
+                    logger.warning(
+                        f"LLM output TRUNCATED by max_tokens limit "
+                        f"(model={openrouter_model}, tokens_out={usage.get('completion_tokens',0)}). "
+                        f"Consider increasing max_tokens."
+                    )
                 # Parse tool calls if present
                 raw_tc = message.get("tool_calls")
                 if raw_tc:

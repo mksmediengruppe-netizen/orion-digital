@@ -852,6 +852,14 @@ ROLES: dict[str, ModelRole] = {
             "structured research_report.json with market_insights and "
             "actionable data for downstream strategy phase."
         ),
+        tiers={
+            Tier.FAST:     "gemini-2.5-flash",      # LITE: 1M context, cheap
+            Tier.STANDARD: "gemini-2.5-flash",      # OPTIMUM: 1M context, fast
+            Tier.GENIUS:   "gemini-3.1-pro",        # TOP: best analysis + vision
+            Tier.DEEP:     "gemini-3.1-pro",
+        },
+        fallback_chain={"gemini-3.1-pro": "claude-sonnet-4.6"},
+        default_tier=Tier.GENIUS,
         min_tier=Tier.STANDARD,
         preferred_tier=Tier.GENIUS,
     ),
@@ -1089,6 +1097,11 @@ _ARCANE4_ROLE_MODEL = {
     "motion_dev":        "claude-sonnet-4.6",
     "developer":         "claude-sonnet-4.6",
     "art_director":      "claude-opus-4.6",
+    # ARCANE 4.0 v2 new roles
+    "researcher_v2":     "gemini-3.1-pro",
+    "brief_writer":      "claude-sonnet-4.6",
+    "icons_specialist":  "claude-sonnet-4.6",
+    "a11y_controller":   "claude-sonnet-4.6",
 }
 
 def get_arcane4_model(role: str) -> str:

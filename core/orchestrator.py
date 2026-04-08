@@ -946,7 +946,7 @@ class Orchestrator:
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
-            max_tokens=16384 if role in ("developer", "css_architect") else 4096,
+            max_tokens=32768 if role in ("developer", "css_architect") else 4096,
         )
 
         if isinstance(resp, dict):
