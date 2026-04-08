@@ -573,23 +573,78 @@ class PipelineRunner:
                         self.result, self.context, "developer", get_arcane4_model("developer")
                     )
             else:
-                # No Manus → developer fallback
+                # No Manus → developer fallback (two-pass to avoid 32K token limit)
                 logger.warning(f"[{self.run_id}] No Manus, using developer fallback")
                 design_tokens_json = _json.dumps(
                     self.state["artifacts"].get("design_tokens", {}),
                     ensure_ascii=False, indent=2
                 )
-                self.context["enrichment"] = (
+
+                # ── Pass 1: HTML structure + CSS (no JS block) ──
+                ctx_pass1 = dict(self.context)
+                ctx_pass1["enrichment"] = (
                     f"<manus_brief>\n{brief_md}\n</manus_brief>\n"
                     f"<design_tokens>\n{design_tokens_json}\n</design_tokens>\n"
-                    f"<task>Build complete HTML landing page from brief. "
-                    f"Use the design_tokens for exact colors, fonts, spacing. "
-                    f"Full HTML document with DOCTYPE, head, body, ALL sections, JS. "
-                    f"Output ONLY the complete HTML file, no markdown.</task>"
+                    f"<task>Build the complete HTML landing page from the brief. "
+                    f"Use design_tokens for exact colors, fonts, spacing. "
+                    f"Output a FULL HTML document: DOCTYPE, head with <style> block, "
+                    f"body with ALL sections (hero, about, services, pricing, testimonials, contact, footer). "
+                    f"Include ALL inline CSS. "
+                    f"At the very end of body, add a single comment: <!-- JS_PLACEHOLDER --> "
+                    f"then close </body></html>. "
+                    f"DO NOT write any JavaScript yet — only HTML+CSS. "
+                    f"Output ONLY the HTML file, no markdown fences.</task>"
                 )
-                html_result = await self.orch.call_specialist(
-                    self.result, self.context, "developer", get_arcane4_model("developer")
+                html_part1 = await self.orch.call_specialist(
+                    self.result, ctx_pass1, "developer", get_arcane4_model("developer")
                 )
+                if "```html" in html_part1:
+                    s = html_part1.find("```html") + 7
+                    e = html_part1.rfind("```")
+                    if e > s:
+                        html_part1 = html_part1[s:e].strip()
+
+                # ── Pass 2: JavaScript block ──
+                ctx_pass2 = dict(self.context)
+                ctx_pass2["enrichment"] = (
+                    f"<html_skeleton>\n{html_part1[-3000:]}\n</html_skeleton>\n"
+                    f"<manus_brief_summary>\n{brief_md[:2000]}\n</manus_brief_summary>\n"
+                    f"<task>Write ONLY the JavaScript <script> block for this landing page. "
+                    f"Include: mobile nav toggle, scroll-reveal animations, smooth scroll, "
+                    f"header scroll effect, testimonials slider (if present), form validation. "
+                    f"Output ONLY the raw JavaScript code (no HTML, no markdown, no <script> tags). "
+                    f"This will be inserted inside a <script> tag before </body>.</task>"
+                )
+                js_code = await self.orch.call_specialist(
+                    self.result, ctx_pass2, "developer", get_arcane4_model("developer")
+                )
+                # Strip markdown fences if any
+                if "```javascript" in js_code:
+                    s = js_code.find("```javascript") + 13
+                    e = js_code.rfind("```")
+                    if e > s:
+                        js_code = js_code[s:e].strip()
+                elif "```js" in js_code:
+                    s = js_code.find("```js") + 5
+                    e = js_code.rfind("```")
+                    if e > s:
+                        js_code = js_code[s:e].strip()
+                elif "```" in js_code:
+                    s = js_code.find("```") + 3
+                    e = js_code.rfind("```")
+                    if e > s:
+                        js_code = js_code[s:e].strip()
+
+                # ── Merge: replace JS_PLACEHOLDER with actual script ──
+                js_block = f"<script>\n{js_code}\n</script>"
+                if "<!-- JS_PLACEHOLDER -->" in html_part1:
+                    html_result = html_part1.replace("<!-- JS_PLACEHOLDER -->", js_block)
+                elif "</body>" in html_part1:
+                    html_result = html_part1.replace("</body>", f"{js_block}\n</body>")
+                else:
+                    html_result = html_part1 + f"\n{js_block}\n</body>\n</html>"
+
+                logger.info(f"[{self.run_id}] Two-pass HTML: part1={len(html_part1)} + js={len(js_code)} = total={len(html_result)} chars")
 
             # Clean up markdown wrappers
             if "```html" in html_result:
