@@ -810,8 +810,19 @@ class AnthropicNativeAdapter(ProviderAdapter):
     def _get_model_id(self, model: str) -> str:
         return self.MODEL_MAP.get(model, model)
 
-    def _serialize_request(self, req: CompletionRequest) -> dict[str, Any]:
-        system_parts: list[str] = []
+    def _serialize_request(self, req) -> dict:
+        """Serialize request to Anthropic API format with prompt caching.
+
+        Cache strategy:
+          - System prompt: always marked as ephemeral cacheable (90% discount
+            on repeated calls within 5 minutes).
+          - Last user message: if content > 2000 chars, mark as cacheable.
+
+        Toggle via ARCANE_PROMPT_CACHE env var (default: enabled).
+        """
+        cache_enabled = os.environ.get("ARCANE_PROMPT_CACHE", "1") == "1"
+
+        system_parts = []
         messages = []
         for m in req.messages:
             if m.role == Role.SYSTEM:
@@ -827,7 +838,7 @@ class AnthropicNativeAdapter(ProviderAdapter):
                     }],
                 })
             elif m.role == Role.ASSISTANT and m.tool_calls:
-                blocks: list[dict] = []
+                blocks = []
                 if m.content:
                     blocks.append({"type": "text", "text": m.content})
                 for tc in m.tool_calls:
@@ -848,16 +859,29 @@ class AnthropicNativeAdapter(ProviderAdapter):
                     })
                 messages.append({"role": "assistant", "content": blocks})
             else:
-                messages.append({"role": m.role.value, "content": m.content})
+                messages.append({"role": m.role.value if hasattr(m.role, "value") else m.role, "content": m.content})
 
-        body: dict[str, Any] = {
+        body = {
             "model": req.model,
             "messages": messages,
             "max_tokens": req.max_tokens,
             "stream": req.stream,
         }
+
+        # SYSTEM prompt with cache_control
         if system_parts:
-            body["system"] = "\n\n".join(system_parts)
+            if cache_enabled:
+                combined = "\n\n".join(system_parts)
+                body["system"] = [
+                    {
+                        "type": "text",
+                        "text": combined,
+                        "cache_control": {"type": "ephemeral"},
+                    }
+                ]
+            else:
+                body["system"] = "\n\n".join(system_parts)
+
         if not req.extended_thinking:
             body["temperature"] = req.temperature
         if req.top_p is not None and not req.extended_thinking:
@@ -874,7 +898,45 @@ class AnthropicNativeAdapter(ProviderAdapter):
                 "type": "enabled",
                 "budget_tokens": req.thinking_budget or (req.max_tokens // 2),
             }
+
+        # Large user messages -> cacheable blocks
+        if cache_enabled:
+            self._inject_user_cache_controls(body)
+
         return body
+
+    def _inject_user_cache_controls(self, body: dict) -> None:
+        """Mark final user message content as cacheable if large enough.
+
+        Heuristic: if user content is > 2000 chars (~500 tokens), assume it
+        contains reusable enrichment and mark as cacheable.
+        """
+        messages = body.get("messages", [])
+        if not messages:
+            return
+
+        for msg in reversed(messages):
+            if msg.get("role") != "user":
+                continue
+            content = msg.get("content")
+
+            if isinstance(content, str) and len(content) > 2000:
+                msg["content"] = [
+                    {
+                        "type": "text",
+                        "text": content,
+                        "cache_control": {"type": "ephemeral"},
+                    }
+                ]
+                break
+
+            if isinstance(content, list) and content:
+                for block in reversed(content):
+                    if isinstance(block, dict) and block.get("type") == "text":
+                        if len(block.get("text", "")) > 2000:
+                            block["cache_control"] = {"type": "ephemeral"}
+                        break
+                break
 
     def _map_tool_choice(self, choice: str | dict) -> dict:
         if isinstance(choice, dict):
