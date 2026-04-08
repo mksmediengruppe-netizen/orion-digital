@@ -182,6 +182,7 @@ class SimpleLLMClient:
             elapsed = time.time() - start
             
             data = response.json()
+            usage = data.get("usage", {})
             
             # Extract response
             content = ""
@@ -203,8 +204,6 @@ class SimpleLLMClient:
                 if raw_tc:
                     tool_calls = raw_tc  # Keep raw format for agent_loop
             
-            # Extract usage
-            usage = data.get("usage", {})
             tokens_in = usage.get("prompt_tokens", 0)
             tokens_out = usage.get("completion_tokens", 0)
             # Anthropic cache tokens (via OpenRouter)
