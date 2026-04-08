@@ -843,6 +843,63 @@ ROLES: dict[str, ModelRole] = {
         default_tier=Tier.STANDARD,
     ),
 
+
+    # ── Researcher v2 (Gemini 3.1 Pro) ──────────────────────────────────────
+    "researcher_v2": ModelRole(
+        name="researcher_v2",
+        description=(
+            "Synthesizes raw Manus data (Awwwards, competitors) into "
+            "structured research_report.json with market_insights and "
+            "actionable data for downstream strategy phase."
+        ),
+        min_tier=Tier.STANDARD,
+        preferred_tier=Tier.GENIUS,
+    ),
+
+    "brief_writer": ModelRole(
+        name="brief_writer",
+        description=(
+            "CRITICAL ROLE: composes manus_brief.md for Manus. Reads all "
+            "pipeline artifacts (positioning, design_tokens, content, "
+            "motion_spec) and produces one rich, specific prompt. Quality "
+            "of every site depends on quality of this brief."
+        ),
+        min_tier=Tier.STANDARD,
+        preferred_tier=Tier.GENIUS,
+    ),
+
+    "icons_specialist": ModelRole(
+        name="icons_specialist",
+        description=(
+            "Selects Lucide icons matching the design concept. Returns "
+            "icons_spec.json with list of slots: location, icon_name, "
+            "size_px, color_token."
+        ),
+        min_tier=Tier.FAST,
+        preferred_tier=Tier.STANDARD,
+    ),
+
+    "seo_copywriter": ModelRole(
+        name="seo_copywriter",
+        description=(
+            "Writes page copy with proper SEO semantics: H1, H2, meta tags, "
+            "alt-texts, CTAs, descriptions. Works with positioning.json and "
+            "brand voice. Returns content.json matching ContentSpec schema."
+        ),
+        min_tier=Tier.STANDARD,
+        preferred_tier=Tier.GENIUS,
+    ),
+
+    "a11y_controller": ModelRole(
+        name="a11y_controller",
+        description=(
+            "Validates site accessibility against WCAG AA: alt attributes, "
+            "form labels, contrast, heading hierarchy, keyboard nav, ARIA. "
+            "Returns a11y_report.json with verdict and issues list."
+        ),
+        min_tier=Tier.FAST,
+        preferred_tier=Tier.STANDARD,
+    ),
 }
 
 
@@ -963,6 +1020,11 @@ STRATEGY_TIER_MAP: dict[str, dict[str, Tier]] = {
         "backend_eng":   Tier.GENIUS,    # DeepSeek-Coder-V2 — API, DB, CRM
         "qa_judge":      Tier.GENIUS,    # Gemini 3.1 Pro — visual QA (1M context)
         "photo_studio":  Tier.GENIUS,    # Flux.1 Pro — photorealistic assets
+        "researcher_v2":    Tier.GENIUS,   # Gemini 3.1 Pro - vision + 1M context
+        "brief_writer":     Tier.GENIUS,   # Sonnet 4.6 - CRITICAL for brief quality
+        "icons_specialist": Tier.STANDARD, # Sonnet 4.6 - Lucide selection
+        "seo_copywriter":   Tier.GENIUS,   # Sonnet 4.6 - page copy with SEO
+        "a11y_controller":  Tier.STANDARD, # Sonnet 4.6 - WCAG AA validation
         "art_director":  Tier.GENIUS,    # Opus 4.6 — alias for marketer
     },
 }
