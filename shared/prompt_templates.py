@@ -69,7 +69,7 @@ ROLE_PROMPTS: dict[str, str] = {
 {
   "mood": "clean|bold|elegant|playful|minimal",
   "palette": {"primary": "#hex", "secondary": "#hex", "accent": "#hex", "background": "#hex", "text": "#hex"},
-  "typography": {"headings": "font-family", "body": "font-family"},
+  "typography": {"headings_family": "font-family", "body_family": "font-family"},
   "layout_concept": "описание концепции",
   "image_prompts": ["prompt 1", "prompt 2", "prompt 3"],
   "animation_style": "subtle|dynamic|none"
@@ -254,7 +254,7 @@ OUTPUT FORMAT:
 Создай design_spec.json (строго JSON):
 {
   "palette": {"primary": "#hex", "secondary": "#hex", "accent": "#hex", "background": "#hex", "text": "#hex"},
-  "typography": {"headings": "font-family", "body": "font-family"},
+  "typography": {"headings_family": "font-family", "body_family": "font-family"},
   "layout": [{"section": "hero", "content": "описание", "style": "стиль"}],
   "mood": "clean|bold|elegant|playful|minimal",
   "image_prompts": ["prompt for image 1"]
